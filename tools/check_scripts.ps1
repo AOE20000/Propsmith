@@ -21,9 +21,47 @@ $scripts = Get-ChildItem -Path (Join-Path $ProjectDir "src"), (Join-Path $Projec
 $failed = @()
 $noiseOnly = @()
 
+
+## Run Godot headless; return what it printed.
+##
+## Captured through temporary files instead of `2>&1` because PowerShell 7 decodes
+## a native command's redirected output with the system OEM codepage, which mojibakes
+## any Chinese the engine echoes back from the sources under test. Reading the bytes
+## back as UTF-8 is deterministic; `[Console]::OutputEncoding` was not.
+function Invoke-GodotCapture {
+    param([string[]]$Arguments)
+
+    $tempRoot = [System.IO.Path]::GetTempPath()
+    $stdoutPath = Join-Path $tempRoot ("lspgodot_check_{0}.log" -f [guid]::NewGuid().ToString("N"))
+    $stderrPath = Join-Path $tempRoot ("lspgodot_checkerr_{0}.log" -f [guid]::NewGuid().ToString("N"))
+    try {
+        $process = Start-Process -FilePath $Godot -ArgumentList $Arguments `
+            -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+
+        $lines = @()
+        if (Test-Path -LiteralPath $stdoutPath) {
+            $lines += @(Get-Content -LiteralPath $stdoutPath -Encoding utf8)
+        }
+        if (Test-Path -LiteralPath $stderrPath) {
+            $lines += @(Get-Content -LiteralPath $stderrPath -Encoding utf8)
+        }
+        return $lines
+    } finally {
+        Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+
+# -ArgumentList is joined on spaces, so paths containing spaces arrive pre-quoted.
+$quotedProjectDir = '"' + $ProjectDir + '"'
+
 foreach ($script in $scripts) {
     $relative = $script.FullName.Substring($ProjectDir.Length + 1).Replace("\", "/")
-    $output = & $Godot --headless --path $ProjectDir --check-only --script "res://$relative" 2>&1
+    $output = Invoke-GodotCapture -Arguments @(
+        "--headless", "--path", $quotedProjectDir,
+        "--check-only", "--script", ('"res://' + $relative + '"')
+    )
     $errors = $output | Select-String -Pattern "Parse Error|SCRIPT ERROR"
 
     if (-not $errors) {
