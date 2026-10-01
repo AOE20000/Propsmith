@@ -42,7 +42,7 @@ func _build() -> void:
 	root.add_child(centre)
 
 	_title = Label.new()
-	_title.text = "LSPgodot"
+	_title.text = "FPGames"
 	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_title.add_theme_font_size_override("font_size", 34)
 	centre.add_child(_title)

@@ -10,7 +10,7 @@ config_version=5
 
 [application]
 
-config/name="LSPgodot"
+config/name="FPGames"
 config/description="Small open world: exploration + modular combat interfaces + mod support."
 run/main_scene="res://src/boot/startup.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")

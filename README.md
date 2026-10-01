@@ -1,4 +1,4 @@
-# LSPgodot
+# FPGames
 
 小型开放世界原型：Godot 4.7 / Forward+ / Jolt Physics。
 核心是**探索**，战斗只提供**稳定接口**（不含平衡），支持 **mod** 扩展。
@@ -9,7 +9,7 @@
 
 ```powershell
 # 打开编辑器
-& 'D:\GJ\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable_win64.exe' --path 'D:\untitled\ls-pgodot'
+& 'D:\GJ\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable_win64.exe' --path 'D:\untitled\FPGames'
 
 # 无头烟雾测试（含地形生成、碰撞、mod 加载）
 pwsh -File tools\smoke_test.ps1
@@ -137,3 +137,18 @@ res://mods/my_mod/
 - 海面是着色器平面，没有水下玩法与游泳。
 - 散布的岩石/树没有 LOD；小地图尺寸下这是刻意的取舍。
 - 地形使用 Terrain3D 的默认材质；未做贴图绘制管线，只做了高度分层的控制图。
+
+---
+
+## 许可
+
+本项目以 **MIT 协议**发布，全文见 [LICENSE](LICENSE)。
+
+随工程分发的第三方资源保留各自的原始许可，**不受**本项目 MIT 协议覆盖：
+
+| 资源 | 许可 | 位置 |
+|---|---|---|
+| [Terrain3D](https://github.com/TokisanGames/Terrain3D) 地形插件 | MIT | `addons/terrain_3d/LICENSE.txt`（版权归 Cory Petkovsek、Roope Palmroos 及贡献者） |
+| [ambientCG](https://ambientcg.com) 地形贴图：Ground037 / Rock023 / Rock030 | CC0 1.0 | `assets/terrain/textures/asset_licenses.txt` |
+
+CC0 属公有领域，无需署名；这里列出仅为来源可追溯。

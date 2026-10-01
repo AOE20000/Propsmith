@@ -1,4 +1,4 @@
-# Per-file GDScript syntax check for the LSPgodot project.
+# Per-file GDScript syntax check for the FPGames project.
 #
 # Why this exists: `godot --headless --script` does not register autoload
 # singletons, so any script referencing `Events`/`Services`/`GameState` reports a
@@ -7,7 +7,7 @@
 #
 # Usage:  pwsh -File tools/check_scripts.ps1 [-ProjectDir <path>]
 param(
-    [string]$ProjectDir = "D:\untitled\ls-pgodot",
+    [string]$ProjectDir = "D:\untitled\FPGames",
     [string]$Godot = "D:\GJ\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable_win64_console.exe"
 )
 
@@ -32,8 +32,8 @@ function Invoke-GodotCapture {
     param([string[]]$Arguments)
 
     $tempRoot = [System.IO.Path]::GetTempPath()
-    $stdoutPath = Join-Path $tempRoot ("lspgodot_check_{0}.log" -f [guid]::NewGuid().ToString("N"))
-    $stderrPath = Join-Path $tempRoot ("lspgodot_checkerr_{0}.log" -f [guid]::NewGuid().ToString("N"))
+    $stdoutPath = Join-Path $tempRoot ("fpgames_check_{0}.log" -f [guid]::NewGuid().ToString("N"))
+    $stderrPath = Join-Path $tempRoot ("fpgames_checkerr_{0}.log" -f [guid]::NewGuid().ToString("N"))
     try {
         $process = Start-Process -FilePath $Godot -ArgumentList $Arguments `
             -NoNewWindow -Wait -PassThru `

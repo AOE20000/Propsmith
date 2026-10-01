@@ -1,4 +1,4 @@
-# Headless smoke test for the LSPgodot project.
+# Headless smoke test for the FPGames project.
 #
 # Runs the real main scene (terrain, mods, player, HUD) either to completion in
 # validate-only mode or for a fixed number of frames, then reports any error the
@@ -7,7 +7,7 @@
 #
 # Usage:  pwsh -File tools/smoke_test.ps1 [-Frames 240] [-Validate]
 param(
-    [string]$ProjectDir = "D:\untitled\ls-pgodot",
+    [string]$ProjectDir = "D:\untitled\FPGames",
     [string]$Godot = "D:\GJ\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable_win64_console.exe",
     [int]$Frames = 240,
     [switch]$Validate
@@ -42,8 +42,8 @@ function Invoke-GodotCapture {
     param([string[]]$Arguments)
 
     $tempRoot = [System.IO.Path]::GetTempPath()
-    $stdoutPath = Join-Path $tempRoot ("lspgodot_stdout_{0}.log" -f [guid]::NewGuid().ToString("N"))
-    $stderrPath = Join-Path $tempRoot ("lspgodot_stderr_{0}.log" -f [guid]::NewGuid().ToString("N"))
+    $stdoutPath = Join-Path $tempRoot ("fpgames_stdout_{0}.log" -f [guid]::NewGuid().ToString("N"))
+    $stderrPath = Join-Path $tempRoot ("fpgames_stderr_{0}.log" -f [guid]::NewGuid().ToString("N"))
     try {
         $process = Start-Process -FilePath $Godot -ArgumentList $Arguments `
             -NoNewWindow -Wait -PassThru `
