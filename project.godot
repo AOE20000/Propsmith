@@ -18,21 +18,6 @@ config/icon="res://icon.svg"
 
 [autoload]
 
-; Order is load-bearing in two ways.
-;
-; 1. GodotModding/godot-mod-loader insists on occupying the first two autoload
-;    slots: it checks the positions at startup and reorders them itself when the
-;    project is opened in the editor, so pinning them here keeps that check quiet
-;    and keeps the vendored addon unmodified.
-; 2. The relative order of the project's own five autoloads is unchanged from
-;    before the loader was introduced: `ModHost` still registers its save section
-;    during `_ready()` and therefore still follows `SaveSystem` being declared
-;    after it, exactly as it did when it was called `ModLoader`.
-;
-; The two mod systems do not collide. This project's loader (`ModHost`) owns
-; `res://mods/<id>/mod.gd` + `mod.json`; godot-mod-loader owns `.zip` packages in
-; `res://mods` and unpacked trees in `res://mods-unpacked/` + `manifest.json`.
-; Each ignores the other's manifest filename.
 ModLoaderStore="*res://addons/mod_loader/mod_loader_store.gd"
 ModLoader="*res://addons/mod_loader/mod_loader.gd"
 Services="*res://src/core/services.gd"

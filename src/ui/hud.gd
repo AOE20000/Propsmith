@@ -160,6 +160,10 @@ func _refresh_debug() -> void:
 	if query != null and query.is_ready():
 		var range: Vector2 = query.height_range()
 		lines.append("地表高度 %.1f ~ %.1f m" % [range.x, range.y])
+		# Reported because it is the difference between "the engine terrain is doing
+		# this" and "you are looking at the CPU heightfield", which is the first thing
+		# worth knowing when terrain looks wrong.
+		lines.append("地形后端：%s" % ("Terrain3D" if query.has_engine_terrain else "仅 CPU 高度场"))
 
 	_debug_label.text = "\n".join(lines)
 

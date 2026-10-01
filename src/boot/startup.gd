@@ -144,8 +144,13 @@ func _build_world(failures: Array[String]) -> void:
 		failures.append("world_builder service has an unexpected type")
 		return
 	var typed_builder: WorldBuilder = builder
+	# Reported because world generation is the one boot stage whose cost is invisible
+	# in every other readout, and the only way to tell an optimisation from a
+	# regression is to print the number that changed.
+	var started_at: int = Time.get_ticks_msec()
 	if not typed_builder.build(world, GameState.world_seed):
 		failures.append("world generation failed (see the log above)")
+	print("[boot] world build: %d ms" % (Time.get_ticks_msec() - started_at))
 
 
 func _spawn_player(failures: Array[String]) -> void:

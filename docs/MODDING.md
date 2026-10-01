@@ -38,6 +38,17 @@ res://mods/my_mod/
 `mod.gd` 里通过 `context` 注册内容。所有注册都会检查 id 冲突：重名会警告并保留
 先注册者，不会静默覆盖别人的内容。
 
+### id 冲突规则（同 mod 内与跨 mod）
+
+- **同一个 mod 内**重名：拒绝，并警告"保留先注册者"。
+- **不同 mod 之间**重名：同样**保留先加载者**（加载顺序由依赖拓扑排序决定，因此是确定的），
+  并把冲突记到**后注册的那个 mod** 的失败说明里，`Esc` 菜单的 mod 列表能直接看到。
+  没有这条检查时，后来者的内容会静默消失，作者无从下手。
+
+工厂类扩展点（poi / prop / combat / terrain / vehicle）在注册时就要求传入**有效的
+`Callable`**，物品要求 `display_name`——不合格的注册当场被拒，而不是等到世界生成时
+在一个跟错误原因毫无关系的地方炸掉。
+
 ### 1. 新地标
 
 ```gdscript
@@ -75,7 +86,7 @@ func _make_stone() -> Mesh:
     return PropFactory.paint(mesh, 1.0, 0.6)   # 顶点色：G=混色，R=明暗
 ```
 
-### 3. 新物品
+### 3. 新物品（预留，核心尚未消费）
 
 ```gdscript
 context.add_item_definition(&"my_relic", {
@@ -84,6 +95,12 @@ context.add_item_definition(&"my_relic", {
     "stackable": false,
 })
 ```
+
+> **当前状态：预留扩展点。** 注册与校验都已实现，采集的词汇也已经铺好
+> （`Events.collectible_picked_up`、`GameState.mark_collected`），但**核心还没有任何
+> 模块读取 `item_definitions`**——没有库存、没有掉落物、没有拾取交互。
+> 注册是安全的，只是不会产生可见效果；`display_name` 现在是必填，因为任何将来的
+> 消费者第一件事都是把它显示出来。这条边界同时写在 README 的「已知边界」里。
 
 ### 4. 新战斗实现
 
@@ -203,6 +220,21 @@ func _make_buggy() -> Vehicle:
 > 与本项目无关的另一种 mod：`godot-mod-loader`（`addons/mod_loader/`）。
 > 它认的是 `manifest.json` 与 `.zip`，用来在不接触游戏源码的前提下改写脚本与资源，
 > 属于另一条路线。两套加载器靠清单文件名分工，互不干扰。
+
+### autoload 顺序是硬约束（理由写在这里，不写在 project.godot）
+
+```
+ModLoaderStore, ModLoader,    # godot-mod-loader 要求自己占前两位
+Services, Events, GameState, ModHost, SaveSystem
+```
+
+- `godot-mod-loader` 启动时会断言自己位于前两位，位置不对就报错。两个 autoload 的名字
+  也只能是这两个——它的代码里有上百处直接引用 `ModLoaderStore.`。
+- 本项目自己的五个 autoload **相对顺序不能动**：`ModHost` 在 `_ready()` 里向 `SaveSystem`
+  注册存档段，而 `SaveSystem` 声明在它之后——这是改名之前就如此的历史顺序。
+- ⚠️ **不要在 `project.godot` 里写解释性注释**：Godot 重写该文件时会丢掉用户注释，
+  只保留它自己生成的文件头。这条理由曾经写在 `[autoload]` 段里，在装好加载器、工程被
+  Godot 重新保存一次之后就消失了（autoload 条目本身没丢）。所以文档放在这里。
 
 ---
 

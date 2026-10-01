@@ -29,7 +29,13 @@ var _resolution: int = 0
 var _step: float = SAMPLE_STEP
 var _extent: float = SAMPLE_EXTENT
 var _ready_flag: bool = false
-## Set when the Terrain3D node exists, so `height_at` can prefer engine truth.
+## Whether the world builder published a Terrain3D backend for this session.
+##
+## Informational only. Every query below answers from the CPU heightfield instead, on
+## purpose: the field is generated from the seed before any backend exists, so heights
+## are identical with and without Terrain3D, and the whole world can be generated and
+## verified headlessly. An earlier comment here claimed `height_at` preferred engine
+## truth; it never did, and should not.
 var has_engine_terrain: bool = false
 
 

@@ -1,4 +1,4 @@
-[gd_scene load_steps=2 format=3 uid="uid://cselftestruntime1"]
+[gd_scene format=3 uid="uid://bqjoyqe4jkkfq"]
 
 [ext_resource type="Script" path="res://tools/runtime_self_test.gd" id="1_selftest"]
 

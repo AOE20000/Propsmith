@@ -5,8 +5,9 @@ class_name Interactable
 ##
 ## Nodes join the `interactable` group and appear to the probe automatically, so
 ## adding an interaction never means editing the player. Extend this class and
-## override `prompt_text()` and `interact()`, or extend `Interactable2D`-style
-## behaviour by composing: only the two methods below are the contract.
+## override `prompt_text()` and `interact()`; a node that already has a base class it
+## cannot give up composes instead, by owning a child of this type — see
+## `VehicleSeat`, which is a child of the vehicle rather than the vehicle itself.
 
 ## Seconds before this can be used again. 0 means no cooldown.
 @export var cooldown_seconds: float = 0.0

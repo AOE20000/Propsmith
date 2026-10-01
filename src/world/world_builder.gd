@@ -34,6 +34,9 @@ func _init() -> void:
 func build(world_root: Node3D, seed_value: int) -> bool:
 	config.seed = seed_value
 	terrain_generator.config = config
+	# Resolved once, before any geometry exists: the sampler runs millions of times per
+	# build and must not be the place that gathers mod content.
+	terrain_generator.set_modifiers(ModHost.content_ordered(&"terrain"))
 
 	Events.world_generation_started.emit(seed_value)
 	var progress := func(step: String, ratio: float) -> void:

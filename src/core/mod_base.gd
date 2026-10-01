@@ -8,9 +8,18 @@ class_name ModBase
 ## keeps two mods from conflicting over a hard-coded node path.
 ##
 ## Contract:
-##   - Hooks run on the main thread in mod id order.
-##   - A hook that throws is contained: the loader logs it, disables that mod for
-##     the rest of the session, and keeps every other mod running.
+##   - Hooks run on the main thread, in the order the loader resolved: dependencies
+##     first, ties broken by id.
+##   - **Load-time** failures are contained. A mod that cannot be scanned, parsed,
+##     instantiated, registered, or started is reported and left out, while every other
+##     mod loads normally. This is what makes mods additive rather than load-bearing.
+##   - **Runtime** failures are not recoverable, and this comment used to claim
+##     otherwise. GDScript has no exceptions, so there is nothing the loader could catch:
+##     if your `_on_tick` divides by zero, the engine logs it and that call ends. What
+##     *is* guaranteed is blast radius — the loader invokes each mod's hook separately,
+##     so a failing mod cannot stop the hooks of the mods after it. Do not read that as
+##     permission to leave a hook fragile: you get no retraction, and the mod stays
+##     loaded with whatever half-finished state it left behind.
 ##   - Never assume another mod has run. Resolve optional collaborators through
 ##     `Services` and tolerate `null`.
 

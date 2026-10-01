@@ -12,7 +12,15 @@ class_name ModContext
 var _mod_id: StringName
 var _registered: Dictionary = {}
 
-## Extension registries, keyed by id. The world builder reads these.
+## Extension registries, keyed by id.
+##
+## Ordering is deliberately **not** decided here. A `ModContext` can only see its own
+## mod's registrations, so any order it produced would be a per-mod order masquerading
+## as a global one — which is exactly the trap two helpers in this file used to be.
+## The single owner of "the order registrations are consumed in" is
+## `ModHost.content_ordered()`. World generation reads these dictionaries only through
+## that, except for `item_definitions`, which nothing in the core consumes yet (see the
+## note on `add_item_definition`).
 var poi_factories: Dictionary = {}
 var prop_factories: Dictionary = {}
 var item_definitions: Dictionary = {}
@@ -32,33 +40,44 @@ func get_mod_id() -> StringName:
 ## Add a point of interest. `factory` is a Callable returning a Node3D; the world
 ## builder places it and registers its discovery trigger.
 func add_poi_factory(poi_id: StringName, display_name: String, factory: Callable, weight: float = 1.0) -> bool:
-	return _register(poi_factories, poi_id, {
+	if display_name.strip_edges().is_empty():
+		push_error("[mod:%s] poi '%s' needs a display name: it is what the HUD and the discovery log show" % [_mod_id, poi_id])
+		return false
+	return _register_delivering(poi_factories, poi_id, {
 		"id": poi_id,
 		"display_name": display_name,
 		"factory": factory,
 		"weight": weight,
 		"owner": _mod_id,
-	}, "poi")
+	}, "poi", "factory")
 
 
-## Add a scattered prop (tree, rock, ruin). `factory` is a Callable returning a
-## Node3D for one instance.
+## Add a scattered prop (tree, rock, ruin). `factory` is a Callable returning a Mesh
+## for one instance.
 func add_prop_factory(prop_id: StringName, factory: Callable, density: float = 1.0, max_slope_degrees: float = 35.0) -> bool:
-	return _register(prop_factories, prop_id, {
+	return _register_delivering(prop_factories, prop_id, {
 		"id": prop_id,
 		"factory": factory,
 		"density": density,
 		"max_slope_degrees": max_slope_degrees,
 		"owner": _mod_id,
-	}, "prop")
+	}, "prop", "factory")
 
 
-## Describe a collectible. `definition` is any dictionary the pickup module
-## understands; the core reads `id` and `display_name` only.
+## Describe a collectible.
+##
+## Reserved extension point: nothing in the core consumes `item_definitions` yet — the
+## collection *vocabulary* (`Events.collectible_picked_up`, `GameState.mark_collected`)
+## exists and is wired, but no inventory or pickup behaviour reads a definition. It is
+## kept because the save format and the event bus already carry it, and it is listed as
+## unimplemented in the README rather than being quietly implied to work.
 func add_item_definition(item_id: StringName, definition: Dictionary) -> bool:
 	var payload: Dictionary = definition.duplicate(true)
 	payload["id"] = item_id
 	payload["owner"] = _mod_id
+	if String(payload.get("display_name", "")).strip_edges().is_empty():
+		push_error("[mod:%s] item '%s' needs a display_name; every consumer of an item begins by showing one" % [_mod_id, item_id])
+		return false
 	return _register(item_definitions, item_id, payload, "item")
 
 
@@ -66,54 +85,41 @@ func add_item_definition(item_id: StringName, definition: Dictionary) -> bool:
 ## implements the `Attacker` contract, letting a mod replace or extend how damage
 ## is produced without touching the player script.
 func add_combat_provider(provider_id: StringName, factory: Callable) -> bool:
-	return _register(combat_providers, provider_id, {
+	return _register_delivering(combat_providers, provider_id, {
 		"id": provider_id,
 		"factory": factory,
 		"owner": _mod_id,
-	}, "combat provider")
+	}, "combat provider", "factory")
 
 
-## Register a heightfield transform applied in deterministic id order after the
-## base noise pass. `modifier` is `Callable(x: float, z: float, height: float, falloff: float) -> float`.
+## Register a heightfield transform applied after the base noise pass, in the order
+## `ModHost.content_ordered()` decides. `modifier` is
+## `Callable(x: float, z: float, height: float, falloff: float) -> float`.
 func add_terrain_modifier(modifier_id: StringName, modifier: Callable, order: int = 100) -> bool:
-	return _register(terrain_modifiers, modifier_id, {
+	return _register_delivering(terrain_modifiers, modifier_id, {
 		"id": modifier_id,
 		"modifier": modifier,
 		"order": order,
 		"owner": _mod_id,
-	}, "terrain modifier")
+	}, "terrain modifier", "modifier")
 
 
-## Provide a drivable vehicle. `factory` is a Callable returning a `VehicleBody3D`
-## (or an existing `Vehicle`); the vehicle system places it and wires its seat.
+## Provide a drivable vehicle. `factory` is a Callable returning a `Vehicle`;
+## the vehicle system places it and wires its seat.
 func add_vehicle_factory(vehicle_id: StringName, factory: Callable) -> bool:
-	return _register(vehicle_factories, vehicle_id, {
+	return _register_delivering(vehicle_factories, vehicle_id, {
 		"id": vehicle_id,
 		"factory": factory,
 		"owner": _mod_id,
-	}, "vehicle")
+	}, "vehicle", "factory")
 
 
-## Resolve another mod's registered content without knowing which mod owns it.
+## Resolve another mod's registered landmark without knowing which mod owns it.
+##
+## Currently unused by the core: it exists so a mod can build on another mod's content
+## instead of hard-coding ids it hopes are there.
 func find_poi_factory(poi_id: StringName) -> Dictionary:
 	return poi_factories.get(poi_id, {}) as Dictionary
-
-
-func find_prop_factories() -> Array:
-	var out: Array = prop_factories.values()
-	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return String(a["id"]) < String(b["id"]))
-	return out
-
-
-## Terrain modifiers in application order, stable across runs.
-func ordered_terrain_modifiers() -> Array:
-	var out: Array = terrain_modifiers.values()
-	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		if int(a["order"]) == int(b["order"]):
-			return String(a["id"]) < String(b["id"])
-		return int(a["order"]) < int(b["order"])
-	)
-	return out
 
 
 ## Remove everything this mod registered. Called by the loader on unload.
@@ -153,3 +159,20 @@ func _register(registry: Dictionary, key: StringName, payload: Dictionary, kind:
 		_registered[kind] = []
 	(_registered[kind] as Array).append(String(key))
 	return true
+
+
+## `_register` plus a check that the payload really carries a usable Callable under
+## `field`.
+##
+## Without this a mod can register a null factory and nothing looks wrong until world
+## generation, where the failure shows up as a missing landmark or a call on a null —
+## far from the line that made the mistake. A mod is code the host did not write, so the
+## seam it is handed should refuse a broken contribution at the moment it is offered.
+func _register_delivering(
+	registry: Dictionary, key: StringName, payload: Dictionary, kind: String, field: String
+) -> bool:
+	var delivered: Variant = payload.get(field, null)
+	if not (delivered is Callable) or not (delivered as Callable).is_valid():
+		push_error("[mod:%s] %s '%s' must supply a valid Callable as '%s'" % [_mod_id, kind, key, field])
+		return false
+	return _register(registry, key, payload, kind)

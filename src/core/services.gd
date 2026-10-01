@@ -8,6 +8,9 @@ extends Node
 
 var _services: Dictionary = {}
 var _registration_order: PackedStringArray = []
+## `class_name` -> its script, or null when unresolvable. See
+## `_script_for_global_class`.
+var _global_class_scripts: Dictionary = {}
 
 ## Emitted whenever the service set changes, so UI can refresh capability lists.
 signal service_registered(service_name: StringName)
@@ -94,10 +97,23 @@ func _inherits_script(object: Object, expected_script: GDScript) -> bool:
 	return false
 
 
-## Look up the script behind a global class name. `class_name` scripts are listed
-## in the project's global class registry, which is the only public route from a
-## name to its script at runtime.
+## Look up the script behind a global class name, memoised.
+##
+## Memoised because the project's global class list is fixed once the project loads —
+## no script can introduce a `class_name` at runtime — while `get_as()` is called from
+## the debug overlay every frame and from code that runs per mod call. Re-deriving the
+## list and re-loading the script on each call was pure overhead. A name that resolves
+## to nothing is cached too, so a repeatedly-asked-for missing class is not re-scanned
+## either.
 func _script_for_global_class(class_name_value: StringName) -> GDScript:
+	if _global_class_scripts.has(class_name_value):
+		return _global_class_scripts[class_name_value] as GDScript
+	var resolved: GDScript = _resolve_global_class(class_name_value)
+	_global_class_scripts[class_name_value] = resolved
+	return resolved
+
+
+func _resolve_global_class(class_name_value: StringName) -> GDScript:
 	var registered: Array[Dictionary] = ProjectSettings.get_global_class_list()
 	for entry: Dictionary in registered:
 		if StringName(String(entry.get("class", ""))) != class_name_value:

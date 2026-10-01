@@ -83,6 +83,10 @@ func load_all() -> void:
 		Events.mod_loaded.emit(mod.mod_id, mod.display_name)
 		print("[ModHost] loaded %s (%s) v%s" % [mod.display_name, mod.mod_id, mod.version])
 
+	# Cross-mod collisions are a property of the whole loaded set, so they can only be
+	# judged once every mod has registered.
+	_report_cross_mod_collisions()
+
 	Events.mods_loaded.emit(active_ids())
 
 
@@ -150,18 +154,95 @@ func unload_all() -> void:
 
 
 ## All registered content of one kind across mods, as id -> payload.
+##
+## A key claimed by two mods resolves to the **first** registration, matching the
+## rule `ModContext` enforces inside a single mod. Before this, the merge let the
+## last mod win, so the documented rule ("a collision keeps the first, with a
+## warning") was true within a mod and false across mods, and which mod won was an
+## accident of dictionary iteration order. `_report_cross_mod_collisions()` now names
+## the losers at load time.
 func content(kind: StringName) -> Dictionary:
 	var merged: Dictionary = {}
 	for mod_id: String in contexts:
 		var mod_context: ModContext = contexts[mod_id]
-		match kind:
-			&"poi": merged.merge(mod_context.poi_factories)
-			&"prop": merged.merge(mod_context.prop_factories)
-			&"item": merged.merge(mod_context.item_definitions)
-			&"combat": merged.merge(mod_context.combat_providers)
-			&"terrain": merged.merge(mod_context.terrain_modifiers)
-			&"vehicle": merged.merge(mod_context.vehicle_factories)
+		var registry: Dictionary = _registry_for(mod_context, kind)
+		for key: Variant in registry:
+			if not merged.has(key):
+				merged[key] = registry[key]
 	return merged
+
+
+## Every registration of one kind, ordered by the single rule the project relies on
+## for determinism: `id`, except terrain modifiers which sort by `order` first so a
+## mod can state its layering.
+##
+## This exists because ordering used to be re-derived at each call site — four copies
+## of the same `sort_custom`, one of them with a different key. One owner means "the
+## same seed with the same mods produces the same world" has exactly one definition,
+## and a new consumer cannot quietly invent a fifth order.
+func content_ordered(kind: StringName) -> Array[Dictionary]:
+	var entries: Array[Dictionary] = []
+	for payload: Variant in content(kind).values():
+		if payload is Dictionary:
+			entries.append(payload)
+	if kind == &"terrain":
+		entries.sort_custom(_terrain_order_before)
+	else:
+		entries.sort_custom(_id_order_before)
+	return entries
+
+
+## The registry a `context()` kind maps to, so the merge and the ordered view cannot
+## disagree about which dictionary they are reading.
+func _registry_for(mod_context: ModContext, kind: StringName) -> Dictionary:
+	match kind:
+		&"poi": return mod_context.poi_factories
+		&"prop": return mod_context.prop_factories
+		&"item": return mod_context.item_definitions
+		&"combat": return mod_context.combat_providers
+		&"terrain": return mod_context.terrain_modifiers
+		&"vehicle": return mod_context.vehicle_factories
+	return {}
+
+
+static func _id_order_before(a: Dictionary, b: Dictionary) -> bool:
+	return String(a.get("id", "")) < String(b.get("id", ""))
+
+
+static func _terrain_order_before(a: Dictionary, b: Dictionary) -> bool:
+	var order_a: int = int(a.get("order", 100))
+	var order_b: int = int(b.get("order", 100))
+	if order_a == order_b:
+		return String(a.get("id", "")) < String(b.get("id", ""))
+	return order_a < order_b
+
+
+## Name every id two mods both claim. Without this the collision is invisible: the
+## loser's content simply never appears and the mod author has nothing to go on.
+##
+## Runs once per load rather than per lookup, so it costs nothing in the hot paths
+## that call `content()`. The note is attached to the losing mod because that is the
+## author who has to change something.
+func _report_cross_mod_collisions() -> void:
+	const KINDS: Array[StringName] = [&"poi", &"prop", &"item", &"combat", &"terrain", &"vehicle"]
+	for kind: StringName in KINDS:
+		var claimed_by: Dictionary = {}
+		var already_reported: Dictionary = {}
+		for mod_id: String in contexts:
+			var mod_context: ModContext = contexts[mod_id]
+			for key: Variant in _registry_for(mod_context, kind):
+				var id: String = String(key)
+				if not claimed_by.has(id):
+					claimed_by[id] = mod_id
+					continue
+				if already_reported.has(id):
+					continue
+				already_reported[id] = true
+				var reason: String = "%s id '%s' is already claimed by mod '%s' — this registration is ignored" % [
+					kind, id, claimed_by[id],
+				]
+				push_warning("[ModHost] mod '%s': %s" % [mod_id, reason])
+				failures[mod_id] = reason
 
 
 ## Enumerate candidate mods under MODS_ROOT.

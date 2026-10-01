@@ -83,13 +83,7 @@ func place(parent: Node3D, query: TerrainQuery, config: TerrainConfig) -> int:
 ## Convert mod-registered POI factories into definitions. A factory may return a
 ## whole Node3D (full control) and may leave discovery to the core marker.
 func _append_mod_definitions() -> void:
-	var registrations: Dictionary = ModHost.content(&"poi")
-	if registrations.is_empty():
-		return
-	var ordered: Array = registrations.values()
-	ordered.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return String(a.get("id", "")) < String(b.get("id", ""))
-	)
+	var ordered: Array[Dictionary] = ModHost.content_ordered(&"poi")
 	for entry: Dictionary in ordered:
 		var factory: Callable = entry.get("factory", Callable())
 		if not factory.is_valid():

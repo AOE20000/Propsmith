@@ -40,11 +40,14 @@ static func combat_providers() -> Dictionary:
 ## player scene knowing about it. Returns provider id -> node.
 static func instantiate_mod_providers(parent: Node) -> Dictionary:
 	var created: Dictionary = {}
-	for provider_id: String in combat_providers():
+	# Resolved once, not per iteration: `combat_providers()` merges every mod's
+	# registry, so looking it up inside the loop rebuilt the whole set each pass.
+	var providers: Dictionary = combat_providers()
+	for provider_id: String in providers:
 		if provider_id == "melee_basic":
 			# The core provider is instantiated by the player scene itself.
 			continue
-		var entry: Dictionary = combat_providers()[provider_id]
+		var entry: Dictionary = providers[provider_id]
 		var factory: Callable = entry.get("factory", Callable())
 		if not factory.is_valid():
 			continue

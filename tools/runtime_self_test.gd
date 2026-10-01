@@ -21,27 +21,27 @@ extends Node
 ##
 ## Exits non-zero when a check fails, so it can gate a build.
 
-## Sections are tracked rather than trusted. GDScript has no exceptions, so a hard
-## engine error inside a section silently abandons the rest of that section's
-## assertions — which would otherwise be reported as a pass. A section only counts as
-## run when its body returned normally.
-var _sections: Dictionary = {}
+## Sections are declared with the exact number of assertions each must run.
+##
+## GDScript errors abort only the function that raised them, so `body.call()` returns
+## normally even when the body died halfway — a flag set after the call cannot detect a
+## truncated section, which is how a broken section once reported "all checks passed".
+## Counting what actually ran catches both a hard error and a silent early `return`. The
+## declared counts are intentionally exact: changing a section means updating its
+## number, which is the point.
 var _checks: int = 0
 var _failures: PackedStringArray = PackedStringArray()
 
 
 func _ready() -> void:
-	_run_section("scripting runtime detection", _check_detection)
-	_run_section("entry resolution", _check_entry_resolution)
-	_run_section("install diagnostics", _check_diagnostics)
-	_run_section("script bridge registration", _check_bridge)
-	_run_section("boot summary", _check_summary)
+	_run_section("scripting runtime detection", 8, _check_detection)
+	_run_section("entry resolution", 10, _check_entry_resolution)
+	_run_section("install diagnostics", 4, _check_diagnostics)
+	_run_section("script bridge registration", 26, _check_bridge)
+	_run_section("cross-mod id collision rule", 10, _check_collision_rule)
+	_run_section("boot summary", 4, _check_summary)
 
 	print("")
-	for section_name: String in _sections:
-		if not bool(_sections[section_name]):
-			_failures.append("section '%s' did not run to completion" % section_name)
-
 	if _failures.is_empty():
 		print("[selftest] %d checks passed" % _checks)
 		get_tree().quit(0)
@@ -212,6 +212,46 @@ func _check_bridge() -> void:
 	_expect(not ScriptBridge.WATCHABLE.is_empty(), "the watchable event list is empty")
 
 
+## Two mods claiming one id is the failure a mod author cannot debug from behaviour: the
+## loser's content simply never appears. The rule is "the first registration wins",
+## matching what `ModContext` enforces inside a single mod, and the collision is
+## reported. Neither half used to hold across mods — the merge let the last mod win, and
+## nothing was reported, so both halves are asserted here.
+##
+## `ModHost.contexts` is empty in this test scene (the boot sequence is what fills it),
+## which is why it can be used directly and cleared again afterwards.
+func _check_collision_rule() -> void:
+	var first := ModContext.new(&"selftest_first")
+	var second := ModContext.new(&"selftest_second")
+	_expect(first.add_prop_factory("shared_id", func() -> Mesh: return SphereMesh.new()), "first mod could not register")
+	_expect(second.add_prop_factory("shared_id", func() -> Mesh: return SphereMesh.new()), "second mod was refused its own registry entry")
+	_expect(second.add_prop_factory("unique_id", func() -> Mesh: return BoxMesh.new()), "second mod could not register a unique id")
+
+	ModHost.contexts["selftest_first"] = first
+	ModHost.contexts["selftest_second"] = second
+	var merged: Dictionary = ModHost.content(&"prop")
+	_expect(merged.size() == 2, "merge should hold 2 props, got %d" % merged.size())
+	# First wins: the surviving payload must be the one registered by the first mod
+	# that claimed the id, not whichever mod happened to be iterated last.
+	var winner: Dictionary = merged.get("shared_id", {}) as Dictionary
+	_expect(String(winner.get("owner", "")) == "selftest_first", "the first registration did not win (owner '%s')" % winner.get("owner", "?"))
+
+	var ordered: Array[Dictionary] = ModHost.content_ordered(&"prop")
+	_expect(ordered.size() == 2, "content_ordered should mirror content, got %d" % ordered.size())
+	_expect(String(ordered[0].get("id", "")) < String(ordered[1].get("id", "")), "content_ordered is not sorted by id")
+
+	# The collision must be recorded against the losing mod, because that is the author
+	# who has to change something.
+	ModHost.failures.clear()
+	ModHost._report_cross_mod_collisions()
+	_expect(ModHost.failures.has("selftest_second"), "the losing mod was not told about the collision")
+	_expect(not ModHost.failures.has("selftest_first"), "the winning mod was blamed for the collision")
+
+	ModHost.contexts.clear()
+	ModHost.failures.clear()
+	_expect(ModHost.content(&"prop").is_empty(), "clearing contexts did not clear the merge")
+
+
 ## The one line the boot report prints has to stay parseable and name both runtimes,
 ## or the smoke test's output stops being evidence.
 func _check_summary() -> void:
@@ -226,11 +266,15 @@ func _check_summary() -> void:
 	print("[selftest]   %s" % summary)
 
 
-func _run_section(section_name: String, body: Callable) -> void:
+func _run_section(section_name: String, expected_checks: int, body: Callable) -> void:
 	print("[selftest] %s" % section_name)
-	_sections[section_name] = false
+	var before: int = _checks
 	body.call()
-	_sections[section_name] = true
+	var ran: int = _checks - before
+	if ran != expected_checks:
+		_failures.append("section '%s' declared %d checks but ran %d — it stopped early" % [
+			section_name, expected_checks, ran,
+		])
 
 
 func _expect(condition: bool, message: String) -> void:

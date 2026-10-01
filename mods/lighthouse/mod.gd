@@ -5,7 +5,9 @@ extends ModBase
 ##   - `add_poi_factory`      a new landmark with its own geometry
 ##   - `add_prop_factory`     a new scattered prop
 ##   - `add_terrain_modifier` a deterministic reshape of the heightfield
-##   - `add_item_definition`  a new collectible
+##   - `add_item_definition`  a new collectible — registered and validated, but note
+##                            that the core has no inventory or pickup system yet, so
+##                            this one has no visible effect (see docs/MODDING.md)
 ##   - `add_combat_provider`  an alternative attacker implementation
 ##   - `serialize/deserialize` persistence without touching the core save format
 ##   - `emit_mod_signal`      a channel other mods can listen on

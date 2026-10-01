@@ -146,13 +146,7 @@ func scatter(parent: Node3D, query: TerrainQuery, config: TerrainConfig) -> Dict
 
 ## Turn every prop factory a mod registered into a scatterable kind.
 func _append_mod_kinds(_query: TerrainQuery, _config: TerrainConfig) -> void:
-	var registrations: Dictionary = ModHost.content(&"prop")
-	if registrations.is_empty():
-		return
-	var ordered: Array = registrations.values()
-	ordered.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return String(a.get("id", "")) < String(b.get("id", ""))
-	)
+	var ordered: Array[Dictionary] = ModHost.content_ordered(&"prop")
 	for entry: Dictionary in ordered:
 		var factory: Callable = entry.get("factory", Callable())
 		if not factory.is_valid():

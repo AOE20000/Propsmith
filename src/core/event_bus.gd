@@ -38,7 +38,11 @@ signal combatant_died(combatant: Node, killer: Node)
 signal attack_started(attacker: Node, attack: Resource)
 signal attack_finished(attacker: Node, attack: Resource)
 
-## Mod-to-mod channel. Listeners filter on `mod_id`; the core never emits here.
+## Mod lifecycle and mod-to-mod channel.
+##
+## `mod_signal` is the only signal here the core never emits: it exists so mods can
+## talk to each other, filtered on `mod_id`. `mod_loaded` and `mod_failed` *are*
+## emitted by the loader, which is how a UI learns the mod set without asking.
 signal mod_signal(mod_id: StringName, signal_name: StringName, payload: Variant)
 signal mod_loaded(mod_id: StringName, display_name: String)
 signal mod_failed(mod_id: StringName, reason: String)

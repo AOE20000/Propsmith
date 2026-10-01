@@ -1,13 +1,15 @@
 extends Area3D
 class_name PoiMarker
 ## A discoverable landmark. Discovery is the exploration reward loop: entering the
-## marker's radius records the POI once, notifies the HUD, and drops a map marker.
+## marker's radius records the POI once, notifies the HUD, and grants its reward.
 ##
 ## The geometry a mod registers is arbitrary; this node only owns identity,
 ## the discovery trigger, and the one-shot rule.
-
-## Reward granted on discovery, applied through the collection module.
-signal discovered(marker: PoiMarker)
+##
+## Discovery is announced on `Events.poi_discovered` and nowhere else. A node-scoped
+## `discovered` signal used to exist as well; it was removed because nothing connected
+## to it and having two announcement paths for one fact contradicts the project's rule
+## that the event bus is the single broadcast seam.
 
 var poi_id: StringName = &"poi"
 var display_name: String = "无名地标"
@@ -54,7 +56,6 @@ func _on_body_entered(body: Node3D) -> void:
 	Events.notify("发现地标：%s" % display_name, Events.NotifyLevel.SUCCESS)
 	if reward_item_id != &"" and reward_amount > 0:
 		Events.collectible_picked_up.emit(reward_item_id, reward_amount)
-	discovered.emit(self)
 	set_deferred("monitoring", false)
 
 

@@ -33,6 +33,15 @@ var _heightfield: PackedFloat32Array = PackedFloat32Array()
 var _resolution: int = 0
 var _extent: float = 0.0
 
+## Mod-supplied reshapers, resolved **once per world build** by `WorldBuilder`.
+##
+## These used to be looked up inside the sampler, which meant `ModHost.content()` ran
+## for every height sample: the CPU field alone is ~484² samples and the Terrain3D
+## region fill is ~3.2 M more, so one world build performed millions of cross-mod
+## dictionary merges, each followed by an allocation and a sort. Holding them here is
+## what makes the sampler a pure function of its arguments.
+var _modifiers: Array[Dictionary] = []
+
 
 func _init() -> void:
 	_configure_noise()
@@ -110,20 +119,20 @@ func _island_mask(world_x: float, world_z: float) -> float:
 	return pow(1.0 - normalised * normalised, config.island_falloff)
 
 
-## Mod-supplied reshapers, applied in a deterministic order so two runs of the
-## same seed with the same mods produce identical terrain.
+## Publish the reshapers to apply. Must be called before generation: modifiers
+## registered later could never affect terrain that already exists, so the ordering
+## here matches the old behaviour exactly rather than changing it.
+func set_modifiers(entries: Array[Dictionary]) -> void:
+	_modifiers = entries
+
+
+## Mod-supplied reshapers, applied in the order `ModHost.content_ordered()` decided so
+## two runs of the same seed with the same mods produce identical terrain.
 func _apply_modifiers(world_x: float, world_z: float, height: float, falloff: float) -> float:
-	var modifiers: Dictionary = ModHost.content(&"terrain")
-	if modifiers.is_empty():
+	if _modifiers.is_empty():
 		return height
-	var ordered: Array = modifiers.values()
-	ordered.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		if int(a.get("order", 100)) == int(b.get("order", 100)):
-			return String(a.get("id", "")) < String(b.get("id", ""))
-		return int(a.get("order", 100)) < int(b.get("order", 100))
-	)
 	var result: float = height
-	for entry: Dictionary in ordered:
+	for entry: Dictionary in _modifiers:
 		var modifier: Callable = entry.get("modifier", Callable())
 		if modifier.is_valid():
 			result = float(modifier.call(world_x, world_z, result, falloff))

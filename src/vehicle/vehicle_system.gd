@@ -102,16 +102,9 @@ func describe() -> Array[String]:
 	return lines
 
 
-func _mod_vehicle_entries() -> Array:
-	var entries: Array = []
-	for entry: Dictionary in ModHost.content(&"vehicle").values():
-		# Deterministic order, so two runs of the same build place the same cars in
-		# the same spots.
-		entries.append(entry)
-	entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return String(a.get("id", "")) < String(b.get("id", ""))
-	)
-	return entries
+## Mod-registered vehicles, in the project's single deterministic order.
+func _mod_vehicle_entries() -> Array[Dictionary]:
+	return ModHost.content_ordered(&"vehicle")
 
 
 ## Instantiate a mod's vehicle. Only a `Vehicle` is accepted: a bare
