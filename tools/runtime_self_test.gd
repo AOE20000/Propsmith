@@ -38,7 +38,8 @@ func _ready() -> void:
 	_run_section("entry resolution", 10, _check_entry_resolution)
 	_run_section("install diagnostics", 4, _check_diagnostics)
 	_run_section("script bridge registration", 26, _check_bridge)
-	_run_section("cross-mod id collision rule", 10, _check_collision_rule)
+	_run_section("cross-mod id collision rule", 21, _check_collision_rule)
+	_run_section("dependency load order", 10, _check_load_order)
 	_run_section("boot summary", 4, _check_summary)
 
 	print("")
@@ -250,6 +251,102 @@ func _check_collision_rule() -> void:
 	ModHost.contexts.clear()
 	ModHost.failures.clear()
 	_expect(ModHost.content(&"prop").is_empty(), "clearing contexts did not clear the merge")
+
+	# The rules themselves are now testable without the autoload, because they live in
+	# `ModContent`. That matters for the ones the end-to-end path above cannot express:
+	# terrain layering sorts by `order` before `id`, which is a *different* order from
+	# every other kind and was previously covered by nothing at all.
+	var layered := ModContext.new(&"selftest_layered")
+	_expect(layered.add_terrain_modifier("z_high_priority", _identity_modifier, 10), "could not register a modifier")
+	_expect(layered.add_terrain_modifier("a_low_priority", _identity_modifier, 50), "could not register a modifier")
+	_expect(layered.add_terrain_modifier("tie_b", _identity_modifier, 100), "could not register a modifier")
+	_expect(layered.add_terrain_modifier("tie_a", _identity_modifier, 100), "could not register a modifier")
+
+	var index := ModContent.new({"selftest_layered": layered})
+	var terrain: Array[Dictionary] = index.ordered(&"terrain")
+	_expect(terrain.size() == 4, "expected 4 modifiers, got %d" % terrain.size())
+	# `z_high_priority` sorts last by id but first by order, so this fails if the sort
+	# key ever regresses to plain `id`.
+	_expect(String(terrain[0].get("id", "")) == "z_high_priority", "terrain modifiers are not ordered by `order` first (got '%s')" % terrain[0].get("id", ""))
+	# Equal `order` falls back to `id`, which is what makes the tie deterministic.
+	_expect(String(terrain[2].get("id", "")) == "tie_a", "equal-order modifiers are not tie-broken by id")
+	_expect(String(terrain[3].get("id", "")) == "tie_b", "equal-order modifiers are not tie-broken by id")
+
+	# A standalone index sees only what it was given, which is what makes the rest of
+	# this section meaningful rather than an accident of the autoload's state.
+	_expect(index.of(&"prop").is_empty(), "a fresh index should carry no props")
+	_expect(index.collisions().is_empty(), "distinct ids must not be reported as collisions")
+
+	# The loader must still be the way callers reach the content: one owner for the
+	# rules, one stable seam for asking.
+	_expect(ModHost.content_index != null, "the loader does not own a content index")
+
+
+## A terrain modifier that changes nothing, for ordering assertions only.
+func _identity_modifier(_x: float, _z: float, height: float, _falloff: float) -> float:
+	return height
+
+
+## Load order is a documented promise: the same set of mods must load the same way every
+## run, because `ModOrder`'s output is what makes a mod-reshaped world reproducible from
+## its seed. Nothing asserted that before, and the algorithm's degenerate cases — a cycle,
+## a chain with no bottom, a dependency that is not installed — were entirely untested.
+func _check_load_order() -> void:
+	_expect(ModOrder.order([]).is_empty(), "an empty graph should produce an empty order")
+
+	# A dependency has to be resolved before the mod that needs it.
+	var ordered := ModOrder.order([_candidate("a_mod", ["b_mod"]), _candidate("b_mod", [])])
+	_expect(_ids(ordered) == ["b_mod", "a_mod"], "a dependency did not load first (got %s)" % str(_ids(ordered)))
+
+	# Independent mods fall back to id order: the other half of determinism, because
+	# otherwise the order would depend on directory iteration.
+	var unordered := ModOrder.order([_candidate("zeta", []), _candidate("alpha", [])])
+	_expect(_ids(unordered) == ["alpha", "zeta"], "independent mods are not tie-broken by id (got %s)" % str(_ids(unordered)))
+
+	# Transitive: c depends on b depends on a.
+	var chain := ModOrder.order([
+		_candidate("c_mod", ["b_mod"]),
+		_candidate("b_mod", ["a_mod"]),
+		_candidate("a_mod", []),
+	])
+	_expect(_ids(chain) == ["a_mod", "b_mod", "c_mod"], "a transitive chain is not ordered (got %s)" % str(_ids(chain)))
+
+	# A dependency that is not installed warns and is skipped — never fatal, because mods
+	# are additive and a broken graph must not be able to stop the game booting.
+	var orphan := ModOrder.order([_candidate("lonely", ["ghost_mod"])])
+	_expect(_ids(orphan) == ["lonely"], "a missing dependency dropped its dependent (got %s)" % str(_ids(orphan)))
+
+	# A cycle must terminate, and must yield each mod exactly once. This is where the
+	# traversal used to be wrong: it only skipped *finished* mods, so a pair declaring
+	# each other appended itself until the depth guard tripped — 64 entries for 2 mods.
+	#
+	# Typed explicitly: an untyped `Array` literal stored in a variable will not convert
+	# to the `Array[Dictionary]` parameter, though the same literal passed inline will.
+	var cycle: Array[Dictionary] = [_candidate("ping", ["pong"]), _candidate("pong", ["ping"])]
+	var cyclic := ModOrder.order(cycle)
+	_expect(cyclic.size() == 2, "a cycle must yield each mod once (got %d entries)" % cyclic.size())
+	var cycle_ids := _ids(cyclic)
+	cycle_ids.sort()
+	_expect(cycle_ids == ["ping", "pong"], "a cycle lost a mod (got %s)" % str(_ids(cyclic)))
+	# A cycle has no correct order, so the requirement is that the answer is stable.
+	_expect(_ids(ModOrder.order(cycle)) == _ids(cyclic), "the order of a cyclic graph is not stable between runs")
+
+	# A mod that depends on itself is the smallest cycle, and the same rule covers it.
+	var selfish := ModOrder.order([_candidate("solo", ["solo"])])
+	_expect(_ids(selfish) == ["solo"], "a self-dependency did not resolve to a single entry (got %s)" % str(_ids(selfish)))
+
+	_expect(ModOrder.MAX_DEPENDENCY_DEPTH > 0, "the depth guard must be positive")
+
+
+func _candidate(id: String, dependencies: Array) -> Dictionary:
+	return {"id": id, "dependencies": PackedStringArray(dependencies)}
+
+
+func _ids(entries: Array[Dictionary]) -> Array[String]:
+	var out: Array[String] = []
+	for entry: Dictionary in entries:
+		out.append(String(entry["id"]))
+	return out
 
 
 ## The one line the boot report prints has to stay parseable and name both runtimes,

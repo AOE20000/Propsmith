@@ -42,7 +42,8 @@ $benignPatterns = @(
     "[mod:selftest] prop id 'selftest_prop' already taken",
     "[selftest] watch: 'player_died_secretly' is not a published event",
     "[selftest] on: 'before_frame' is not a hook",
-    "[ModHost] mod 'selftest_second': prop id 'shared_id' is already claimed"
+    "[ModHost] mod 'selftest_second': prop id 'shared_id' is already claimed",
+    "[ModOrder] mod 'lonely' depends on 'ghost_mod', which is not installed"
 )
 
 

@@ -62,7 +62,7 @@ func _make_tower() -> Node3D:
     cylinder.height = 8.0
     mesh.mesh = cylinder
     mesh.position = Vector3(0.0, 4.0, 0.0)
-    mesh.material_override = PoiMarker.standard_material(Color(0.6, 0.6, 0.65))
+    mesh.material_override = PoiGeometry.standard_material(Color(0.6, 0.6, 0.65))
     root.add_child(mesh)
     return root
 ```

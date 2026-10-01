@@ -90,9 +90,9 @@ func _make_lighthouse() -> Node3D:
 	var root := Node3D.new()
 	root.name = "Lighthouse"
 
-	var stone := PoiMarker.standard_material(Color(0.82, 0.8, 0.76))
-	var trim := PoiMarker.standard_material(Color(0.72, 0.26, 0.22))
-	var beam := PoiMarker.emissive_material(Color(1.0, 0.94, 0.72), 4.0)
+	var stone := PoiGeometry.standard_material(Color(0.82, 0.8, 0.76))
+	var trim := PoiGeometry.standard_material(Color(0.72, 0.26, 0.22))
+	var beam := PoiGeometry.emissive_material(Color(1.0, 0.94, 0.72), 4.0)
 
 	var height: float = 16.0
 	var shaft := CylinderMesh.new()

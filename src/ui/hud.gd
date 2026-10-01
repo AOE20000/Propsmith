@@ -6,18 +6,18 @@ extends CanvasLayer
 ## hand-edited `.tscn` that drifts. Every element is driven by an `Events` signal,
 ## so the HUD holds no reference to the player, the world, or any gameplay module
 ## — it can be deleted and the game still runs.
+##
+## The minimap is not built here: it owns a 3D camera and a viewport, so it lives in
+## `HudMinimap` and this class only tells it where the player is.
 
 const NOTICE_LIFETIME: float = 3.6
-const MINIMAP_SIZE: float = 220.0
-const MINIMAP_HEIGHT: float = 140.0
 
 var _prompt_label: Label = null
 var _stamina_bar: ProgressBar = null
 var _notice_box: VBoxContainer = null
 var _debug_label: Label = null
 var _discovery_label: Label = null
-var _minimap_viewport: SubViewport = null
-var _minimap_camera: Camera3D = null
+var _minimap: HudMinimap = null
 
 var _debug_visible: bool = false
 var _discovery_timer: float = 0.0
@@ -28,9 +28,6 @@ func _ready() -> void:
 	layer = 10
 	_build()
 	_connect_events()
-	# The world's 3D viewport exists by the time this runs, but assigning it
-	# deferred avoids depending on the order the HUD is added in.
-	call_deferred("_bind_minimap_world")
 
 
 func _connect_events() -> void:
@@ -40,14 +37,6 @@ func _connect_events() -> void:
 	Events.player_stamina_changed.connect(_on_stamina_changed)
 	Events.poi_discovered.connect(_on_poi_discovered)
 	Events.player_spawned.connect(_on_player_spawned)
-
-
-func _bind_minimap_world() -> void:
-	if _minimap_viewport == null:
-		return
-	var viewport: Viewport = get_viewport()
-	if viewport != null:
-		_minimap_viewport.world_3d = viewport.world_3d
 
 
 func _on_player_spawned(player: Node3D) -> void:
@@ -62,8 +51,8 @@ func _process(delta: float) -> void:
 
 	if _player == null or not is_instance_valid(_player):
 		_player = get_tree().get_first_node_in_group(&"player") as Node3D
-	if _player != null and _minimap_camera != null:
-		_minimap_camera.position = Vector3(_player.global_position.x, MINIMAP_HEIGHT, _player.global_position.z)
+	if _player != null and _minimap != null:
+		_minimap.follow(_player.global_position)
 
 	if _debug_visible:
 		_refresh_debug()
@@ -234,7 +223,10 @@ func _build() -> void:
 	stamina_caption.modulate = Color(0.75, 0.82, 0.9)
 	bottom_left.add_child(stamina_caption)
 
-	_build_minimap(root)
+	# A widget rather than inline construction: it brings its own 3D camera and
+	# viewport, which is a different kind of thing from the 2D elements above.
+	_minimap = HudMinimap.new()
+	root.add_child(_minimap)
 
 	_debug_label = Label.new()
 	_debug_label.set_anchors_preset(Control.PRESET_TOP_LEFT)
@@ -244,46 +236,3 @@ func _build() -> void:
 	_debug_label.modulate = Color(0.85, 0.95, 1.0, 0.9)
 	_debug_label.visible = false
 	root.add_child(_debug_label)
-
-
-## A second camera looking straight down, rendered into a small viewport. Cheaper
-## to reason about than drawing a map texture by hand, and it picks up landmarks
-## and mod content for free.
-##
-## The viewport is parented to its container, never to the HUD: a `SubViewport` can
-## have only one parent, and adding it to the CanvasLayer first makes the later
-## `add_child` fail with "already has a parent".
-func _build_minimap(root: Control) -> void:
-	var frame := ColorRect.new()
-	frame.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	frame.offset_left = -(MINIMAP_SIZE + 24.0)
-	frame.offset_top = 16.0
-	frame.offset_right = -16.0
-	frame.offset_bottom = MINIMAP_SIZE + 24.0
-	frame.color = Color(0.86, 0.92, 1.0, 0.2)
-	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(frame)
-
-	var container := SubViewportContainer.new()
-	container.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	container.offset_left = -(MINIMAP_SIZE + 20.0)
-	container.offset_top = 20.0
-	container.offset_right = -20.0
-	container.offset_bottom = MINIMAP_SIZE + 20.0
-	container.stretch = true
-	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(container)
-
-	_minimap_viewport = SubViewport.new()
-	_minimap_viewport.size = Vector2i(int(MINIMAP_SIZE), int(MINIMAP_SIZE))
-	_minimap_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	_minimap_viewport.own_world_3d = false
-	container.add_child(_minimap_viewport)
-
-	_minimap_camera = Camera3D.new()
-	_minimap_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	_minimap_camera.size = 260.0
-	_minimap_camera.far = 600.0
-	_minimap_camera.position = Vector3(0.0, MINIMAP_HEIGHT, 0.0)
-	_minimap_camera.rotation_degrees = Vector3(-89.9, 0.0, 0.0)
-	_minimap_viewport.add_child(_minimap_camera)

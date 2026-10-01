@@ -140,7 +140,7 @@ func _instantiate_marker(definition: PoiDefinition, position: Vector3) -> PoiMar
 		else:
 			push_warning("PoiPlacer: factory for '%s' did not return a Node3D" % definition.id)
 	if geometry == null:
-		geometry = PoiMarker.build_geometry(definition.style, _materials_for(definition.style))
+		geometry = PoiGeometry.build(definition.style, _materials_for(definition.style))
 	marker.add_child(geometry)
 
 	# Orient toward the island centre so landmarks face the player's approach.
@@ -149,25 +149,28 @@ func _instantiate_marker(definition: PoiDefinition, position: Vector3) -> PoiMar
 	return marker
 
 
+## Per-style palette. Colour lives here rather than in `PoiGeometry` so a mod can place
+## the same shape in its own colours by supplying a factory that passes a different
+## dictionary — and so the built-in shapes keep readable defaults when it does not.
 func _materials_for(style: StringName) -> Dictionary:
-	var stone := PoiMarker.standard_material(Color(0.46, 0.45, 0.42))
-	var wood := PoiMarker.standard_material(Color(0.31, 0.21, 0.13))
+	var stone := PoiGeometry.standard_material(Color(0.46, 0.45, 0.42))
+	var wood := PoiGeometry.standard_material(Color(0.31, 0.21, 0.13))
 	match style:
 		&"crystal":
 			return {
-				"stone": PoiMarker.standard_material(Color(0.34, 0.35, 0.4)),
-				"crystal": PoiMarker.emissive_material(Color(0.35, 0.75, 1.0), 2.4),
+				"stone": PoiGeometry.standard_material(Color(0.34, 0.35, 0.4)),
+				"crystal": PoiGeometry.emissive_material(Color(0.35, 0.75, 1.0), 2.4),
 			}
 		&"ruins":
 			return {
-				"stone": PoiMarker.standard_material(Color(0.52, 0.5, 0.45)),
+				"stone": PoiGeometry.standard_material(Color(0.52, 0.5, 0.45)),
 				"wood": wood,
 			}
 		&"campsite":
 			return {
 				"wood": wood,
-				"cloth": PoiMarker.standard_material(Color(0.56, 0.31, 0.23)),
-				"ember": PoiMarker.emissive_material(Color(1.0, 0.55, 0.2), 3.0),
+				"cloth": PoiGeometry.standard_material(Color(0.56, 0.31, 0.23)),
+				"ember": PoiGeometry.emissive_material(Color(1.0, 0.55, 0.2), 3.0),
 			}
 		&"watchtower":
 			return {"stone": stone, "wood": wood}

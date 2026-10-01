@@ -32,8 +32,6 @@ extends Node
 const MODS_ROOT: String = "res://mods"
 const ENTRY_SCRIPT: String = "mod.gd"
 const MANIFEST_FILE: String = "mod.json"
-## Guard against a pathological chain of mod dependencies.
-const MAX_DEPENDENCY_DEPTH: int = 64
 
 ## Loaded mods in execution order.
 var mods: Array[ModBase] = []
@@ -41,6 +39,15 @@ var mods: Array[ModBase] = []
 var contexts: Dictionary = {}
 ## mod id -> reason, for the settings screen and diagnostics.
 var failures: Dictionary = {}
+
+## The merged view of everything mods registered, and the home of the ordering and
+## collision rules. Built once: it holds `contexts` by reference, so a registration made
+## later is visible without anything having to refresh it.
+var content_index: ModContent = null
+
+
+func _init() -> void:
+	content_index = ModContent.new(contexts)
 
 
 func _ready() -> void:
@@ -153,96 +160,36 @@ func unload_all() -> void:
 	contexts.clear()
 
 
-## All registered content of one kind across mods, as id -> payload.
+## Everything registered under one kind across mods, as id -> payload.
 ##
-## A key claimed by two mods resolves to the **first** registration, matching the
-## rule `ModContext` enforces inside a single mod. Before this, the merge let the
-## last mod win, so the documented rule ("a collision keeps the first, with a
-## warning") was true within a mod and false across mods, and which mod won was an
-## accident of dictionary iteration order. `_report_cross_mod_collisions()` now names
-## the losers at load time.
+## The rules — ordering, "first registration for an id wins", and naming collisions — live
+## in `ModContent`. This is the loader's stable public seam, so callers keep asking
+## `ModHost` rather than reaching for the index; it is also why those rules have a single
+## owner instead of being re-derived at each call site.
 func content(kind: StringName) -> Dictionary:
-	var merged: Dictionary = {}
-	for mod_id: String in contexts:
-		var mod_context: ModContext = contexts[mod_id]
-		var registry: Dictionary = _registry_for(mod_context, kind)
-		for key: Variant in registry:
-			if not merged.has(key):
-				merged[key] = registry[key]
-	return merged
+	return content_index.of(kind)
 
 
-## Every registration of one kind, ordered by the single rule the project relies on
-## for determinism: `id`, except terrain modifiers which sort by `order` first so a
-## mod can state its layering.
-##
-## This exists because ordering used to be re-derived at each call site — four copies
-## of the same `sort_custom`, one of them with a different key. One owner means "the
-## same seed with the same mods produces the same world" has exactly one definition,
-## and a new consumer cannot quietly invent a fifth order.
+## The same registrations, deterministically ordered. Prefer this over `content()` in any
+## consumer that iterates: world generation reads it during `build()`, and mod content
+## must land in the same order every run for the seed to mean anything.
 func content_ordered(kind: StringName) -> Array[Dictionary]:
-	var entries: Array[Dictionary] = []
-	for payload: Variant in content(kind).values():
-		if payload is Dictionary:
-			entries.append(payload)
-	if kind == &"terrain":
-		entries.sort_custom(_terrain_order_before)
-	else:
-		entries.sort_custom(_id_order_before)
-	return entries
+	return content_index.ordered(kind)
 
 
-## The registry a `context()` kind maps to, so the merge and the ordered view cannot
-## disagree about which dictionary they are reading.
-func _registry_for(mod_context: ModContext, kind: StringName) -> Dictionary:
-	match kind:
-		&"poi": return mod_context.poi_factories
-		&"prop": return mod_context.prop_factories
-		&"item": return mod_context.item_definitions
-		&"combat": return mod_context.combat_providers
-		&"terrain": return mod_context.terrain_modifiers
-		&"vehicle": return mod_context.vehicle_factories
-	return {}
-
-
-static func _id_order_before(a: Dictionary, b: Dictionary) -> bool:
-	return String(a.get("id", "")) < String(b.get("id", ""))
-
-
-static func _terrain_order_before(a: Dictionary, b: Dictionary) -> bool:
-	var order_a: int = int(a.get("order", 100))
-	var order_b: int = int(b.get("order", 100))
-	if order_a == order_b:
-		return String(a.get("id", "")) < String(b.get("id", ""))
-	return order_a < order_b
-
-
-## Name every id two mods both claim. Without this the collision is invisible: the
-## loser's content simply never appears and the mod author has nothing to go on.
+## Attach every cross-mod id collision to the mod that lost it.
 ##
-## Runs once per load rather than per lookup, so it costs nothing in the hot paths
-## that call `content()`. The note is attached to the losing mod because that is the
-## author who has to change something.
+## `ModContent` detects; the loader records, because the failure list belongs to the
+## loader. Without this the collision is invisible: the loser's content simply never
+## appears and its author has nothing to go on. Runs once per load, so it costs nothing
+## in the paths that call `content()`.
 func _report_cross_mod_collisions() -> void:
-	const KINDS: Array[StringName] = [&"poi", &"prop", &"item", &"combat", &"terrain", &"vehicle"]
-	for kind: StringName in KINDS:
-		var claimed_by: Dictionary = {}
-		var already_reported: Dictionary = {}
-		for mod_id: String in contexts:
-			var mod_context: ModContext = contexts[mod_id]
-			for key: Variant in _registry_for(mod_context, kind):
-				var id: String = String(key)
-				if not claimed_by.has(id):
-					claimed_by[id] = mod_id
-					continue
-				if already_reported.has(id):
-					continue
-				already_reported[id] = true
-				var reason: String = "%s id '%s' is already claimed by mod '%s' — this registration is ignored" % [
-					kind, id, claimed_by[id],
-				]
-				push_warning("[ModHost] mod '%s': %s" % [mod_id, reason])
-				failures[mod_id] = reason
+	for finding: Dictionary in content_index.collisions():
+		var reason: String = "%s id '%s' is already claimed by mod '%s' — this registration is ignored" % [
+			finding["kind"], finding["id"], finding["winner"],
+		]
+		push_warning("[ModHost] mod '%s': %s" % [finding["loser"], reason])
+		failures[String(finding["loser"])] = reason
 
 
 ## Enumerate candidate mods under MODS_ROOT.
@@ -372,64 +319,7 @@ func _record(mod_id: StringName, reason: String) -> void:
 	Events.mod_failed.emit(mod_id, reason)
 
 
-## Depth-first ordering where a mod always follows the mods it depends on.
-## Implemented with an explicit stack (no recursion) so a deep graph cannot
-## overflow. Missing dependencies warn; a cycle or over-deep chain falls back to
-## id order for the affected mods instead of failing the load.
+## Depth-first ordering where a mod always follows the mods it depends on. The algorithm
+## and its degenerate-case rules live in `ModOrder`.
 func _order_by_dependencies(candidates: Array[Dictionary]) -> Array[Dictionary]:
-	var by_id: Dictionary = {}
-	var sorted_candidates: Array[Dictionary] = candidates.duplicate()
-	sorted_candidates.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return String(a["id"]) < String(b["id"])
-	)
-	for candidate: Dictionary in sorted_candidates:
-		by_id[String(candidate["id"])] = candidate
-
-	var ordered: Array[Dictionary] = []
-	var visited: Dictionary = {}
-	var visit_sequence: int = 0
-
-	for root: Dictionary in sorted_candidates:
-		var root_id: String = String(root["id"])
-		if visited.has(root_id):
-			continue
-		var stack: Array[Dictionary] = [{"node": root, "deps": [], "index": 0}]
-		while not stack.is_empty():
-			var frame: Dictionary = stack[-1]
-			var node: Dictionary = frame["node"]
-			var node_id: String = String(node["id"])
-
-			if frame["deps"].is_empty():
-				if visited.has(node_id):
-					stack.pop_back()
-					continue
-				if stack.size() > MAX_DEPENDENCY_DEPTH:
-					push_warning("[ModHost] dependency chain deeper than %d at '%s'; using id order for the remainder" % [MAX_DEPENDENCY_DEPTH, node_id])
-					stack.pop_back()
-					continue
-				var resolved: Array[Dictionary] = []
-				for dependency: String in (node.get("dependencies", PackedStringArray()) as PackedStringArray):
-					if by_id.has(dependency):
-						if not visited.has(dependency):
-							resolved.append(by_id[dependency])
-					else:
-						push_warning("[ModHost] mod '%s' depends on '%s', which is not installed" % [node_id, dependency])
-				resolved.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-					return String(a["id"]) < String(b["id"])
-				)
-				frame["deps"] = resolved
-
-			var deps: Array = frame["deps"]
-			var index: int = int(frame["index"])
-			if index < deps.size():
-				frame["index"] = index + 1
-				var dependency_node: Dictionary = deps[index]
-				if not visited.has(String(dependency_node["id"])):
-					stack.append({"node": dependency_node, "deps": [], "index": 0})
-				continue
-
-			visited[node_id] = visit_sequence
-			visit_sequence += 1
-			ordered.append(node)
-			stack.pop_back()
-	return ordered
+	return ModOrder.order(candidates)
