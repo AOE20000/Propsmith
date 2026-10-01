@@ -1,0 +1,9 @@
+{
+  "id": "lighthouse",
+  "name": "灯塔与风化石",
+  "version": "1.0.0",
+  "author": "example",
+  "enabled": true,
+  "dependencies": [],
+  "description": "示例 mod：新增一个灯塔地标、一种散布道具，并抬高一小片地形。同时演示存档扩展点。"
+}

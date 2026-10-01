@@ -1,0 +1,283 @@
+extends Node
+## Discovers and runs content mods from `res://mods`, autoloaded as `ModLoader`.
+##
+## A mod is a directory containing `mod.gd` (extends `ModBase`) and an optional
+## `mod.json` manifest:
+##
+##     res://mods/example/
+##         mod.gd      # required entry script
+##         mod.json    # optional: { "id", "name", "version", "author",
+##                     #             "enabled", "dependencies": [] }
+##
+## Load order is dependency-aware and deterministic: dependencies first, ties
+## broken by id, so two runs of the same build behave identically. A mod that
+## cannot be scanned, parsed, or instantiated is disabled for the session while
+## every other mod keeps working: mods are additive by contract, never
+## load-bearing.
+
+const MODS_ROOT: String = "res://mods"
+const ENTRY_SCRIPT: String = "mod.gd"
+const MANIFEST_FILE: String = "mod.json"
+## Guard against a pathological chain of mod dependencies.
+const MAX_DEPENDENCY_DEPTH: int = 64
+
+## Loaded mods in execution order.
+var mods: Array[ModBase] = []
+## mod id -> ModContext, for mods that registered successfully.
+var contexts: Dictionary = {}
+## mod id -> reason, for the settings screen and diagnostics.
+var failures: Dictionary = {}
+
+
+func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	SaveSystem.register_persistent(&"mods", serialize_mods, deserialize_mods)
+
+
+func _process(delta: float) -> void:
+	if mods.is_empty():
+		return
+	for mod: ModBase in mods:
+		mod._on_tick(delta)
+
+
+## Scan, order, register, and activate every enabled mod. Call `unload_all()`
+## first to reload.
+func load_all() -> void:
+	unload_all()
+	failures.clear()
+
+	for candidate: Dictionary in _order_by_dependencies(_scan()):
+		if not bool(candidate.get("enabled", true)):
+			continue
+		var mod: ModBase = _instantiate(candidate)
+		if mod == null:
+			continue
+		mod.context = ModContext.new(mod.mod_id)
+		mod._on_register()
+		mods.append(mod)
+		contexts[String(mod.mod_id)] = mod.context
+		Events.mod_loaded.emit(mod.mod_id, mod.display_name)
+		print("[ModLoader] loaded %s (%s) v%s" % [mod.display_name, mod.mod_id, mod.version])
+
+	Events.mods_loaded.emit(active_ids())
+
+
+## Broadcast world generation to mods once the terrain exists.
+func notify_world_generate(world: Node3D) -> void:
+	for mod: ModBase in mods:
+		mod._on_world_generate(world)
+
+
+## Broadcast population, after core props and POIs are placed.
+func notify_world_populate(world: Node3D) -> void:
+	for mod: ModBase in mods:
+		mod._on_world_populate(world)
+
+
+func notify_player_spawn(player: Node3D) -> void:
+	for mod: ModBase in mods:
+		mod._on_player_spawn(player)
+
+
+func active_ids() -> PackedStringArray:
+	var ids: PackedStringArray = []
+	for mod: ModBase in mods:
+		ids.append(String(mod.mod_id))
+	return ids
+
+
+## Human-readable status lines for the settings screen and the debug overlay.
+func describe() -> Array[String]:
+	var lines: Array[String] = []
+	for mod: ModBase in mods:
+		lines.append("%s v%s (%s)" % [mod.display_name, mod.version, mod.mod_id])
+	for failed_id: String in failures:
+		lines.append("%s [failed: %s]" % [failed_id, failures[failed_id]])
+	return lines
+
+
+## Persistence bridge: every loaded mod contributes one section keyed by mod id,
+## so a mod only implements `serialize`/`deserialize` and never touches JSON.
+func serialize_mods() -> Dictionary:
+	var sections: Dictionary = {}
+	for mod: ModBase in mods:
+		var section: Dictionary = mod.serialize()
+		if not section.is_empty():
+			sections[String(mod.mod_id)] = section
+	return sections
+
+
+func deserialize_mods(data: Dictionary) -> void:
+	for mod: ModBase in mods:
+		var key: String = String(mod.mod_id)
+		if data.has(key) and data[key] is Dictionary:
+			mod.deserialize(data[key])
+
+
+## Tear down in reverse load order so a mod that depends on another unloads first.
+func unload_all() -> void:
+	for index: int in range(mods.size() - 1, -1, -1):
+		var mod: ModBase = mods[index]
+		mod._on_unload()
+		if mod.context != null:
+			mod.context.release_all()
+	mods.clear()
+	contexts.clear()
+
+
+## All registered content of one kind across mods, as id -> payload.
+func content(kind: StringName) -> Dictionary:
+	var merged: Dictionary = {}
+	for mod_id: String in contexts:
+		var mod_context: ModContext = contexts[mod_id]
+		match kind:
+			&"poi": merged.merge(mod_context.poi_factories)
+			&"prop": merged.merge(mod_context.prop_factories)
+			&"item": merged.merge(mod_context.item_definitions)
+			&"combat": merged.merge(mod_context.combat_providers)
+			&"terrain": merged.merge(mod_context.terrain_modifiers)
+	return merged
+
+
+## Enumerate candidate mods under MODS_ROOT.
+func _scan() -> Array[Dictionary]:
+	var candidates: Array[Dictionary] = []
+	var dir: DirAccess = DirAccess.open(MODS_ROOT)
+	if dir == null:
+		# No mods directory is the normal case for a plain checkout.
+		return candidates
+
+	for directory_name: String in dir.get_directories():
+		var mod_dir: String = "%s/%s" % [MODS_ROOT, directory_name]
+		var entry_path: String = "%s/%s" % [mod_dir, ENTRY_SCRIPT]
+		if not ResourceLoader.exists(entry_path):
+			# A directory without mod.gd is ignored rather than reported: it may
+			# be shared assets or documentation.
+			continue
+
+		var manifest: Dictionary = _read_manifest("%s/%s" % [mod_dir, MANIFEST_FILE])
+		candidates.append({
+			"id": StringName(String(manifest.get("id", directory_name))),
+			"display_name": String(manifest.get("name", directory_name)),
+			"version": String(manifest.get("version", "1.0.0")),
+			"author": String(manifest.get("author", "")),
+			"enabled": bool(manifest.get("enabled", true)),
+			"dependencies": _string_list(manifest.get("dependencies", [])),
+			"dir": mod_dir,
+			"entry": entry_path,
+		})
+	return candidates
+
+
+func _string_list(raw: Variant) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	if raw is Array:
+		for entry: Variant in raw:
+			out.append(String(entry))
+	return out
+
+
+func _read_manifest(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		return {}
+	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return {}
+	var text: String = file.get_as_text()
+	file.close()
+	var parsed: Variant = JSON.parse_string(text)
+	if parsed is Dictionary:
+		return parsed
+	push_warning("[ModLoader] %s is not valid JSON; using directory defaults" % path)
+	return {}
+
+
+func _instantiate(candidate: Dictionary) -> ModBase:
+	var mod_id: StringName = candidate["id"]
+	var script_resource: Resource = load(String(candidate["entry"]))
+	if script_resource == null or not (script_resource is GDScript):
+		_fail(mod_id, "mod.gd is not a loadable GDScript")
+		return null
+
+	var instance: Object = (script_resource as GDScript).new()
+	if not (instance is ModBase):
+		_fail(mod_id, "mod.gd must extend ModBase")
+		return null
+
+	var mod: ModBase = instance
+	mod.mod_id = mod_id
+	mod.display_name = String(candidate.get("display_name", mod_id))
+	mod.version = String(candidate.get("version", "1.0.0"))
+	mod.author = String(candidate.get("author", ""))
+	mod.dependencies = candidate.get("dependencies", PackedStringArray())
+	return mod
+
+
+func _fail(mod_id: StringName, reason: String) -> void:
+	failures[String(mod_id)] = reason
+	push_error("[ModLoader] %s: %s" % [mod_id, reason])
+	Events.mod_failed.emit(mod_id, reason)
+
+
+## Depth-first ordering where a mod always follows the mods it depends on.
+## Implemented with an explicit stack (no recursion) so a deep graph cannot
+## overflow. Missing dependencies warn; a cycle or over-deep chain falls back to
+## id order for the affected mods instead of failing the load.
+func _order_by_dependencies(candidates: Array[Dictionary]) -> Array[Dictionary]:
+	var by_id: Dictionary = {}
+	var sorted_candidates: Array[Dictionary] = candidates.duplicate()
+	sorted_candidates.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return String(a["id"]) < String(b["id"])
+	)
+	for candidate: Dictionary in sorted_candidates:
+		by_id[String(candidate["id"])] = candidate
+
+	var ordered: Array[Dictionary] = []
+	var visited: Dictionary = {}
+	var visit_sequence: int = 0
+
+	for root: Dictionary in sorted_candidates:
+		var root_id: String = String(root["id"])
+		if visited.has(root_id):
+			continue
+		var stack: Array[Dictionary] = [{"node": root, "deps": [], "index": 0}]
+		while not stack.is_empty():
+			var frame: Dictionary = stack[-1]
+			var node: Dictionary = frame["node"]
+			var node_id: String = String(node["id"])
+
+			if frame["deps"].is_empty():
+				if visited.has(node_id):
+					stack.pop_back()
+					continue
+				if stack.size() > MAX_DEPENDENCY_DEPTH:
+					push_warning("[ModLoader] dependency chain deeper than %d at '%s'; using id order for the remainder" % [MAX_DEPENDENCY_DEPTH, node_id])
+					stack.pop_back()
+					continue
+				var resolved: Array[Dictionary] = []
+				for dependency: String in (node.get("dependencies", PackedStringArray()) as PackedStringArray):
+					if by_id.has(dependency):
+						if not visited.has(dependency):
+							resolved.append(by_id[dependency])
+					else:
+						push_warning("[ModLoader] mod '%s' depends on '%s', which is not installed" % [node_id, dependency])
+				resolved.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+					return String(a["id"]) < String(b["id"])
+				)
+				frame["deps"] = resolved
+
+			var deps: Array = frame["deps"]
+			var index: int = int(frame["index"])
+			if index < deps.size():
+				frame["index"] = index + 1
+				var dependency_node: Dictionary = deps[index]
+				if not visited.has(String(dependency_node["id"])):
+					stack.append({"node": dependency_node, "deps": [], "index": 0})
+				continue
+
+			visited[node_id] = visit_sequence
+			visit_sequence += 1
+			ordered.append(node)
+			stack.pop_back()
+	return ordered
