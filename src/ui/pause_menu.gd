@@ -124,7 +124,7 @@ func _refresh_mod_list() -> void:
 		return
 	for child: Node in _mod_list.get_children():
 		child.queue_free()
-	var lines: Array[String] = ModLoader.describe()
+	var lines: Array[String] = ModHost.describe()
 	if lines.is_empty():
 		var empty := Label.new()
 		empty.text = "（无）把 mod 放进 res://mods/<名字>/ 即可加载"

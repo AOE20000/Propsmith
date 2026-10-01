@@ -17,6 +17,12 @@ signal player_died(player: Node3D)
 signal player_respawned(player: Node3D)
 signal player_stamina_changed(current: float, maximum: float)
 
+## Vehicles. Broadcast, never required: a session with no vehicle system never
+## emits these and nothing breaks, which is what keeps the module removable.
+signal vehicle_entered(vehicle: Node3D, driver: Node3D)
+signal vehicle_exited(vehicle: Node3D, driver: Node3D)
+signal vehicle_spawned(vehicle: Node3D, vehicle_id: StringName)
+
 ## Exploration.
 signal poi_discovered(poi_id: StringName, display_name: String, world_position: Vector3)
 signal collectible_picked_up(item_id: StringName, amount: int)

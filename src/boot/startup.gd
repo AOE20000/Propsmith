@@ -54,7 +54,7 @@ func _ready() -> void:
 		await get_tree().process_frame
 
 	if auto_load_mods:
-		ModLoader.load_all()
+		ModHost.load_all()
 
 	_register_core_services(failures)
 
@@ -64,6 +64,8 @@ func _ready() -> void:
 		return
 
 	_spawn_player(failures)
+	_spawn_vehicles(failures)
+	_spawn_freecam()
 	_spawn_ui(failures)
 
 	GameState.mode = GameState.Mode.EXPLORING
@@ -121,6 +123,8 @@ func _register_core_services(failures: Array[String]) -> void:
 		Services.register(&"world_builder", WorldBuilder.new())
 	if not Services.has(&"terrain_query"):
 		Services.register(&"terrain_query", TerrainQuery.new())
+	if not Services.has(&"vehicle_system"):
+		Services.register(&"vehicle_system", VehicleSystem.new())
 	ModIntegration.publish_core_providers()
 
 	for required: StringName in [&"world_builder", &"terrain_query"]:
@@ -159,7 +163,38 @@ func _spawn_player(failures: Array[String]) -> void:
 	GameState.set_spawn(player.global_position)
 	Events.player_spawned.emit(player)
 	ModIntegration.instantiate_mod_providers(player)
-	ModLoader.notify_player_spawn(player)
+	ModHost.notify_player_spawn(player)
+
+
+## Vehicles and the debug camera sit on top of the generated world rather than
+## inside it. They are created here, not as world-builder stages, because the
+## builder's contract is about terrain and placed content: either of these can be
+## deleted without the island changing at all.
+func _spawn_vehicles(failures: Array[String]) -> void:
+	if world == null:
+		return
+	var system: VehicleSystem = Services.get_as(&"vehicle_system", &"VehicleSystem") as VehicleSystem
+	if system == null:
+		failures.append("vehicle_system service has an unexpected type")
+		return
+	var query: TerrainQuery = Services.get_as(&"terrain_query", &"TerrainQuery") as TerrainQuery
+	system.name = "Vehicles"
+	world.add_child(system)
+	# Anchored on the player so the fleet is where the player already is, rather
+	# than at the island centre where they may never walk.
+	var anchor: Vector3 = player.global_position if player != null else Vector3.ZERO
+	system.spawn_fleet(world, query, anchor)
+
+
+func _spawn_freecam() -> void:
+	if world == null:
+		return
+	var freecam := Freecam.new()
+	freecam.name = "Freecam"
+	# A child of the world, not of the player: it is a world-space camera, and
+	# parenting it to the character would make it inherit the motion it exists to
+	# escape.
+	world.add_child(freecam)
 
 
 func _spawn_ui(failures: Array[String]) -> void:
@@ -200,7 +235,7 @@ func _finish(failures: Array[String], validate_only: bool) -> void:
 		return
 
 	if validate_only:
-		var mod_ids: PackedStringArray = ModLoader.active_ids()
+		var mod_ids: PackedStringArray = ModHost.active_ids()
 		print("[boot] validate-only: mods=%s services=%s nodes=%d" % [
 			", ".join(mod_ids) if not mod_ids.is_empty() else "none",
 			", ".join(Services.names()),
@@ -215,8 +250,8 @@ func _finish(failures: Array[String], validate_only: bool) -> void:
 		await _settle_and_verify()
 		return
 
-	print("[boot] world ready: seed=%d mods=%d" % [GameState.world_seed, ModLoader.mods.size()])
-	Events.notify("世界已生成 — F1 调试信息 · F5 保存 · F9 读取 · Esc 菜单", Events.NotifyLevel.SUCCESS)
+	print("[boot] world ready: seed=%d mods=%d" % [GameState.world_seed, ModHost.mods.size()])
+	Events.notify("世界已生成 — F1 调试 · F3 自由视角 · F5 保存 · F9 读取 · Esc 菜单", Events.NotifyLevel.SUCCESS)
 
 
 func _count_nodes(node: Node) -> int:
@@ -263,3 +298,14 @@ func _report_world() -> void:
 			printerr("[boot] no Scatter container was created")
 		var landmarks: Node = world.get_node_or_null("Landmarks")
 		print("[boot] landmarks placed: %d" % (landmarks.get_child_count() if landmarks != null else 0))
+
+	var system: VehicleSystem = Services.get_as(&"vehicle_system", &"VehicleSystem") as VehicleSystem
+	if system == null:
+		printerr("[boot] vehicle_system service is not available")
+	else:
+		var fleet: Array[String] = system.describe()
+		print("[boot] vehicles: %s" % ("; ".join(fleet) if not fleet.is_empty() else "none"))
+
+	# Reported unconditionally, including the absent case: an integration that is
+	# only visible when it works is an integration nobody can debug.
+	print("[boot] scripting runtimes: %s" % ScriptingRuntimes.summary())

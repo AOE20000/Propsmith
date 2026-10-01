@@ -1,0 +1,76 @@
+# Godot Sandbox 的 SafeGDScript 源码。
+#
+# 重要：这是**源码**，不是可执行产物。Godot Sandbox 运行的是编译后的 ELF 程序，
+# 所以复制本目录到 res://mods/ 之后，还要用它的工具链把本文件编译好，
+# 并把产物命名为 mod.elf 放在同一目录。（本文件留在目录里只为随 mod 一起携带。）
+#
+# 沙盒程序必须导出 on_register(game)。`game` 与 Lua 那边是同一个门面。
+
+var total_registered := 0
+
+
+func add_tower(game) -> void:
+	game.add_poi("sgd_tower", "沙盒塔", _make_tower, 1.0)
+	total_registered += 1
+
+
+func add_glow_stone(game) -> void:
+	# 散布系统会给网格套上自己的材质，所以这里返回一个素网格就够了。
+	game.add_prop("sgd_glow_stone", _make_glow_stone, 0.5, 40.0)
+	total_registered += 1
+
+
+func _make_tower() -> Node3D:
+	var root := Node3D.new()
+
+	var shaft := MeshInstance3D.new()
+	var cylinder := CylinderMesh.new()
+	cylinder.top_radius = 1.2
+	cylinder.bottom_radius = 2.4
+	cylinder.height = 12.0
+	shaft.mesh = cylinder
+	shaft.position = Vector3(0.0, 6.0, 0.0)
+	root.add_child(shaft)
+
+	# 顶部一圈发光环，让塔在夜里也认得出来。
+	var beacon := MeshInstance3D.new()
+	var ring := TorusMesh.new()
+	ring.inner_radius = 1.0
+	ring.outer_radius = 1.6
+	beacon.mesh = ring
+	beacon.position = Vector3(0.0, 12.6, 0.0)
+	root.add_child(beacon)
+
+	return root
+
+
+func _make_glow_stone() -> Mesh:
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.9
+	sphere.height = 1.4
+	return sphere
+
+
+func on_register(game) -> void:
+	add_tower(game)
+	add_glow_stone(game)
+
+	# 地形改造：falloff 是岛屿径向遮罩，乘上它改动就会随海岸自然消失。
+	game.add_terrain_modifier("sgd_mesa", _raise_mesa, 60)
+
+	game.on("world_populate", func(_world) -> void:
+		game.notify("沙盒 mod 已注入 %d 项" % total_registered, 1)
+	)
+
+	game.on("player_spawn", func(_player) -> void:
+		game.log("玩家已生成，服务：%s" % str(game.service_names()))
+	)
+
+
+func _raise_mesa(x: float, z: float, height: float, falloff: float) -> float:
+	var centre := Vector2(-140.0, 110.0)
+	var radius := 46.0
+	var distance := Vector2(x, z).distance_to(centre)
+	if distance >= radius:
+		return height
+	return height + pow(1.0 - distance / radius, 2.0) * 11.0 * falloff

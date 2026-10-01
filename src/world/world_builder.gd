@@ -60,7 +60,7 @@ func build(world_root: Node3D, seed_value: int) -> bool:
 	_environment.build(world_root, config)
 
 	progress.call("通知 Mod 介入地形", 0.8)
-	ModLoader.notify_world_generate(world_root)
+	ModHost.notify_world_generate(world_root)
 
 	progress.call("散布植被与岩石", 0.84)
 	_scatter.scatter(world_root, query, config)
@@ -69,7 +69,7 @@ func build(world_root: Node3D, seed_value: int) -> bool:
 	_poi_placer.place(world_root, query, config)
 
 	progress.call("通知 Mod 补充内容", 0.98)
-	ModLoader.notify_world_populate(world_root)
+	ModHost.notify_world_populate(world_root)
 
 	progress.call("完成", 1.0)
 	return true

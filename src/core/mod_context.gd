@@ -18,6 +18,7 @@ var prop_factories: Dictionary = {}
 var item_definitions: Dictionary = {}
 var combat_providers: Dictionary = {}
 var terrain_modifiers: Dictionary = {}
+var vehicle_factories: Dictionary = {}
 
 
 func _init(owner_mod_id: StringName) -> void:
@@ -83,6 +84,16 @@ func add_terrain_modifier(modifier_id: StringName, modifier: Callable, order: in
 	}, "terrain modifier")
 
 
+## Provide a drivable vehicle. `factory` is a Callable returning a `VehicleBody3D`
+## (or an existing `Vehicle`); the vehicle system places it and wires its seat.
+func add_vehicle_factory(vehicle_id: StringName, factory: Callable) -> bool:
+	return _register(vehicle_factories, vehicle_id, {
+		"id": vehicle_id,
+		"factory": factory,
+		"owner": _mod_id,
+	}, "vehicle")
+
+
 ## Resolve another mod's registered content without knowing which mod owns it.
 func find_poi_factory(poi_id: StringName) -> Dictionary:
 	return poi_factories.get(poi_id, {}) as Dictionary
@@ -121,6 +132,7 @@ func _registry_by_name(registry_name: String) -> Dictionary:
 		"item": return item_definitions
 		"combat provider": return combat_providers
 		"terrain modifier": return terrain_modifiers
+		"vehicle": return vehicle_factories
 	return {}
 
 

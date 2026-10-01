@@ -16,9 +16,12 @@ class_name PlayerScene
 ##   ├── InteractionProbe
 ##   └── AttackController
 
-const PLAYER_HEIGHT: float = 1.8
-const PLAYER_RADIUS: float = 0.35
-const EYE_HEIGHT: float = 1.55
+## Body dimensions are owned by `Player`, not restated here: the crouch collider and
+## the stand-up clearance query both recompute from those constants, so duplicating
+## them would let the built geometry drift from the runtime assumptions.
+const PLAYER_HEIGHT: float = Player.BODY_HEIGHT
+const PLAYER_RADIUS: float = Player.BODY_RADIUS
+const EYE_HEIGHT: float = Player.EYE_HEIGHT
 
 
 static func build() -> Player:

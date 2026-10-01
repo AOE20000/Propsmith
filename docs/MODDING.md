@@ -24,7 +24,7 @@ res://mods/my_mod/
 加载顺序按 `dependencies` 拓扑排序，同层按 id 排序，所以**同样的一批 mod 每次加载
 顺序一致**。声明了不存在的依赖只会警告，不会阻止启动。
 
-启动时 `ModLoader` 会依次调用：`_on_register` → （世界生成后）`_on_world_generate`
+启动时 `ModHost` 会依次调用：`_on_register` → （世界生成后）`_on_world_generate`
 → （内容放置后）`_on_world_populate` → （玩家生成后）`_on_player_spawn`，每帧
 `_on_tick`，卸载时逆序 `_on_unload`。
 
@@ -154,6 +154,58 @@ func deserialize(data: Dictionary) -> void:
 
 ---
 
+## 扩展点：载具
+
+`add_vehicle_factory` 让 mod 增加一种可驾驶载具。工厂必须返回一个 `Vehicle`
+（而不是裸的 `VehicleBody3D`）——只有 `Vehicle` 带座位交互和乘客吸附，
+返回裸载具会被拒绝并说明原因，这比"能开但上不去"更好排查。
+
+载具由 `VehicleSystem` 在玩家出生点附近挑一块平地停放；同一次启动里
+每个工厂各放一辆，顺序按 id 排定，所以两次运行位置一致。
+
+```gdscript
+func _on_register() -> void:
+    context.add_vehicle_factory(&"my_buggy", _make_buggy)
+
+func _make_buggy() -> Vehicle:
+    # 复用工程自带的构建器，只改参数；这样默认载具以后加的新特性你会自动继承。
+    var vehicle: Vehicle = VehicleScene.build("Vehicle_my_buggy")
+    vehicle.mass = 720.0
+    vehicle.max_engine_force = 2600.0
+    vehicle.max_speed = 34.0
+    return vehicle
+```
+
+要一辆**外形完全不同**的载具就自己在工厂里组装：放一个 `CollisionShape3D`、
+若干 `VehicleWheel3D`（前轮 `use_as_steering`，后轮 `use_as_traction`）、
+一个名为 `Seat` 的 `VehicleSeat`、一个名为 `ExitPoint` 的 `Marker3D` 即可。
+`Vehicle._ready()` 靠这些节点名接线，不靠顺序。
+
+完整例子见 `mods/garage/`。
+
+### 上下车是怎么接到核心的
+
+座位就是一个普通的 `Interactable`，因此玩家已有的探测、提示与 `E` 键链路
+直接复用，核心三处都没为载具改过一行。上车时 `Vehicle` 调用
+`Player.take_control(self)`：角色自身的移动、重力与体力被挂起，碰撞体被关掉，
+位置由座位每物理帧写入。下车反向走 `release_external_control()`，
+并把乘客放到地形采样出的地面上（而不是车厢里）。
+
+---
+
+## 用别的语言写 mod
+
+`mod.lua`（Lua GDExtension）与 `mod.sgd` / `mod.elf`（Godot Sandbox）是
+`mod.gd` 之外的合法入口。二者的清单、加载顺序、扩展点与 GDScript mod 完全一致，
+差别只在 `context` 换成了 `game` 这个门面。见
+[SCRIPTED_MODS.md](SCRIPTED_MODS.md)。
+
+> 与本项目无关的另一种 mod：`godot-mod-loader`（`addons/mod_loader/`）。
+> 它认的是 `manifest.json` 与 `.zip`，用来在不接触游戏源码的前提下改写脚本与资源，
+> 属于另一条路线。两套加载器靠清单文件名分工，互不干扰。
+
+---
+
 ## 可直接使用的公共服务
 
 | 服务 | 获取方式 | 用途 |
@@ -178,4 +230,5 @@ func deserialize(data: Dictionary) -> void:
 pwsh -File tools\check_scripts.ps1      # 语法
 pwsh -File tools\smoke_test.ps1         # 启动 + 碰撞 + mod 加载
 pwsh -File tools\smoke_test.ps1 -Validate   # 只跑启动并打印世界统计
+pwsh -File tools\check_runtimes.ps1     # 可选脚本运行时兼容层自检
 ```

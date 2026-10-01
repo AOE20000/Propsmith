@@ -3,7 +3,7 @@ class_name ModIntegration
 ## Bridges mod-registered combat providers into the running game.
 ##
 ## Kept out of the combat classes on purpose: `Hitbox3D` and `Damageable` must not
-## know that mods exist. This is the single place that reads `ModLoader.content`
+## know that mods exist. This is the single place that reads `ModHost.content`
 ## and turns a registration into a live node, which is also why the combat system
 ## behaves identically when no mods are installed.
 
@@ -32,7 +32,7 @@ static func combat_providers() -> Dictionary:
 	var merged: Dictionary = {}
 	if core_context != null:
 		merged.merge(core_context.combat_providers)
-	merged.merge(ModLoader.content(&"combat"))
+	merged.merge(ModHost.content(&"combat"))
 	return merged
 
 

@@ -33,6 +33,12 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# A controller that brings its own camera (the debug free camera) turns this
+	# off, so one mouse motion cannot steer two cameras at once. Read dynamically
+	# rather than through a `Player` reference: the rig must keep working for any
+	# target that never heard of this property.
+	if target != null and not bool(target.get(&"look_input_enabled")):
+		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var motion: InputEventMouseMotion = event
 		_yaw -= motion.relative.x * mouse_sensitivity

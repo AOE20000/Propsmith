@@ -5,7 +5,10 @@ extends Node
 ## here. Only decisions and discoveries live here, which keeps the save file
 ## small and keeps world generation deterministic from `world_seed` alone.
 
-enum Mode { BOOT, EXPLORING, PAUSED, MAP, DEAD }
+## `FREECAM` is a session mode rather than a paused state: interaction and attacks
+## already suspend themselves when the mode is not `EXPLORING`, so the debug camera
+## gets a coherent session without either of them learning that a camera exists.
+enum Mode { BOOT, EXPLORING, FREECAM, PAUSED, MAP, DEAD }
 
 const SAVE_VERSION: int = 1
 

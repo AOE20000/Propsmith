@@ -65,18 +65,26 @@ function Invoke-GodotCapture {
 
 # -ArgumentList is joined on spaces, so a project path containing spaces has to
 # arrive already quoted.
-$godotArgs = @("--headless", "--path", ('"' + $ProjectDir + '"'))
+#
+# `--quit-after` is a hang guard, not a timeout. If the boot script itself fails to
+# compile, nothing ever calls `quit()`, and a script that waits for the process
+# would sit here forever. The engine then exits by itself with status 0, which is
+# why the completion-marker check below exists: without it, a boot that never
+# finished would be indistinguishable from a pass.
+$godotArgs = @("--headless", "--path", ('"' + $ProjectDir + '"'), "--quit-after", "6000")
 
 if ($Validate) {
     $env:DSH_VALIDATE_ONLY = "1"
     $run = Invoke-GodotCapture -Arguments $godotArgs
     $env:DSH_VALIDATE_ONLY = ""
+    $expectedMarker = "[boot] SMOKE TEST PASSED"
 } else {
     # Runtime mode: boot, settle the physics, and verify the player is standing on
     # the generated collision before quitting.
     $env:DSH_RUNTIME_REPORT = "1"
     $run = Invoke-GodotCapture -Arguments $godotArgs
     $env:DSH_RUNTIME_REPORT = ""
+    $expectedMarker = "[runtime] COLLISION AND SPAWN VERIFIED"
 }
 $exitCode = $run.ExitCode
 
@@ -95,6 +103,14 @@ Write-Host "--- boot report ---"
 $lines | Where-Object { $_ -match "\[boot\]|\[runtime\]|\[mod:|\[ModLoader\]" } | ForEach-Object { Write-Host $_ }
 
 Write-Host ""
+$reachedMarker = @($lines | Where-Object { $_.Contains($expectedMarker) }).Count -gt 0
+if (-not $reachedMarker) {
+    Write-Host "--- problems (1) ---" -ForegroundColor Red
+    Write-Host "the run never reached '$expectedMarker' — boot did not complete" -ForegroundColor DarkRed
+    Write-Host "SMOKE TEST FAILED (godot exit $exitCode)" -ForegroundColor Red
+    exit 1
+}
+
 if ($failures.Count -gt 0) {
     Write-Host "--- problems ($($failures.Count)) ---" -ForegroundColor Red
     $failures | Select-Object -First 30 | ForEach-Object { Write-Host $_ -ForegroundColor DarkRed }

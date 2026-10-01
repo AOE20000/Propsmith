@@ -1,19 +1,33 @@
 extends Node
-## Discovers and runs content mods from `res://mods`, autoloaded as `ModLoader`.
+## Discovers and runs this project's content mods from `res://mods`, autoloaded as
+## `ModHost`.
 ##
-## A mod is a directory containing `mod.gd` (extends `ModBase`) and an optional
-## `mod.json` manifest:
+## A mod is a directory containing an entry script (extends `ModBase`) and an
+## optional `mod.json` manifest:
 ##
 ##     res://mods/example/
-##         mod.gd      # required entry script
+##         mod.gd      # entry: GDScript (or `mod.lua` / `mod.sgd`, see below)
 ##         mod.json    # optional: { "id", "name", "version", "author",
 ##                     #             "enabled", "dependencies": [] }
+##
+## The entry may also be written in a language provided by an optional GDExtension:
+## `mod.lua` through Lua GDExtension, or `mod.sgd` / `mod.elf` through Godot
+## Sandbox. Neither extension is required — `mod.gd` is tried first and a scripted
+## entry is only reached when there is no GDScript — and a scripted mod whose
+## runtime is missing is reported as a failed mod with instructions rather than
+## crashing the scan. See `ScriptingRuntimes` and `ScriptedMod`.
 ##
 ## Load order is dependency-aware and deterministic: dependencies first, ties
 ## broken by id, so two runs of the same build behave identically. A mod that
 ## cannot be scanned, parsed, or instantiated is disabled for the session while
 ## every other mod keeps working: mods are additive by contract, never
 ## load-bearing.
+##
+## Not to be confused with the `ModLoader` autoload vendored from
+## GodotModding/godot-mod-loader, which loads `.zip` mod packages from
+## `res://mods` and unpacked trees from `res://mods-unpacked/`. The two do not
+## collide because they key on different manifest filenames — `mod.json` here,
+## `manifest.json` there.
 
 const MODS_ROOT: String = "res://mods"
 const ENTRY_SCRIPT: String = "mod.gd"
@@ -55,10 +69,19 @@ func load_all() -> void:
 			continue
 		mod.context = ModContext.new(mod.mod_id)
 		mod._on_register()
+		# A scripted mod whose runtime was present but whose code failed to start
+		# has registered nothing, so it is dropped exactly like a mod that never
+		# instantiated — but with its own reason, which the UI shows.
+		if mod is ScriptedMod and not (mod as ScriptedMod).is_started():
+			var scripted: ScriptedMod = mod
+			_record(scripted.mod_id, scripted.start_error())
+			mod.context.release_all()
+			mod._on_unload()
+			continue
 		mods.append(mod)
 		contexts[String(mod.mod_id)] = mod.context
 		Events.mod_loaded.emit(mod.mod_id, mod.display_name)
-		print("[ModLoader] loaded %s (%s) v%s" % [mod.display_name, mod.mod_id, mod.version])
+		print("[ModHost] loaded %s (%s) v%s" % [mod.display_name, mod.mod_id, mod.version])
 
 	Events.mods_loaded.emit(active_ids())
 
@@ -137,6 +160,7 @@ func content(kind: StringName) -> Dictionary:
 			&"item": merged.merge(mod_context.item_definitions)
 			&"combat": merged.merge(mod_context.combat_providers)
 			&"terrain": merged.merge(mod_context.terrain_modifiers)
+			&"vehicle": merged.merge(mod_context.vehicle_factories)
 	return merged
 
 
@@ -150,10 +174,10 @@ func _scan() -> Array[Dictionary]:
 
 	for directory_name: String in dir.get_directories():
 		var mod_dir: String = "%s/%s" % [MODS_ROOT, directory_name]
-		var entry_path: String = "%s/%s" % [mod_dir, ENTRY_SCRIPT]
-		if not ResourceLoader.exists(entry_path):
-			# A directory without mod.gd is ignored rather than reported: it may
-			# be shared assets or documentation.
+		var entry_file: String = _resolve_entry_file(mod_dir)
+		if entry_file.is_empty():
+			# A directory with no entry script is ignored rather than reported: it
+			# may be shared assets or documentation.
 			continue
 
 		var manifest: Dictionary = _read_manifest("%s/%s" % [mod_dir, MANIFEST_FILE])
@@ -165,9 +189,24 @@ func _scan() -> Array[Dictionary]:
 			"enabled": bool(manifest.get("enabled", true)),
 			"dependencies": _string_list(manifest.get("dependencies", [])),
 			"dir": mod_dir,
-			"entry": entry_path,
+			"entry": "%s/%s" % [mod_dir, entry_file],
+			"entry_file": entry_file,
 		})
 	return candidates
+
+
+## Which entry script a mod directory provides, in precedence order. `mod.gd`
+## wins, so a mod can carry a GDScript shim next to the Lua or sandboxed source it
+## is migrating away from.
+##
+## Presence is tested with `FileAccess` rather than `ResourceLoader`: nobody loads
+## `.lua` while Lua GDExtension is absent, so a resource check would silently skip
+## the mod and lose the very diagnostic that tells the author what to install.
+func _resolve_entry_file(mod_dir: String) -> String:
+	for candidate: String in ScriptingRuntimes.entry_precedence():
+		if FileAccess.file_exists("%s/%s" % [mod_dir, candidate]):
+			return candidate
+	return ""
 
 
 func _string_list(raw: Variant) -> PackedStringArray:
@@ -189,12 +228,17 @@ func _read_manifest(path: String) -> Dictionary:
 	var parsed: Variant = JSON.parse_string(text)
 	if parsed is Dictionary:
 		return parsed
-	push_warning("[ModLoader] %s is not valid JSON; using directory defaults" % path)
+	push_warning("[ModHost] %s is not valid JSON; using directory defaults" % path)
 	return {}
 
 
 func _instantiate(candidate: Dictionary) -> ModBase:
 	var mod_id: StringName = candidate["id"]
+	var entry_file: String = String(candidate.get("entry_file", ENTRY_SCRIPT))
+	var runtime: StringName = ScriptingRuntimes.runtime_for_entry(entry_file)
+	if runtime != &"":
+		return _instantiate_scripted(mod_id, candidate, runtime)
+
 	var script_resource: Resource = load(String(candidate["entry"]))
 	if script_resource == null or not (script_resource is GDScript):
 		_fail(mod_id, "mod.gd is not a loadable GDScript")
@@ -206,17 +250,44 @@ func _instantiate(candidate: Dictionary) -> ModBase:
 		return null
 
 	var mod: ModBase = instance
-	mod.mod_id = mod_id
-	mod.display_name = String(candidate.get("display_name", mod_id))
-	mod.version = String(candidate.get("version", "1.0.0"))
-	mod.author = String(candidate.get("author", ""))
-	mod.dependencies = candidate.get("dependencies", PackedStringArray())
+	_apply_metadata(mod, candidate)
 	return mod
 
 
+## Build a mod whose entry is a scripted language. The runtime is verified before
+## anything is constructed, so a missing GDExtension surfaces as an ordinary mod
+## failure carrying the install instructions, instead of a parse error from deep
+## inside the loader.
+func _instantiate_scripted(mod_id: StringName, candidate: Dictionary, runtime: StringName) -> ModBase:
+	if not ScriptingRuntimes.is_available(runtime):
+		_fail(mod_id, ScriptingRuntimes.install_hint(runtime))
+		return null
+
+	var mod := ScriptedMod.new()
+	_apply_metadata(mod, candidate)
+	mod.configure(runtime, String(candidate["entry"]), String(candidate.get("entry_file", "")))
+	return mod
+
+
+## Manifest values are copied onto the mod instance the same way for every entry
+## language, so `mod.json` behaves identically for a Lua mod and a GDScript one.
+func _apply_metadata(mod: ModBase, candidate: Dictionary) -> void:
+	mod.mod_id = candidate["id"]
+	mod.display_name = String(candidate.get("display_name", mod.mod_id))
+	mod.version = String(candidate.get("version", "1.0.0"))
+	mod.author = String(candidate.get("author", ""))
+	mod.dependencies = candidate.get("dependencies", PackedStringArray())
+
+
 func _fail(mod_id: StringName, reason: String) -> void:
+	_record(mod_id, reason)
+	push_error("[ModHost] %s: %s" % [mod_id, reason])
+
+
+## Record a failure for the mod list and the `mod_failed` signal, without raising a
+## second engine error: used when the module that owns the failure already logged it.
+func _record(mod_id: StringName, reason: String) -> void:
 	failures[String(mod_id)] = reason
-	push_error("[ModLoader] %s: %s" % [mod_id, reason])
 	Events.mod_failed.emit(mod_id, reason)
 
 
@@ -252,7 +323,7 @@ func _order_by_dependencies(candidates: Array[Dictionary]) -> Array[Dictionary]:
 					stack.pop_back()
 					continue
 				if stack.size() > MAX_DEPENDENCY_DEPTH:
-					push_warning("[ModLoader] dependency chain deeper than %d at '%s'; using id order for the remainder" % [MAX_DEPENDENCY_DEPTH, node_id])
+					push_warning("[ModHost] dependency chain deeper than %d at '%s'; using id order for the remainder" % [MAX_DEPENDENCY_DEPTH, node_id])
 					stack.pop_back()
 					continue
 				var resolved: Array[Dictionary] = []
@@ -261,7 +332,7 @@ func _order_by_dependencies(candidates: Array[Dictionary]) -> Array[Dictionary]:
 						if not visited.has(dependency):
 							resolved.append(by_id[dependency])
 					else:
-						push_warning("[ModLoader] mod '%s' depends on '%s', which is not installed" % [node_id, dependency])
+						push_warning("[ModHost] mod '%s' depends on '%s', which is not installed" % [node_id, dependency])
 				resolved.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 					return String(a["id"]) < String(b["id"])
 				)

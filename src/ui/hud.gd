@@ -149,7 +149,7 @@ func _refresh_debug() -> void:
 	lines.append("已发现地标 %d | 采集种类 %d" % [GameState.discovered_pois.size(), GameState.collected_items.size()])
 	lines.append("服务：" + ", ".join(Services.names()))
 
-	var mod_lines: Array[String] = ModLoader.describe()
+	var mod_lines: Array[String] = ModHost.describe()
 	if mod_lines.is_empty():
 		lines.append("mod：无")
 	else:

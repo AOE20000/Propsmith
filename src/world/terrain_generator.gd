@@ -113,7 +113,7 @@ func _island_mask(world_x: float, world_z: float) -> float:
 ## Mod-supplied reshapers, applied in a deterministic order so two runs of the
 ## same seed with the same mods produce identical terrain.
 func _apply_modifiers(world_x: float, world_z: float, height: float, falloff: float) -> float:
-	var modifiers: Dictionary = ModLoader.content(&"terrain")
+	var modifiers: Dictionary = ModHost.content(&"terrain")
 	if modifiers.is_empty():
 		return height
 	var ordered: Array = modifiers.values()
