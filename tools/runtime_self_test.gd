@@ -40,7 +40,7 @@ func _ready() -> void:
 	_run_section("script bridge registration", 26, _check_bridge)
 	_run_section("cross-mod id collision rule", 21, _check_collision_rule)
 	_run_section("dependency load order", 10, _check_load_order)
-	_run_section("map-agnostic mobility core", 55, _check_mobility_core)
+	_run_section("map-agnostic mobility core", 68, _check_mobility_core)
 	_run_section("boot summary", 4, _check_summary)
 
 	print("")
@@ -367,6 +367,25 @@ func _check_mobility_core() -> void:
 	_expect(ActivityTag.fallback_ladder(ActivityTag.FOOD)[0] == ActivityTag.FOOD, "a ladder must start at the tag itself")
 	_expect(ActivityTag.fallback_ladder(ActivityTag.FOOD).back() == ActivityTag.OTHER, "a ladder must end at `other`")
 	_expect(ActivityTag.fallback_ladder(&"never_heard_of_it").back() == ActivityTag.OTHER, "even an unknown tag needs a ladder")
+
+	# --- The default map source is PLATEAU, whose buildings carry `bldg:usage` in Japanese.
+	# These are the values that turn a real 3D city model into an activity-tagged map with no
+	# trajectory data at all, so they are asserted rather than assumed.
+	_expect(ActivityTag.normalize("住宅") == ActivityTag.HOME, "PLATEAU use type 住宅 did not map to home")
+	_expect(ActivityTag.normalize("共同住宅") == ActivityTag.HOME, "PLATEAU use type 共同住宅 did not map to home")
+	_expect(ActivityTag.normalize("事務所") == ActivityTag.WORK, "PLATEAU use type 事務所 did not map to work")
+	_expect(ActivityTag.normalize("工場") == ActivityTag.WORK, "PLATEAU use type 工場 did not map to work")
+	_expect(ActivityTag.normalize("飲食店") == ActivityTag.FOOD, "PLATEAU use type 飲食店 did not map to food")
+	_expect(ActivityTag.normalize("店舗") == ActivityTag.SHOP, "PLATEAU use type 店舗 did not map to shop")
+	_expect(ActivityTag.normalize("学校") == ActivityTag.SCHOOL, "PLATEAU use type 学校 did not map to school")
+	_expect(ActivityTag.normalize("病院") == ActivityTag.SERVICE, "PLATEAU use type 病院 did not map to service")
+	_expect(ActivityTag.normalize("体育館") == ActivityTag.LEISURE, "PLATEAU use type 体育館 did not map to leisure")
+	_expect(ActivityTag.normalize("駅舎") == ActivityTag.TRANSIT, "PLATEAU use type 駅舎 did not map to transit")
+	# Lodging is where someone stays overnight, so it belongs with home. `hotel` used to be
+	# filed under food, which made an English and a Dutch label disagree about the same thing.
+	_expect(ActivityTag.normalize("ホテル") == ActivityTag.HOME, "lodging must group with home")
+	_expect(ActivityTag.normalize("ホテル") == ActivityTag.normalize("hotel"), "lodging label must not depend on language")
+	_expect(ActivityTag.normalize("謎の用途") == ActivityTag.OTHER, "an unknown Japanese use type must degrade to `other`")
 
 	# --- Distance and weight are the two variables the score is built from ---
 	_expect(
