@@ -40,6 +40,7 @@ func _ready() -> void:
 	_run_section("script bridge registration", 26, _check_bridge)
 	_run_section("cross-mod id collision rule", 21, _check_collision_rule)
 	_run_section("dependency load order", 10, _check_load_order)
+	_run_section("map-agnostic mobility core", 55, _check_mobility_core)
 	_run_section("boot summary", 4, _check_summary)
 
 	print("")
@@ -347,6 +348,208 @@ func _ids(entries: Array[Dictionary]) -> Array[String]:
 	for entry: Dictionary in entries:
 		out.append(String(entry["id"]))
 	return out
+
+
+## The mobility core is deliberately dataset-agnostic: given *any* map whose places carry
+## activity labels, behaviour runs. These assertions cover the three things that makes true —
+## label normalisation with a fallback ladder, destination choice from tags and distance, and
+## a route cache that must never survive a map change.
+func _check_mobility_core() -> void:
+	# --- Labels from four different vocabularies must land on the same canonical tag ---
+	_expect(ActivityTag.normalize("Kantoorfunctie") == ActivityTag.WORK, "a Dutch usage function did not normalise")
+	_expect(ActivityTag.normalize("  fast-food ") == ActivityTag.FOOD, "separators and whitespace were not squashed")
+	_expect(ActivityTag.normalize("公司") == ActivityTag.WORK, "a CJK label did not normalise")
+	_expect(ActivityTag.normalize("Restaurant") == ActivityTag.FOOD, "case was not folded")
+	_expect(ActivityTag.normalize("work") == ActivityTag.WORK, "a canonical name was not accepted directly")
+	_expect(ActivityTag.normalize("zzz-unknown") == ActivityTag.OTHER, "an unknown label must degrade to `other`, never fail")
+	_expect(ActivityTag.normalize("") == ActivityTag.OTHER, "an empty label must be safe")
+	_expect(ActivityTag.is_canonical(ActivityTag.normalize("supermarket")), "a normalised tag must be canonical")
+	_expect(ActivityTag.fallback_ladder(ActivityTag.FOOD)[0] == ActivityTag.FOOD, "a ladder must start at the tag itself")
+	_expect(ActivityTag.fallback_ladder(ActivityTag.FOOD).back() == ActivityTag.OTHER, "a ladder must end at `other`")
+	_expect(ActivityTag.fallback_ladder(&"never_heard_of_it").back() == ActivityTag.OTHER, "even an unknown tag needs a ladder")
+
+	# --- Distance and weight are the two variables the score is built from ---
+	_expect(
+		DestinationChooser.score(0.0, 1.0, 1.0, 100.0) > DestinationChooser.score(500.0, 1.0, 1.0, 100.0),
+		"distance must decay the score"
+	)
+	_expect(
+		DestinationChooser.score(10.0, 2.0, 1.0, 100.0) > DestinationChooser.score(10.0, 1.0, 1.0, 100.0),
+		"weight must raise the score"
+	)
+	_expect(DestinationChooser.score(10.0, 0.0, 1.0, 100.0) == 0.0, "a weightless place must be unselectable")
+
+	var places: Array[Dictionary] = _stub_places()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var picked: Dictionary = DestinationChooser.choose(places, ActivityTag.FOOD, Vector3.ZERO, rng)
+	_expect(StringName(picked.get("tag", &"")) == ActivityTag.FOOD, "a food step must pick a food place")
+
+	# A map thinner than the pattern is the case this whole design exists for.
+	var no_food: Array[Dictionary] = _stub_places_without(ActivityTag.FOOD)
+	var fell_back: Dictionary = DestinationChooser.choose(no_food, ActivityTag.FOOD, Vector3.ZERO, rng)
+	_expect(not fell_back.is_empty(), "a map with no `food` must still resolve the step")
+	_expect(StringName(fell_back.get("tag", &"")) == ActivityTag.SHOP, "the ladder must be walked in order (expected shop before leisure)")
+
+	_expect(
+		DestinationChooser.choose([] as Array[Dictionary], ActivityTag.FOOD, Vector3.ZERO, rng).is_empty(),
+		"an empty map must return no destination rather than crash"
+	)
+	var avoided: Dictionary = DestinationChooser.choose(places, ActivityTag.FOOD, Vector3.ZERO, rng, &"food_a")
+	_expect(StringName(avoided.get("id", &"")) != &"food_a", "avoid_id must exclude that place")
+
+	# Same seed, same choice — the world is supposed to be reproducible.
+	var rng_a := RandomNumberGenerator.new()
+	rng_a.seed = 99
+	var rng_b := RandomNumberGenerator.new()
+	rng_b.seed = 99
+	var first: Dictionary = DestinationChooser.choose(places, ActivityTag.SHOP, Vector3.ZERO, rng_a)
+	var second: Dictionary = DestinationChooser.choose(places, ActivityTag.SHOP, Vector3.ZERO, rng_b)
+	_expect(
+		StringName(first.get("id", &"")) == StringName(second.get("id", &"")),
+		"the same seed must pick the same place"
+	)
+	# ...but different people must not all walk into the same building.
+	var spread: Dictionary = {}
+	for candidate_seed: int in 24:
+		var person_rng := RandomNumberGenerator.new()
+		person_rng.seed = candidate_seed
+		spread[String(DestinationChooser.choose(places, ActivityTag.SHOP, Vector3.ZERO, person_rng).get("id", ""))] = true
+	_expect(spread.size() > 1, "different seeds must spread people across candidate places")
+
+	# --- The cache: shared, bounded, and invalid on a map change ---
+	var cache := RouteCache.new()
+	cache.set_map_version("map_v1")
+	var computes: Array = [0]
+	var counter := func(_from_key: String, _to_key: String) -> PackedVector3Array:
+		computes[0] = int(computes[0]) + 1
+		return PackedVector3Array([Vector3.ZERO, Vector3(1.0, 0.0, 0.0)])
+
+	var path: PackedVector3Array = cache.get_or_compute("a", "b", counter)
+	_expect(path.size() == 2, "the path finder's result must be stored as-is")
+	_expect(cache.misses == 1 and cache.hits == 0, "the first lookup must be a miss")
+	cache.get_or_compute("a", "b", counter)
+	_expect(cache.hits == 1, "the second lookup must be a hit")
+	_expect(int(computes[0]) == 1, "a cached path must not be recomputed")
+	_expect(cache.has("a", "b"), "the cached route must be findable")
+
+	# The one rule that stops agents walking through walls after a map change.
+	_expect(cache.set_map_version("map_v2"), "changing the map version must report the change")
+	_expect(cache.size() == 0, "a map change must drop every cached route")
+	_expect(not cache.has("a", "b"), "a route from the old map must never be served")
+	cache.get_or_compute("a", "b", counter)
+	_expect(int(computes[0]) == 2, "after a map change the path must be recomputed")
+	_expect(not cache.set_map_version("map_v2"), "setting the same version must report no change")
+
+	# An empty result is not cached: it usually means "navigation was not ready yet", and
+	# caching it would make that永久 for the session.
+	var empty_cache := RouteCache.new()
+	empty_cache.set_map_version("v")
+	empty_cache.get_or_compute("a", "b", func(_f: String, _t: String) -> PackedVector3Array:
+		return PackedVector3Array()
+	)
+	_expect(empty_cache.size() == 0, "an empty path must not be cached")
+
+	var same_calls: Array = [0]
+	var same_cache := RouteCache.new()
+	same_cache.set_map_version("v")
+	same_cache.get_or_compute("a", "a", func(_f: String, _t: String) -> PackedVector3Array:
+		same_calls[0] = int(same_calls[0]) + 1
+		return PackedVector3Array([Vector3.ONE])
+	)
+	_expect(int(same_calls[0]) == 0, "a hop to the same place must not consult the path finder")
+
+	var bounded := RouteCache.new()
+	bounded.set_map_version("v")
+	bounded.max_entries = 2
+	for index: int in 4:
+		bounded.get_or_compute("a%d" % index, "b%d" % index, counter)
+	_expect(bounded.size() == 2, "the cache must stay within max_entries (got %d)" % bounded.size())
+	_expect(bounded.evictions == 2, "evictions must be counted")
+
+	var partial := RouteCache.new()
+	partial.set_map_version("v")
+	partial.get_or_compute("a", "b", counter)
+	partial.get_or_compute("c", "d", counter)
+	_expect(partial.invalidate_touching("b") == 1, "invalidate_touching must drop exactly the routes touching that place")
+	_expect(partial.has("c", "d"), "invalidate_touching must leave unrelated routes alone")
+
+	# --- A person's route: destinations resolved at creation, paths cached, map change re-inits ---
+	var route_cache := RouteCache.new()
+	var route := AgentRoute.new()
+	route.set_path_finder(_stub_polyline)
+	route.configure(ActivityPattern.commute(), places, route_cache, "map_v1", Vector3.ZERO, 11, &"home_a")
+	_expect(route.stop_count() == 3, "a commute must resolve to 3 stops (got %d)" % route.stop_count())
+	_expect(route.unresolved_steps() == 0, "every step must resolve on a well-annotated map")
+	_expect(route.needs_reinit("map_v2"), "a route built for another map must ask to be re-initialised")
+	_expect(not route.needs_reinit("map_v1"), "the route's own map version must not trigger a re-init")
+	_expect(not route.current_path().is_empty(), "the first leg must already be resolved when the route is created")
+	_expect(route_cache.size() == 1, "only the first leg may be computed eagerly (got %d)" % route_cache.size())
+	_expect(route.place_id_at(1) != route.place_id_at(0), "consecutive stops must not be the same place")
+
+	_expect(route.advance(), "advancing must move to the next stop")
+	_expect(route_cache.size() == 2, "advancing must resolve the leg it enters")
+	_expect(route.advance(), "the last stop must still be reachable")
+	_expect(not route.advance(), "advancing past the last stop must report the end")
+	_expect(route.is_finished(), "the route must be finished after the last stop")
+
+	var route_a := AgentRoute.new()
+	route_a.set_path_finder(_stub_polyline)
+	var route_b := AgentRoute.new()
+	route_b.set_path_finder(_stub_polyline)
+	route_a.configure(ActivityPattern.commute_with_lunch(), places, RouteCache.new(), "m", Vector3.ZERO, 3, &"home_a")
+	route_b.configure(ActivityPattern.commute_with_lunch(), places, RouteCache.new(), "m", Vector3.ZERO, 3, &"home_a")
+	var identical: bool = route_a.stop_count() == route_b.stop_count()
+	for index: int in route_a.stop_count():
+		if route_a.place_id_at(index) != route_b.place_id_at(index):
+			identical = false
+	_expect(identical, "the same seed must produce the same itinerary")
+
+	# A thin map must degrade down the ladder, not collapse.
+	var thin := AgentRoute.new()
+	thin.set_path_finder(_stub_polyline)
+	thin.configure(ActivityPattern.school_day(), places, RouteCache.new(), "m", Vector3.ZERO, 5, &"home_a")
+	_expect(thin.unresolved_steps() == 0, "a map with no school must still resolve via the ladder")
+	_expect(thin.tag_at(1) == ActivityTag.SCHOOL, "the route must still record what the pattern asked for")
+	_expect(thin.resolved_tag_at(1) == ActivityTag.SERVICE, "the fallback that satisfied the step must be visible")
+
+	var blank := AgentRoute.new()
+	blank.configure(ActivityPattern.new(&"empty", [] as Array[StringName]), places, RouteCache.new(), "m", Vector3.ZERO, 1)
+	_expect(blank.is_finished(), "an invalid pattern must produce a finished, empty route")
+
+	var nowhere := AgentRoute.new()
+	nowhere.configure(ActivityPattern.commute(), [] as Array[Dictionary], RouteCache.new(), "m", Vector3.ZERO, 1)
+	_expect(nowhere.unresolved_steps() == 3, "a map with no places must report every step unresolved (got %d)" % nowhere.unresolved_steps())
+
+
+## A small annotated place set: two homes, two workplaces, two eateries, two shops and one
+## service. Deliberately has **no** school and **no** leisure place, so the fallback ladder is
+## exercised by the assertions above.
+func _stub_places() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	out.append(DestinationChooser.make_candidate(&"home_a", ActivityTag.HOME, Vector3(0.0, 0.0, 0.0)))
+	out.append(DestinationChooser.make_candidate(&"home_b", ActivityTag.HOME, Vector3(120.0, 0.0, 40.0)))
+	out.append(DestinationChooser.make_candidate(&"work_a", ActivityTag.WORK, Vector3(300.0, 0.0, 0.0)))
+	out.append(DestinationChooser.make_candidate(&"work_b", ActivityTag.WORK, Vector3(420.0, 0.0, 120.0)))
+	out.append(DestinationChooser.make_candidate(&"food_a", ActivityTag.FOOD, Vector3(150.0, 0.0, 200.0)))
+	out.append(DestinationChooser.make_candidate(&"food_b", ActivityTag.FOOD, Vector3(260.0, 0.0, 260.0)))
+	out.append(DestinationChooser.make_candidate(&"shop_a", ActivityTag.SHOP, Vector3(80.0, 0.0, 90.0)))
+	out.append(DestinationChooser.make_candidate(&"shop_b", ActivityTag.SHOP, Vector3(220.0, 0.0, 60.0)))
+	out.append(DestinationChooser.make_candidate(&"service_a", ActivityTag.SERVICE, Vector3(340.0, 0.0, 210.0)))
+	return out
+
+
+func _stub_places_without(tag: StringName) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for place: Dictionary in _stub_places():
+		if StringName(place.get("tag", ActivityTag.OTHER)) != tag:
+			out.append(place)
+	return out
+
+
+## Stands in for a navigation mesh: a straight two-point line for any hop.
+func _stub_polyline(_from_key: String, _to_key: String) -> PackedVector3Array:
+	return PackedVector3Array([Vector3.ZERO, Vector3(1.0, 0.0, 0.0)])
 
 
 ## The one line the boot report prints has to stay parseable and name both runtimes,
