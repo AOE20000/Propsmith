@@ -1,0 +1,3 @@
+# Unpacked godot-mod-loader mods go here (one directory per mod, each with a
+# manifest.json). See docs/MODDING.md. This directory is kept in the repo so the
+# loader does not log an error when it probes an empty, missing path.

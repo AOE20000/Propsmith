@@ -2,5 +2,11 @@
 .godot/
 /android/
 
+# Terrain3D's GDExtension is `reloadable`, so the engine copies its library to a
+# `~`-prefixed name beside the real one at load time. The copy is regenerated on
+# every run (and vanishes in between, which is why it kept showing up as a stray
+# untracked file), so it must never be tracked.
+addons/terrain_3d/bin/~*
+
 # Agent workspace state (memory notes, caches) — not project source
 .workbuddy/
