@@ -1,0 +1,267 @@
+# 开发计划：开源城市模型作为默认地图 + 内置城市人类移动数据
+
+> 状态：**设计阶段**（未实现）。本文是完整开发计划，含数据选型、许可合规、
+> 管线设计、运行时架构改动、分阶段里程碑与风险登记。
+>
+> 已确认的四项决策：
+> 1. 默认城市 = **荷兰（阿姆斯特丹 / 鹿特丹）**
+> 2. 移动数据的角色 = **可交互个体**（有行程目的、可跟踪、可影响）
+> 3. 范围 = **街区优先（约 2–3 km²），架构预留流式**
+> 4. Terrain3D 仅用于临时测试，城市地图**不依赖它**（与现有 `terrain_generator.gd` 的定位一致）
+
+---
+
+## 1. 目标与非目标
+
+### 目标
+- 用**开放数据**构建一张可步行、可驾驶的真实城市街区，作为游戏的**默认地图**。
+- 内置一套**由开放数据驱动的城市人类移动**：行人/车辆 agent 有行程目的（家→工作→消费→回家），
+  玩家可以**跟踪、搭载、阻挡、改变**它们的行程。
+- 与现有架构（`Services` / `Events` / `ModHost` / 扩展点 / 无头测试四件套）保持一致，
+  城市地图作为**一个 `MapSource`** 接入，而不是把岛屿代码改烂。
+- 许可干净：MIT 工程 + 署名型开放数据，不引入 share-alike 义务。
+
+### 非目标（明确不做，避免范围蔓延）
+- **不使用真实个体轨迹**。荷兰开放数据里**不存在**可自由使用的个体移动轨迹
+  （ODiN 微观数据需注册+数据方许可；详见 §2）。个体是**由聚合数据生成的**，
+  并用 NDW 的路段实测流量做校准。这一点是刻意的诚实取舍，不是偷懒。
+- 第一期**不做全城流式**（不做 20 km² 一次性可走）。
+- 不做建筑内部、不做交通信号微观仿真、不做真实天气/时间与实测数据的对齐。
+- **不把城市数据提交进 git 仓库**（理由见 §3）。
+
+---
+
+## 2. 数据选型（均为开放数据，真实可获取）
+
+### 2.1 城市模型与地形
+
+| 用途 | 数据集 | 格式 | 许可 | 获取 |
+|---|---|---|---|---|
+| **三维建筑（主）** | **3D BAG**（TU Delft 3D geoinformation + 3DGI） | CityJSON（另有 GeoPackage / PostGIS / OGC API / WMS） | **CC BY 4.0**，署名 `© 3DBAG by tudelft3d and 3DGI`；**已签 ODbL 兼容豁免**（可与 OSM 数据混用） | 按 QuadTree **瓦片**下载（瓦片号形如 `9-564-628`），默认 **LOD2.2**（含屋顶几何） |
+| 地面高程 | **AHN**（Actueel Hoogtebestand Nederland）LiDAR DTM/DSM | GeoTIFF / WCS | 开放（PDOK 分发，**许可需在 M0 核实**） | PDOK |
+| 道路 / 人行道 / 水岸 | **BGT**（Basisregistratie Grootschalige Topografie） | GeoPackage / WFS / OGC API | PDOK **大体为 CC0 / 公有领域**（需核实） | PDOK |
+| 建筑功能（出行发生源） | **BAG**：`gebruiksdoel`（用途）、`oorspronkelijk bouwjaar`、`oppervlakte` | API / CSV / SHP | PDOK **CC0 / 公有领域**（需核实） | PDOK / Basisregistraties API |
+| **阿姆斯特丹专有的更强标签** | **BAG-plus**：`feitelijk gebruik`（实际使用）、`aantal bouwlagen`（层数）、建筑名称 | API / WFS | 市政开放数据（需核实） | Amsterdam BAG API / WFS |
+
+> **3D BAG 的一个关键细节**：`b3_h_dak_max` / `b3_h_dak_maaiveld` 等高度是 **NAP 绝对高程**，
+> 不是楼高。楼高要用 `height = b3_h_dak_max − b3_h_maaiveld`。
+> Amsterdam 的地面基本在 0～+10 m NAP，所以**地形起伏很小**——这对玩法是好消息，
+> 但也意味着现有岛屿那套"噪声地形 + 坡度筛选"的假设在城市里基本失效。
+
+### 2.2 移动数据
+
+| 用途 | 数据集 | 粒度 | 许可 / 可得性 |
+|---|---|---|---|
+| **路段实测流量 / 速度**（校准与真实感的主来源） | **NDW**（Nationaal Dataportaal Wegverkeer） | 全国 **24,000+ 测点**，**分钟级**：intensity、point speed、trave time、车型；历史库自 2010 年，≈46 万点/分钟 | **开放**（实时 `opendata.ndw.nu`；历史 `dexter.ndwcloud.nu/opendata`）。单次请求上限 12.5 GB；**具体许可条款在 M0 核实** |
+| **出行率 / 方式分担**（需求生成参数） | **CBS「Onderweg in Nederland (ODiN)」StatLine 汇总表** | 人均每日出行次数、距离、时间，按出行目的 / 方式 / 地区 | **CC BY 4.0**（data.overheid.nl 标注） |
+| ODiN **微观数据** | ODiN 个人级数据 | 个体出行日记，4.5 万受访者/年 | ⚠️ **需注册 + 数据方许可**（DANS → Data Station SSH）→ **本计划不使用** |
+| 公共交通班次（公交/电车/地铁/火车） | **GTFS（OVapi / NDOV）** | 站点、线路、时刻 | 开放（**许可在 M0 核实**） |
+
+**结论**：NL 的开放移动数据是 **「路网级 + 汇总级 + 班次级」**，
+**不是「个体级」**。所以"可交互个体"必须**生成**：用 ODiN 的出行率与方式分担做需求、
+BAG 的建筑功能做活动地点、BGT 路网做路径、GTFS 做公交、NDW 做校准。
+
+### 2.3 备选城市（若以后要换）
+- **纽约**：模型走 Overture（Meta/Microsoft 源，CDLA-Permissive）或市政开放数据；
+  出行数据最强（TLC 数十亿行程、Citi Bike、MTA ridership）。**代价**：OSM 派生部分为 ODbL（share-alike）。
+- **旧金山**：市政建筑足迹自带高度且属公有领域 + Cabspotting / Bay Wheels 等开放出行数据集。均衡。
+- **全球兜底**：**Overture Maps Buildings**（全球建筑轮廓 + `height` / `levels` / `type` / `roof type`，
+  **CDLA-Permissive 2.0**，但 OSM 派生部分是 **ODbL**；每个要素的 `sources` 数组记录来源，**必须保留**）。
+
+---
+
+## 3. 许可与合规策略（这一节决定实现方式）
+
+1. **数据不入库**。本工程是 MIT 且公开在 GitHub 上：
+   - 城市数据是 GB 级，进库会让仓库无法使用；
+   - Overture 的 OSM 派生部分带 **ODbL share-alike**，一旦进库会给整个资产包附加义务。
+   因此：**数据由 `tools/city/` 脚本抓取与转换**，产物落在 `user://` 或构建目录（gitignore），
+   预处理后的**紧凑**移动资产（几 MB）可作为 Release 资产或 Git LFS 单独分发。
+2. **署名**（CC BY 4.0 是硬要求）：
+   - `docs/CREDITS.md` 列出 3D BAG / AHN / BGT / BAG / NDW / CBS / GTFS 与各自许可与版本日期；
+   - **游戏内**设一个"数据来源"页（暂停菜单入口），署名 `© 3DBAG by tudelft3d and 3DGI` 并链接 CC BY 4.0；
+   - 数据版本（3D BAG 发布日、NDW 取数区间）写进 `CREDITS.md` 与地图清单，做到可追溯。
+3. **许可待核清单**（M0 必须逐条确认并记录）：AHN、BGT、NDW、GTFS、各市政数据。
+   CC BY 4.0 与 CC0 已确认；其余在写进 `CREDITS.md` 前不得声称"开放"。
+4. **ODbL 隔离原则**：任何 ODbL 来源的数据（若引入 OSM）与 CC BY/CC0 数据**分开存放、分开署名**，
+   便于在必要时剥离。
+
+---
+
+## 4. 离线数据管线（`tools/city/`）
+
+一次抓取 → 裁剪 → 转换 → 优化 → 生成清单。**产物是 Godot 能直接吃的东西**，
+运行时不做任何地理格式解析。
+
+```
+tools/city/
+  fetch_district.py     按 bbox 拉取 3D BAG 瓦片 + BGT + BAG + AHN（+ NDW 取数区间）
+  build_buildings.py    CityJSON → GLB（分块）+ 建筑属性表（功能/层数/高度/占地）
+  build_terrain.py      AHN DTM → 高度场（二进制）+ 水域掩码
+  build_roads.py        BGT/Overture → 路网图（节点/边/断面积/限速/人行道宽度）
+  build_mobility.py     ODiN 汇总 + BAG 功能 + 人口 → 分时段 OD；NDW → 路段流量表
+  optimize.py           quantize / meshopt 压缩、按街区切块、生成 LOD
+  manifest.json         map id、数据版本、许可、署名、块索引、坐标原点
+```
+
+**转换工具（真实存在、开源）**
+
+| 工具 | 作用 | 许可 | 备注 |
+|---|---|---|---|
+| **`cjconvert`**（crate `cityjson-convert`，作者 3DGI） | **CityJSON → GLB**，支持 `quantize_geometry`、`meshopt_compression`、`clip_bbox`、3D Tiles metadata class、按源坐标/投影放置 | Apache-2.0 | 现代首选，CLI 与库都有 |
+| **`tyler`**（3DGI） | **CityJSON → 3D Tiles**（分块 + LOD） | Apache-2.0 | 选流式路线时用它生成瓦片 |
+| `cjio` / `val3dity` | CityJSON 处理 / 校验 | 开源 | 管线前置校验，避免坏数据进 Godot |
+| `tudelft3d/CityJSON2glTF` | 早期 Python 转换脚本 | 免费（学术引用） | 仅 LOD1、未在 Windows 验证 → 备用 |
+
+**投影与坐标**：CityJSON 用 **RD（EPSG:28992）+ NAP 高程**。
+必须在管线里投影到**局部米制**并把街区中心平移到 **(0,0,0)**，
+平移量记进 `manifest.json` 的 `origin`。理由见 §5.3。
+
+---
+
+## 5. 运行时架构改动
+
+### 5.1 新增 `MapSource` 抽象（替换 `TerrainConfig` 的位置）
+
+```
+src/map/
+  map_source.gd          接口：构建世界、回答地表问题、给出出生点
+  island_map_source.gd   把现有 terrain_config/terrain_generator/world_scatter 收进来
+  city_map_source.gd     城市实现：分块 GLB + 路网 + 建筑碰撞 + 移动性
+  map_registry.gd        服务：按 id 解析当前地图；mod 可注册
+```
+
+`WorldBuilder` 不再直接持有 `TerrainGenerator`，而是询问 `map_registry`。
+**这是本期最大的一处结构改动**，但它是必然的：城市与岛屿除了"都有人可以站的地面"之外
+几乎没有共同点。
+
+### 5.2 泛化 `TerrainQuery`（现有接口里最硬的耦合）
+
+当前 `terrain_query.gd` 暴露 `island_falloff(x, z)`（岛屿径向遮罩），
+散布系统用它的 `interior_bias`，mod 也可能用。城市里没有"离岛中心多远"这个概念。
+
+- 新增通用语义：`surface_mask(x, z) -> float`（"这里是可用的地面吗，权重多少"）
+  与 `surface_kind(x, z) -> StringName`（`road` / `sidewalk` / `water` / `building` / `green`）。
+- 岛屿实现把 `island_falloff` 适配成 `surface_mask`；城市实现用 BGT 分类 + 水域掩码。
+- **旧名保留为过渡别名并在文档标注弃用**，避免一次性打断 mod 与示例。
+
+### 5.3 坐标与浮点精度
+
+Godot 是单精度。城市尺度（km）下，距离原点越远，顶点抖动越明显。
+- 第一期：**街区级 + 平移原点**（管线把街区中心移到 0），振颤可控。
+- 预留：`MapSource` 暴露 `world_origin_offset()`，为将来的**浮动原点**
+  （按玩家位置平移世界根节点、同时平移所有 agent 与导航数据）留出唯一接入点。
+  3D Tiles for Godot 提供 double-precision 构建，属于备选。
+
+### 5.4 存档语义必须改（容易漏掉的连带影响）
+
+现在的存档哲学是"**只存一个整数种子，世界由种子确定重生成**"（见 README 与 `GameState.to_dict`）。
+**城市不是从种子生成的**，而是从数据加载的。所以：
+- `GameState.world_seed` 旁边要有 **地图身份**：`map_id` + 数据版本 + 内容哈希；
+- 存档加载时**校验地图身份**，不匹配要明确报错而不是静默把玩家放错城市；
+- 岛屿地图仍可用种子，城市地图用身份——两者都由 `MapSource` 提供，
+  `SaveSystem` 不需要知道区别。
+
+### 5.5 行人 / 车辆 agent 与现有系统的关系
+
+- **导航**：从 `build_roads.py` 的路网图用 **`NavigationServer3D`** 烘焙；
+  车辆用另一份（车辆可通行）子图。
+- **分级 LOD**：近处（约 30 m 内）用 `NavigationAgent3D` + 独立 `Node3D`（可交互）；
+  远处用 **多实例（MultiMesh）** 沿路径采样——**与现有 `world_scatter.gd` 完全同构**，
+  复用同一套"一种多实例承载上千个体"的做法。
+- **可交互性零侵入**：把个体做成 **`Interactable`**（复用玩家已有的探测/提示/`E` 键链路），
+  "搭载他人"复用上一轮的 **载具座位** 机制。
+  → 这条让"可交互个体"在玩家、HUD、输入映射里各占 **0 行**，与座位那次同样的手法。
+- **确定性**：同一 `map_id` + 同一份数据 + 同一随机种子 → 同一批 agent 的同一段行程。
+  这是可被无头测试断言的性质，也是与现有"世界可复现"哲学一致的地方。
+
+### 5.6 移动性模拟分层（可交互个体的实现骨架）
+
+```
+人口与活动地点      BAG 功能（住宅/办公/零售）+ 人口分布  → 出发点/目的地集合
+出行需求            ODiN 汇总：人均出行次数、目的、方式分担、时段分布
+方式选择            步行 / 自行车 / 公交(GTFS) / 车
+路径分配            BGT 路网图上的最短路
+个体行为            状态机：在家 → 通勤 → 工作 → 购物 → 回家；可被打断/影响
+校准                生成的分时段路段流量 vs NDW 实测 → 相关性报告（可验收指标）
+```
+
+**时间**：真实数据的"一天"映射为游戏内时段，支持加速（1×/8×/60×）。
+用数据里的时段分布驱动，不做与真实日历的对齐。
+
+---
+
+## 6. 里程碑与验收
+
+每阶段都必须让**现有四件套保持全绿**，并对照基线数值。
+
+| 阶段 | 内容 | 验收（可执行） |
+|---|---|---|
+| **M0 可行性 spike** | 下 1 个 3D BAG 瓦片 → `cjconvert` 出 GLB → 导入 Godot 4.7；验证 **3D Tiles for Godot 能否在 4.7 加载**；验证 Godot 是否支持 glTF **`EXT_meshopt_compression`**；取一个街区的 NDW 历史流量；核实 AHN/BGT/NDW/GTFS 许可 | 一栋楼能在 Godot 里看见且无报错；产出 spike 结论 + **流式路线二选一**的决策；许可清单逐条填好 |
+| **M1 地图接缝** | `MapSource` 抽象 + `IslandMapSource`（把现有岛屿代码收进去）；`TerrainQuery` 泛化；`GameState`/存档加地图身份 | 四件套全绿，且**岛屿世界数值与基线逐项一致**（硬验收：这是"没有改坏现有地图"的证明）；旧存档仍可读 |
+| **M2 城市街区可用** | `tools/city/` 管线；`CityMapSource`；建筑碰撞；出生点=人行道；`check_city.ps1` + **合成小城 fixture** | 能在街区里走、上车、不能穿墙；`check_city` 绿；**CI 不需要下载任何大数据** |
+| **M3 移动性基础** | OD 生成 + 方式选择 + 路网分配 + agent 分级 LOD + 时段加速 | agent 数量与帧率达标；**生成流量 vs NDW 实测的相关性报告**（校准验收） |
+| **M4 可交互个体** | 个体状态机 + `Interactable` 接入 + 载人（复用载具）+ 跟踪/跟随 UI | 能跟一个人一整天；能载他一程并**真的改变他的行程** |
+| **M5 流式与扩展** | 按 M0 结论接 3D Tiles 或自研分块流式；浮动原点；`add_map_source` mod 扩展点 | 走出街区不崩、无明显抖动；mod 能注册自己的地图 |
+| **M6 许可与发布** | `docs/CREDITS.md`；游戏内数据来源页；数据抓取脚本 + Release 资产；README 更新 | 署名可见且完整；仓库体积未增长 |
+
+---
+
+## 7. CI 策略（重要：无头测试不能依赖 GB 级数据）
+
+- 仓库内只放一个**合成小城 fixture**：脚本生成的正交路网 + 方块楼 + 简化人流参数，
+  体积 KB 级。它跑的是**与真实城市完全相同的运行时代码路径**。
+- 新增 `tools/check_city.ps1`，与现有三件套并列：
+  检查合成城市能加载、能走、建筑不可穿透、agent 数量正确、**同一输入产生同一批行程**。
+- 沿用已有的两个教训：`--quit-after` 防挂、以及**完成标记断言**（避免挂起被当成通过）。
+- 仍然沿用"新加 `class_name` 后要刷新全局类缓存"的既有流程。
+
+---
+
+## 8. 性能预算（初值，M2/M3 据实调）
+
+| 项 | 目标 |
+|---|---|
+| 街区范围 | 约 2–3 km² |
+| 建筑数 | 2,000–8,000（LOD2.2），每栋一个碰撞体（盒/凸包） |
+| 碰撞体 | 只对**玩家半径 150 m 内**的建筑启用；其余仅渲染 |
+| 常显 agent | 100–300 个独立个体（可交互） |
+| 背景 agent | 1,000–3,000（MultiMesh，无独立物理） |
+| 街区加载时间 | < 5 s（无头校验里可断言上限） |
+| 三角形预算 | 视距内 < 300 万 |
+
+---
+
+## 9. 风险登记
+
+| # | 风险 | 影响 | 缓解 |
+|---|---|---|---|
+| 1 | **3D Tiles for Godot 对本项目 Godot 4.7.2 的兼容性未知**（该插件文档写 4.1+，社区称"首选 4.4.1 stable"） | 若不可用，流式路线要自研 | M0 先做 spike；不行就走"分块 GLB + 自研流式"，并把该插件当作**可选**（沿用工程既有的 `ClassDB` 探测 + 优雅降级手法，绝不写进 `project.godot`） |
+| 2 | Godot 是否支持 glTF `EXT_meshopt_compression` | 体积/加载时间 | M0 验证；不支持就退回 quantize 或不压缩 |
+| 3 | CityJSON（RD/NAP）投影与原点平移算错 | 整张地图错位 | 管线里用 `proj`（cjconvert 已依赖 `proj-sys`）；把 `origin` 写进 manifest 并在运行时断言 |
+| 4 | 许可：AHN/BGT/NDW/GTFS 未核实 | 合规风险 | M0 逐条核实并记录，未核实不得声称开放；数据不入库 |
+| 5 | ODbL share-alike 污染 | 影响整个资产包 | 默认只用 CC BY/CC0；若引入 OSM 派生数据则分开存放与署名 |
+| 6 | 阿姆斯特丹**运河与水域** | 水域玩法缺失（现有"海面是着色器平面，没有水下玩法"） | 水域掩码 + 不可行走；明确列为已知边界，不做游泳 |
+| 7 | 城市地形几乎平坦，现有"坡度筛选"假设失效 | 散布/选址逻辑无意义 | 用 `surface_kind` 取代坡度作为主要筛选条件；街道家具替换植被散布 |
+| 8 | 街区级加载与"整城"预期不符 | 用户预期偏差 | 架构预留流式 + 在 README 明确写清第一期范围 |
+| 9 | 生成流量与实测不吻合 | 真实感不足 | 把"与 NDW 的相关性"做成可验收报告，而不是靠感觉 |
+
+---
+
+## 10. 与现有 mod 系统的关系
+
+- 城市地图是**核心内置**的 `MapSource`（因为它是"默认地图"），
+  同时开一个扩展点 **`context.add_map_source(id, factory)`**，
+  让 mod 提供自己的地图（合成生成、其他城市、实验地图）——这与工程"一切可被 mod 扩展"的哲学一致。
+- 移动数据参数（出行率、方式分担、时段曲线、路网权重）以**数据文件**形式暴露，
+  mod 可覆盖：这张地图的行为因此可被 mod 调参，而不需要改核心代码。
+- 城市地图的"内容"（地标、物品、战斗、载具）**继续走现有扩展点**，
+  所以 `mods/lighthouse`、`mods/garage` 这类 mod 在城市地图上仍然有意义（只是语义要重写）。
+
+---
+
+## 11. 待你确认的下一步
+
+M0 是**纯验证、不写产品代码**的阶段。建议先从 M0 开始：
+它会在 1–2 天内回答两个决定性问题——**流式路线能不能用现成插件**、
+以及**这份数据的许可是否真的如预期干净**。这两点任一翻车，后面的方案都要改。
