@@ -226,7 +226,7 @@ res://mods/my_mod/
 |---|---|---|
 | [Terrain3D](https://github.com/TokisanGames/Terrain3D) 地形插件 | MIT | `addons/terrain_3d/LICENSE.txt`（版权归 Cory Petkovsek、Roope Palmroos 及贡献者） |
 | [godot-mod-loader](https://github.com/GodotModding/godot-mod-loader) mod 加载器 | CC0 1.0 | `addons/mod_loader/LICENSE`（版权归 GodotModding 及贡献者） |
-| [JSON_Schema_Validator](https://github.com/GodotModding/godot-mod-loader)（上者的依赖） | CC0 1.0 | `addons/JSON_Schema_Validator/` |
+| [JSON_Schema_Validator](https://github.com/GodotModding/godot-mod-loader)（上者的依赖） | MIT | `addons/JSON_Schema_Validator/JSON_Schema_validator_LICENSE`（版权归 Sahedo） |
 | [ambientCG](https://ambientcg.com) 地形贴图：Ground037 / Rock023 / Rock030 | CC0 1.0 | `assets/terrain/textures/asset_licenses.txt` |
 
 CC0 属公有领域，无需署名；这里列出仅为来源可追溯。
