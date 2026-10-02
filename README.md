@@ -1,9 +1,9 @@
 # FPGames
 
-**受 Garry's Mod 启发、以 MIT 协议发布**的沙盒游乐场。Godot 4.7 / Forward+ / Jolt Physics。
+**以 MIT 协议发布的沙盒游乐场**。Godot 4.7 / Forward+ / Jolt Physics。
 
-复刻的是 GMod 的玩法骨架——**沙盒物理、工具枪、NPC 与人流、Lua 式 mod 生态**——
-不使用任何 Valve/GMod 的代码、模型或资产。开发路线见 [docs/ROADMAP.md](docs/ROADMAP.md)。
+复刻经典沙盒游戏的玩法骨架——**沙盒物理、工具系统、NPC 与人流、Lua 式 mod 生态**——
+全部原创实现，不使用任何第三方游戏的代码、模型或资产。开发路线见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 当前状态：沙盒底座（物理 / 载具 / 战斗接口 / 城市地图）已就绪；工具枪与生成菜单在
 P0/P1（见路线图）。默认地图是 PLATEAU 渋谷街区，街上的人流由地图自身的用途标签驱动。
@@ -157,7 +157,7 @@ tools/                   check_scripts / smoke_test / check_runtimes / 截图与
 
 ## Mod 支持
 
-GMod 式沙盒的灵魂。见 [docs/MODDING.md](docs/MODDING.md)。最小例子：
+沙盒游戏的灵魂。见 [docs/MODDING.md](docs/MODDING.md)。最小例子：
 
 ```
 res://mods/my_mod/
