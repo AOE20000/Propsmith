@@ -145,14 +145,12 @@ func _refresh_debug() -> void:
 		for mod_line: String in mod_lines:
 			lines.append("mod " + mod_line)
 
-	var query: TerrainQuery = Services.get_as(&"terrain_query", &"TerrainQuery") as TerrainQuery
-	if query != null and query.is_ready():
-		var range: Vector2 = query.height_range()
-		lines.append("地表高度 %.1f ~ %.1f m" % [range.x, range.y])
-		# Reported because it is the difference between "the engine terrain is doing
-		# this" and "you are looking at the CPU heightfield", which is the first thing
-		# worth knowing when terrain looks wrong.
-		lines.append("地形后端：%s" % ("Terrain3D" if query.has_engine_terrain else "仅 CPU 高度场"))
+	var query: SurfaceQuery = Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery
+	if query != null and query.is_ready() and _player != null and is_instance_valid(_player):
+		var position: Vector3 = _player.global_position
+		lines.append("脚下地表 %.1f m（%s）" % [
+			query.height_at(position.x, position.z), query.surface_kind(position.x, position.z),
+		])
 
 	_debug_label.text = "\n".join(lines)
 

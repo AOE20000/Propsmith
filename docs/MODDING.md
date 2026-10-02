@@ -49,44 +49,53 @@ res://mods/my_mod/
 `Callable`**，物品要求 `display_name`——不合格的注册当场被拒，而不是等到世界生成时
 在一个跟错误原因毫无关系的地方炸掉。
 
-### 1. 新地标
+> **岛屿时代的三个扩展点在城市地图上暂无消费者**：`add_poi_factory`（地标）、
+> `add_prop_factory`（散布道具）、`add_terrain_modifier`（地形改造）的消费者是程序化
+> 岛屿的散布器与地标放置器，随岛屿一起移除了。注册接口与冲突规则仍然有效且有断言
+> （与"预留"的物品扩展点同理），城市地图上注册它们不会报错，只是没有可见效果。
+> 在城市地图上放内容用 `_on_world_populate` 直接注入——见 `mods/lighthouse/`。
+
+### 1. 往世界里放自己的东西（推荐入口）
+
+地图就绪后，核心会调用 mod 的 `_on_world_populate(world)`。这是城市地图上最直接的
+内容注入点：自己建节点、自己定位、自己加进去。
+
+```gdscript
+func _on_world_populate(world: Node3D) -> void:
+    var query: SurfaceQuery = Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery
+    if query == null or not query.is_ready():
+        return
+    var tower := _make_tower()
+    tower.position = query.sample_height(Vector3(0.0, 0.0, 0.0), 0.0)
+    world.add_child(tower)
+```
+
+地表查询服务 `surface_query` 用物理射线回答"这儿的地面在哪"：`height_at(x, z)`、
+`sample_height(pos, clearance)`、`slope_degrees_at(x, z)`、`is_placeable(x, z, max_slope)`、
+`surface_kind(x, z)`（`ground` / `building` / `none`）。完整例子见 `mods/lighthouse/`。
+
+以下两个注册式扩展点保留给**未来的世界生成管线**（例如城市景点系统、程序化散布）。
+
+### 2. 注册地标（预留，城市地图暂无消费者）
 
 ```gdscript
 func _on_register() -> void:
     context.add_poi_factory(&"my_tower", "我的塔", _make_tower, 1.0)  # 权重
-
-func _make_tower() -> Node3D:
-    var root := Node3D.new()
-    var mesh := MeshInstance3D.new()
-    var cylinder := CylinderMesh.new()
-    cylinder.height = 8.0
-    mesh.mesh = cylinder
-    mesh.position = Vector3(0.0, 4.0, 0.0)
-    mesh.material_override = PoiGeometry.standard_material(Color(0.6, 0.6, 0.65))
-    root.add_child(mesh)
-    return root
 ```
 
-发现逻辑由核心的 `PoiMarker` 负责：玩家进入半径即记录一次（只记一次），发出
-`Events.poi_discovered`，并在已发现时不再重复触发。
+工厂返回一个 `Node3D`。注册与校验照常工作，冲突规则照常生效；只是当前核心没有任何
+模块放置它，也不会有 `Events.poi_discovered` 发生。
 
-### 2. 新散布道具
+### 3. 注册散布道具（预留，城市地图暂无消费者）
 
 工厂返回**一个** `Mesh`，实例化由散布系统负责（`MultiMesh`），所以不要自己摆几千个节点。
 
 ```gdscript
 func _on_register() -> void:
     context.add_prop_factory(&"my_stone", _make_stone, 0.8, 35.0)  # 密度 / 最大坡度
-
-func _make_stone() -> Mesh:
-    var primitive := SphereMesh.new()
-    primitive.radius = 0.8
-    var mesh := ArrayMesh.new()
-    mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, primitive.surface_get_arrays(0))
-    return PropFactory.paint(mesh, 1.0, 0.6)   # 顶点色：G=混色，R=明暗
 ```
 
-### 3. 新物品（预留，核心尚未消费）
+### 4. 新物品（预留，核心尚未消费）
 
 ```gdscript
 context.add_item_definition(&"my_relic", {
@@ -123,7 +132,7 @@ context.add_combat_provider(&"my_weapon", func() -> Node:
 `Attacker`（`try_attack` / `is_attacking` / `cancel_attack`）与 `Damageable`
 （`can_receive_damage` / `apply_damage` / `health_fraction` / `is_defeated`）。
 
-### 5. 地形改造
+### 5. 地形改造（预留，城市地图暂无消费者）
 
 ```gdscript
 func _on_register() -> void:
@@ -136,8 +145,8 @@ func _raise(x: float, z: float, height: float, falloff: float) -> float:
     return height + pow(1.0 - d / 40.0, 2.0) * 8.0 * falloff
 ```
 
-`falloff` 是岛屿径向遮罩（中心 1、海岸 0），乘上它可以让改动随海岸自然消失。
-同 `order` 的修改器按 id 排序，保证确定性。
+`falloff` 原是岛屿径向遮罩。注册排序规则（同 `order` 按 id）仍然有断言钉住，
+只是城市地图上没有高度场可以改。
 
 ### 6. 事件与自有信号
 
@@ -203,10 +212,8 @@ func _make_buggy() -> Vehicle:
 ### 上下车是怎么接到核心的
 
 座位就是一个普通的 `Interactable`，因此玩家已有的探测、提示与 `E` 键链路
-直接复用，核心三处都没为载具改过一行。上车时 `Vehicle` 调用
-`Player.take_control(self)`：角色自身的移动、重力与体力被挂起，碰撞体被关掉，
-位置由座位每物理帧写入。下车反向走 `release_external_control()`，
-并把乘客放到地形采样出的地面上（而不是车厢里）。
+直接复用，核心三处都没为载具改过一行。`Player.take_control()` 挂起自身的移动/重力并关掉碰撞体，位置由座位每物理帧写入。
+下车反向走 `release_external_control()`，并把乘客放到地表查询出的地面上（而不是车厢里）。
 
 ---
 
@@ -242,19 +249,16 @@ Services, Events, GameState, ModHost, SaveSystem
 
 | 服务 | 获取方式 | 用途 |
 |---|---|---|
-| `terrain_query` | `Services.get_as(&"terrain_query", &"TerrainQuery")` | 地表高度、法线、坡度、岛屿遮罩 |
-| `world_builder` | `Services.get_service(&"world_builder")` | 重新构建世界、寻找出生点 |
+| `surface_query` | `Services.get_as(&"surface_query", &"SurfaceQuery")` | 地表高度、坡度、表面类型（物理射线，只打地图层） |
+| `map_source` | `Services.get_service(&"map_source")` | 当前地图源：出生点、地图身份、加载统计 |
 | 事件 | `Events.<信号>` | 见 `src/core/event_bus.gd` 全部契约 |
-| 存档 | `SaveSystem` | 存读档、槽位枚举 |
-
-`TerrainQuery` 常用方法：`height_at(x, z)`、`sample_height(pos, clearance)`、
-`slope_degrees_at(x, z)`、`is_placeable(x, z, max_slope)`、`island_falloff(x, z)`。
+| 存档 | `SaveSystem` | 存读档、槽位枚举、**读档校验地图身份** |
 
 ---
 
 ## 调试
 
-- `F1` 打开调试浮层：帧率、种子、坐标、速度、体力、服务列表、已加载 mod、地表高度范围。
+- `F1` 打开调试浮层：帧率、地图身份、坐标、速度、体力、服务列表、已加载 mod、脚下地表。
 - `Esc` 菜单里有 mod 列表（含加载失败原因）。
 - 无头验证：
 

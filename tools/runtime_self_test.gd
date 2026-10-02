@@ -42,6 +42,7 @@ func _ready() -> void:
 	_run_section("dependency load order", 10, _check_load_order)
 	_run_section("map-agnostic mobility core", 82, _check_mobility_core)
 	_run_section("mobility is an optional capability", 18, _check_mobility_readiness)
+	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("boot summary", 4, _check_summary)
 
 	print("")
@@ -192,7 +193,7 @@ func _check_bridge() -> void:
 
 	# Read-only queries must degrade instead of raising when nothing is ready.
 	_expect(bridge.terrain_height(0.0, 0.0) == 0.0, "terrain_height did not degrade to 0.0")
-	_expect(bridge.island_falloff(0.0, 0.0) == 0.0, "island_falloff did not degrade to 0.0")
+	_expect(bridge.surface_kind(0.0, 0.0) == "none", "surface_kind did not degrade to 'none'")
 	_expect(
 		bridge.watchable_events().size() == ScriptBridge.WATCHABLE.size(),
 		"watchable_events() does not match the published table"
@@ -643,6 +644,44 @@ func _check_mobility_readiness() -> void:
 	# The two reports a UI would actually show.
 	_expect(String(MobilityReadiness.describe(bare)).contains("未启用"), "the disabled description must say so")
 	_expect(String(MobilityReadiness.describe(report)).contains("启用"), "the enabled description must say so")
+
+
+## Map identity is the thing that keeps a save made in one city from silently
+## teleporting its player into another. The island era produced saves with no
+## map id at all — those must be refused too, which is the "empty string" case.
+func _check_save_map_identity() -> void:
+	var original_id: String = GameState.map_id
+	GameState.map_id = "map_running"
+	var slot: String = "selftest_slot"
+	var path: String = SaveSystem.slot_path(slot)
+
+	var foreign := {"meta": {}, "state": {"map_id": "map_foreign"}, "sections": {}}
+	var file: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(JSON.stringify(foreign))
+	file.close()
+	SaveSystem.last_error = ""
+	_expect(not SaveSystem.load_game(slot), "a foreign-map save must be refused")
+	_expect(SaveSystem.last_error.contains("其他地图"), "the refusal must name the map mismatch")
+	_expect(GameState.map_id == "map_running", "a refused save must not touch the running state")
+
+	var same := {"meta": {}, "state": {"map_id": "map_running", "world_seed": 7}, "sections": {}}
+	file = FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(JSON.stringify(same))
+	file.close()
+	SaveSystem.last_error = ""
+	_expect(SaveSystem.load_game(slot), "a same-map save must load")
+	_expect(GameState.world_seed == 7, "a loaded save must apply its state")
+
+	# An island-era save carries no map id — empty on read, refused for it.
+	var legacy := {"meta": {}, "state": {"world_seed": 7}, "sections": {}}
+	file = FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(JSON.stringify(legacy))
+	file.close()
+	SaveSystem.last_error = ""
+	_expect(not SaveSystem.load_game(slot), "a save with no map id must be refused")
+
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	GameState.map_id = original_id
 
 
 ## The one line the boot report prints has to stay parseable and name both runtimes,

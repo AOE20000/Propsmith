@@ -12,3 +12,9 @@ addons/terrain_3d/bin/~*
 .workbuddy/
 # PLATEAU multi-city scan output (downloaded datasets and coverage reports)
 tools/plateau/.scan/
+
+# PLATEAU city data (hundreds of MB per city) - downloaded via tools/plateau/scan_cities.py
+data/
+
+# PLATEAU GDExtension reloadable copies (same mechanism as terrain_3d had)
+addons/plateau/~*

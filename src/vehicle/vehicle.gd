@@ -206,12 +206,12 @@ func _pin_rider() -> void:
 
 
 ## Put the driver down beside the car, on the ground rather than in it. Sampling the
-## terrain is what keeps a driver who exits on a slope from spawning inside the hill.
+## surface is what keeps a driver who exits on a slope from spawning inside it.
 func _place_rider_on_exit(rider: Node3D) -> void:
 	if rider == null or not is_instance_valid(rider):
 		return
 	var target: Vector3 = (exit_point.global_position if exit_point != null else global_position)
-	var query: TerrainQuery = Services.get_as(&"terrain_query", &"TerrainQuery") as TerrainQuery
+	var query: SurfaceQuery = Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery
 	if query != null and query.is_ready():
 		target = query.sample_height(Vector3(target.x, 0.0, target.z), exit_ground_clearance)
 	rider.global_position = target

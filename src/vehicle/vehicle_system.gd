@@ -3,7 +3,7 @@ class_name VehicleSystem
 ## Owns the session's vehicles, registered as the `vehicle_system` service.
 ##
 ## Kept as a node under the world rather than as loose objects so a vehicle's
-## lifetime is visibly tied to the island: tearing the world down takes the cars
+## lifetime is visibly tied to the map: tearing the world down takes the cars
 ## with it, and nothing has to remember to free them.
 ##
 ## Mod vehicles come through the same door as everything else. A mod registers a
@@ -35,7 +35,7 @@ const SPAWN_CLEARANCE: float = 1.2
 ##
 ## Each vehicle is parked at its own anchor along +X so two never spawn inside each
 ## other.
-func spawn_fleet(world: Node3D, query: TerrainQuery, near: Vector3) -> PackedStringArray:
+func spawn_fleet(world: Node3D, query: SurfaceQuery, near: Vector3) -> PackedStringArray:
 	var placed: PackedStringArray = PackedStringArray()
 	var origin: Vector3 = _find_flat_ground(query, near, PARK_MIN_RADIUS, PARK_MAX_RADIUS)
 
@@ -70,8 +70,8 @@ func spawn_vehicle(world: Node3D, vehicle_id: StringName, position: Vector3) -> 
 	# transform, and writing one raises an engine error about not being in the tree.
 	world.add_child(vehicle)
 	vehicle.global_position = position
-	# Pointed at the island centre, so a vehicle parked on the coast is not left
-	# nose-out to sea.
+	# Pointed at the world origin, so a vehicle parked away from the centre is
+	# not left nose-out to nowhere.
 	var look_target := Vector3(0.0, position.y, 0.0)
 	if Vector3(position.x, 0.0, position.z).length_squared() > 1.0:
 		vehicle.look_at_from_position(position, look_target, Vector3.UP)
@@ -131,14 +131,13 @@ func _build_from_mod(vehicle_id: StringName) -> Vehicle:
 
 
 ## Look for ground flat enough to park on, sampling rings outward from `anchor`
-## between `min_radius` and `max_radius`. Reusing the terrain query's own placement
-## test keeps "is this drivable" the same question the scatter and landmark placers
-## already ask.
+## between `min_radius` and `max_radius`. Reusing the surface query's own placement
+## test keeps "is this drivable" the same question the spawn search already asks.
 ##
 ## `min_radius` of 0 also offers the anchor itself; a positive one does not, which is
 ## what keeps the fleet out of the player's capsule.
 func _find_flat_ground(
-	query: TerrainQuery, anchor: Vector3, min_radius: float, max_radius: float
+	query: SurfaceQuery, anchor: Vector3, min_radius: float, max_radius: float
 ) -> Vector3:
 	if query == null or not query.is_ready():
 		return anchor + Vector3(maxf(min_radius, RING_STEP), SPAWN_CLEARANCE, 0.0)

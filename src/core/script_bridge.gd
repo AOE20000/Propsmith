@@ -211,20 +211,20 @@ func release() -> void:
 
 
 ## Read-only world queries. A scripted mod can ask where the ground is without
-## ever holding the terrain backend.
+## ever holding the map backend.
 
 func terrain_height(world_x: float, world_z: float) -> float:
-	var query: TerrainQuery = Services.get_as(&"terrain_query", &"TerrainQuery") as TerrainQuery
+	var query: SurfaceQuery = Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery
 	if query == null or not query.is_ready():
 		return 0.0
 	return query.height_at(world_x, world_z)
 
 
-func island_falloff(world_x: float, world_z: float) -> float:
-	var query: TerrainQuery = Services.get_as(&"terrain_query", &"TerrainQuery") as TerrainQuery
-	if query == null or not query.is_ready():
-		return 0.0
-	return query.island_falloff(world_x, world_z)
+func surface_kind(world_x: float, world_z: float) -> String:
+	var query: SurfaceQuery = Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery
+	if query == null:
+		return "none"
+	return String(query.surface_kind(world_x, world_z))
 
 
 func player_position() -> Vector3:

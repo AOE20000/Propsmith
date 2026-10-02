@@ -20,9 +20,16 @@ var mode: Mode = Mode.BOOT:
 		mode = value
 		Events.game_mode_changed.emit(int(previous), int(value))
 
-## Seed for all deterministic world generation. Changing it produces a different
-## island with the same size and rules.
+## Seed for all deterministic generation that still wants one (mobility sampling,
+## mod randomness). The world itself is no longer seed-derived: it is loaded from
+## map data, and its identity lives in `map_id`.
 var world_seed: int = 20260930
+
+## Which map the session runs on, as reported by the map source. Written into
+## every save; `SaveSystem` refuses to load a save made on a different map,
+## because silently teleporting a player between cities is not a recoverable
+## surprise — the discovered places and the routes all reference another world.
+var map_id: String = ""
 
 var play_time_seconds: float = 0.0
 var total_distance_travelled: float = 0.0
@@ -49,6 +56,7 @@ func _process(delta: float) -> void:
 func reset_for_new_world(new_seed: int = -1) -> void:
 	if new_seed >= 0:
 		world_seed = new_seed
+	map_id = ""
 	play_time_seconds = 0.0
 	total_distance_travelled = 0.0
 	discovered_pois.clear()
@@ -107,6 +115,7 @@ func to_dict() -> Dictionary:
 	return {
 		"save_version": SAVE_VERSION,
 		"world_seed": world_seed,
+		"map_id": map_id,
 		"play_time_seconds": play_time_seconds,
 		"total_distance_travelled": total_distance_travelled,
 		"discovered_pois": discovered_pois.duplicate(true),
@@ -120,12 +129,22 @@ func to_dict() -> Dictionary:
 
 func from_dict(data: Dictionary) -> void:
 	world_seed = int(data.get("world_seed", world_seed))
+	# The map id is *reported* here, not trusted: the load-time check that refuses
+	# a foreign map lives in `SaveSystem.load_game`, which can fail the whole load.
+	# A save from before the map identity existed (the island era) reads as an
+	# empty string and is refused for exactly that reason.
+	map_id = String(data.get("map_id", ""))
 	play_time_seconds = float(data.get("play_time_seconds", 0.0))
 	total_distance_travelled = float(data.get("total_distance_travelled", 0.0))
 	discovered_pois = (data.get("discovered_pois", {}) as Dictionary).duplicate(true)
 	collected_items = (data.get("collected_items", {}) as Dictionary).duplicate(true)
 	visited_regions = (data.get("visited_regions", {}) as Dictionary).duplicate(true)
-	spawn_position = SaveSystem.decode_variant(data.get("spawn_position", null)) as Vector3
+	# `decode_variant` returns null when the field is absent (or untagged), and
+	# `null as Vector3` is a runtime cast error rather than a zero vector — a
+	# save section that predates a field, or a hand-written one, must not turn
+	# "missing" into a crash.
+	var decoded_spawn: Variant = SaveSystem.decode_variant(data.get("spawn_position", null))
+	spawn_position = decoded_spawn if decoded_spawn is Vector3 else Vector3.ZERO
 	has_spawn_position = bool(data.get("has_spawn_position", false))
 	module_state = (data.get("module_state", {}) as Dictionary).duplicate(true)
 

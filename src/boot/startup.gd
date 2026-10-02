@@ -5,8 +5,8 @@ extends Node
 ## headless smoke test.
 ##
 ## Order is explicit rather than spread across autoloads:
-##   1. load mods, so a mod can register world content before generation;
-##   2. build the world through the `world_builder` service;
+##   1. load mods, so a mod can register world content before the map builds;
+##   2. build the world through the `map_source` service;
 ##   3. spawn the player and the UI on top of it.
 ##
 ## Set `DSH_VALIDATE_ONLY=1` in the environment to boot, report, and quit with a
@@ -76,13 +76,13 @@ func _ready() -> void:
 
 
 ## Runtime assertion used by the smoke test: after the physics has settled, is the
-## player actually standing on the terrain rather than falling through it? This is
+## player actually standing on the map rather than falling through it? This is
 ## the check that proves collision generation worked, which no static inspection
 ## can tell you.
 func _settle_and_verify() -> void:
-	var query: TerrainQuery = Services.get_as(&"terrain_query", &"TerrainQuery") as TerrainQuery
+	var query: SurfaceQuery = Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery
 	if player == null or query == null:
-		printerr("[runtime] cannot verify: player or terrain query is missing")
+		printerr("[runtime] cannot verify: player or surface query is missing")
 		get_tree().quit(EXIT_BOOT_FAILED)
 		return
 
@@ -96,14 +96,14 @@ func _settle_and_verify() -> void:
 	print("[runtime] player settled at (%.1f, %.1f, %.1f)" % [
 		player.global_position.x, player.global_position.y, player.global_position.z,
 	])
-	print("[runtime] terrain height here %.2f m | drift %.2f m | on_floor=%s" % [ground, drift, grounded])
+	print("[runtime] surface height here %.2f m | drift %.2f m | on_floor=%s" % [ground, drift, grounded])
 
 	var ok: bool = true
 	if not grounded:
 		printerr("[runtime] FAIL: player is not on the floor after settling")
 		ok = false
-	if absf(player.global_position.y - ground) > 3.0:
-		printerr("[runtime] FAIL: player is %.2f m from the sampled terrain height" % absf(player.global_position.y - ground))
+	if player.global_position.y < ground - 3.0:
+		printerr("[runtime] FAIL: player is %.2f m below the sampled surface height" % absf(player.global_position.y - ground))
 		ok = false
 	if player.global_position.y < -10.0:
 		printerr("[runtime] FAIL: player fell through the world")
@@ -119,38 +119,41 @@ func _settle_and_verify() -> void:
 ## Services are registered by the module that owns them, so swapping a module
 ## means changing one registration rather than editing the boot order.
 func _register_core_services(failures: Array[String]) -> void:
-	if not Services.has(&"world_builder"):
-		Services.register(&"world_builder", WorldBuilder.new())
-	if not Services.has(&"terrain_query"):
-		Services.register(&"terrain_query", TerrainQuery.new())
+	if not Services.has(&"map_source"):
+		Services.register(&"map_source", PlateauMapSource.new())
+	if not Services.has(&"surface_query"):
+		Services.register(&"surface_query", SurfaceQuery.new())
 	if not Services.has(&"vehicle_system"):
 		Services.register(&"vehicle_system", VehicleSystem.new())
 	ModIntegration.publish_core_providers()
 
-	for required: StringName in [&"world_builder", &"terrain_query"]:
+	for required: StringName in [&"map_source", &"surface_query"]:
 		if not Services.has(required):
 			failures.append("core service not registered: %s" % required)
 
 
 func _build_world(failures: Array[String]) -> void:
 	# A plain Node3D is the world root on purpose: everything under it is created
-	# by `WorldBuilder`, so there is no scene file to keep in sync.
+	# by the map source, so there is no scene file to keep in sync.
 	world = Node3D.new()
 	world.name = "World"
 	add_child(world)
 
-	var builder: Variant = Services.get_service(&"world_builder")
-	if builder == null or not (builder is WorldBuilder):
-		failures.append("world_builder service has an unexpected type")
+	var source: Variant = Services.get_service(&"map_source")
+	if source == null or not (source is MapSource):
+		failures.append("map_source service has an unexpected type")
 		return
-	var typed_builder: WorldBuilder = builder
-	# Reported because world generation is the one boot stage whose cost is invisible
+	var typed_source: MapSource = source
+	# Reported because map loading is the one boot stage whose cost is invisible
 	# in every other readout, and the only way to tell an optimisation from a
 	# regression is to print the number that changed.
 	var started_at: int = Time.get_ticks_msec()
-	if not typed_builder.build(world, GameState.world_seed):
-		failures.append("world generation failed (see the log above)")
-	print("[boot] world build: %d ms" % (Time.get_ticks_msec() - started_at))
+	if not typed_source.build(world, GameState.world_seed):
+		failures.append("map build failed (see the log above)")
+	print("[boot] map build: %d ms" % (Time.get_ticks_msec() - started_at))
+	# The map source owns its identity; the session state just records it, so a
+	# save made from here carries the same id the save check will compare against.
+	GameState.map_id = typed_source.map_id()
 
 
 func _spawn_player(failures: Array[String]) -> void:
@@ -160,10 +163,9 @@ func _spawn_player(failures: Array[String]) -> void:
 		return
 	world.add_child(player)
 
-	var builder: WorldBuilder = Services.get_service(&"world_builder") as WorldBuilder
-	var query: TerrainQuery = Services.get_as(&"terrain_query", &"TerrainQuery") as TerrainQuery
-	if builder != null and query != null:
-		player.global_position = builder.find_spawn_position(query)
+	var source: Variant = Services.get_service(&"map_source")
+	if source is MapSource:
+		player.global_position = (source as MapSource).find_spawn_position()
 
 	GameState.set_spawn(player.global_position)
 	Events.player_spawned.emit(player)
@@ -171,10 +173,10 @@ func _spawn_player(failures: Array[String]) -> void:
 	ModHost.notify_player_spawn(player)
 
 
-## Vehicles and the debug camera sit on top of the generated world rather than
-## inside it. They are created here, not as world-builder stages, because the
-## builder's contract is about terrain and placed content: either of these can be
-## deleted without the island changing at all.
+## Vehicles and the debug camera sit on top of the loaded map rather than inside
+## it. They are created here, not as map-build stages, because the map source's
+## contract is about the city itself: either of these can be deleted without the
+## map changing at all.
 func _spawn_vehicles(failures: Array[String]) -> void:
 	if world == null:
 		return
@@ -182,11 +184,11 @@ func _spawn_vehicles(failures: Array[String]) -> void:
 	if system == null:
 		failures.append("vehicle_system service has an unexpected type")
 		return
-	var query: TerrainQuery = Services.get_as(&"terrain_query", &"TerrainQuery") as TerrainQuery
+	var query: SurfaceQuery = Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery
 	system.name = "Vehicles"
 	world.add_child(system)
 	# Anchored on the player so the fleet is where the player already is, rather
-	# than at the island centre where they may never walk.
+	# than at the reference point where they may never walk.
 	var anchor: Vector3 = player.global_position if player != null else Vector3.ZERO
 	system.spawn_fleet(world, query, anchor)
 
@@ -255,8 +257,8 @@ func _finish(failures: Array[String], validate_only: bool) -> void:
 		await _settle_and_verify()
 		return
 
-	print("[boot] world ready: seed=%d mods=%d" % [GameState.world_seed, ModHost.mods.size()])
-	Events.notify("世界已生成 — F1 调试 · F3 自由视角 · F5 保存 · F9 读取 · Esc 菜单", Events.NotifyLevel.SUCCESS)
+	print("[boot] world ready: map=%s mods=%d" % [GameState.map_id, ModHost.mods.size()])
+	Events.notify("城市已加载 — F1 调试 · F3 自由视角 · F5 保存 · F9 读取 · Esc 菜单", Events.NotifyLevel.SUCCESS)
 
 
 func _count_nodes(node: Node) -> int:
@@ -267,42 +269,27 @@ func _count_nodes(node: Node) -> int:
 
 
 ## Post-boot facts, printed only in validate-only mode. This is what makes the
-## smoke test meaningful: it reports the generated world's actual numbers instead
-## of just "no errors".
+## smoke test meaningful: it reports the loaded map's actual numbers instead of
+## just "no errors".
 func _report_world() -> void:
-	var query: TerrainQuery = Services.get_as(&"terrain_query", &"TerrainQuery") as TerrainQuery
+	var query: SurfaceQuery = Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery
 	if query != null and query.is_ready():
-		var range: Vector2 = query.height_range()
-		print("[boot] terrain: sampled=%s height %.1f..%.1f m island_radius=%.0f m" % [
-			query.is_ready(), range.x, range.y, query.island_radius,
-		])
-		var probe_heights: PackedStringArray = PackedStringArray()
-		for offset: float in [0.0, 120.0, 260.0, 400.0]:
-			probe_heights.append("%.0fm:%.1f" % [offset, query.height_at(offset, 0.0)])
-		print("[boot] centre profile: " + " ".join(probe_heights))
+		print("[boot] surface query: ready (map physics present)")
 	else:
-		printerr("[boot] terrain query is not ready — heightfield was never published")
+		printerr("[boot] surface query is not ready — map geometry was never published")
+
+	var source: Variant = Services.get_service(&"map_source")
+	if source is MapSource:
+		var info: Dictionary = (source as MapSource).describe()
+		var summary: PackedStringArray = PackedStringArray()
+		for key: String in info:
+			summary.append("%s=%s" % [key, str(info[key])])
+		print("[boot] map: " + ", ".join(summary))
 
 	if player != null and is_instance_valid(player):
 		print("[boot] player spawn: (%.1f, %.1f, %.1f)" % [
 			player.global_position.x, player.global_position.y, player.global_position.z,
 		])
-
-	if world != null:
-		var scatter: Node = world.get_node_or_null("Scatter")
-		if scatter != null:
-			var summary: PackedStringArray = PackedStringArray()
-			for child: Node in scatter.get_children():
-				if child is MultiMeshInstance3D:
-					var multimesh_instance: MultiMeshInstance3D = child
-					summary.append("%s=%d" % [child.name, multimesh_instance.multimesh.instance_count])
-				else:
-					summary.append("%s=%d" % [child.name, child.get_child_count()])
-			print("[boot] scatter: " + ", ".join(summary))
-		else:
-			printerr("[boot] no Scatter container was created")
-		var landmarks: Node = world.get_node_or_null("Landmarks")
-		print("[boot] landmarks placed: %d" % (landmarks.get_child_count() if landmarks != null else 0))
 
 	var system: VehicleSystem = Services.get_as(&"vehicle_system", &"VehicleSystem") as VehicleSystem
 	if system == null:

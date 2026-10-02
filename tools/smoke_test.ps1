@@ -1,6 +1,6 @@
 # Headless smoke test for the FPGames project.
 #
-# Runs the real main scene (terrain, mods, player, HUD) either to completion in
+# Runs the real main scene (map loading, mods, player, HUD) either to completion in
 # validate-only mode or for a fixed number of frames, then reports any error the
 # engine produced. This is the check that catches runtime faults — bad API calls,
 # null references, missing resources — which a syntax pass cannot see.
@@ -16,7 +16,8 @@ param(
 $ErrorActionPreference = "Continue"
 
 # Known-benign shutdown noise: the headless renderer always leaks its dummy
-# resources at exit, and Terrain3D reports a missing camera with no display.
+# resources at exit, and a display-only GDExtension reports a missing camera
+# under headless.
 $benignPatterns = @(
     "RendererDummy",
     "resources still in use at exit",

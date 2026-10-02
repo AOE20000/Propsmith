@@ -43,7 +43,13 @@ $benignPatterns = @(
     "[selftest] watch: 'player_died_secretly' is not a published event",
     "[selftest] on: 'before_frame' is not a hook",
     "[ModHost] mod 'selftest_second': prop id 'shared_id' is already claimed",
-    "[ModOrder] mod 'lonely' depends on 'ghost_mod', which is not installed"
+    "[ModOrder] mod 'lonely' depends on 'ghost_mod', which is not installed",
+    # The map-identity section *provokes* SaveSystem refusals on purpose; the
+    # refusal is implemented as push_error, so this line is evidence, not a fault.
+    # (The match is on the ASCII prefix only — the Chinese reason would mojibake
+    # in captured output, and the prefix is enough: this self test performs no
+    # other save-file operation.)
+    "ERROR: SaveSystem: "
 )
 
 

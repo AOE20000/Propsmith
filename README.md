@@ -1,6 +1,7 @@
 # FPGames
 
-小型开放世界原型：Godot 4.7 / Forward+ / Jolt Physics。
+开放世界原型：Godot 4.7 / Forward+ / Jolt Physics。默认地图是 **PLATEAU 渋谷街区**
+（日本国土交通省 MLIT 全国 3D 都市模型）。
 核心是**探索**，战斗只提供**稳定接口**（不含平衡），支持 **mod** 扩展。
 
 ---
@@ -11,7 +12,7 @@
 # 打开编辑器
 & 'D:\GJ\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable_win64.exe' --path 'D:\untitled\FPGames'
 
-# 无头烟雾测试（含地形生成、碰撞、mod 加载）
+# 无头烟雾测试（含地图加载、碰撞、mod 加载）
 pwsh -File tools\smoke_test.ps1
 
 # 逐文件语法检查（不启动游戏）
@@ -20,6 +21,16 @@ pwsh -File tools\check_scripts.ps1
 # 可选脚本运行时（Godot Sandbox / Lua GDExtension）兼容层自检
 pwsh -File tools\check_runtimes.ps1
 ```
+
+**地图数据**（数百 MB/城市，不入库）需要单独下载到 `data/plateau/<城市>/`：
+
+```powershell
+python tools\plateau\scan_cities.py --areas 渋谷区 --max-mb 800 --keep --work-dir data\plateau-scan
+# 然后把解压出的「渋谷区」目录移动为 data/plateau/shibuya
+```
+
+首次加载默认取 `udx/bldg` 的第 1 个网格方块（数千栋建筑）。环境变量可调：
+`DSH_MAP_FILES`（加载数量）、`DSH_MAP_LOD`（1=白模，2=带纹理）、`DSH_MAP_CITY`、`DSH_MAP_DATA`。
 
 操作：`WASD` 移动 · `Shift` 冲刺 · `Ctrl` 蹲下 · `Space` 跳跃 · `E` 交互 ·
 `左键` 攻击 · `F3` 自由视角 · `F1` 调试信息 · `F5` 快速保存 · `F9` 快速读取 ·
@@ -36,28 +47,23 @@ pwsh -File tools\check_runtimes.ps1
 
 ```
 src/
-  boot/startup.gd        应用入口：装载 mod → 构建世界 → 生成玩家、载具与 UI
+  boot/startup.gd        应用入口：装载 mod → 加载地图 → 生成玩家、载具与 UI
   core/
     services.gd          服务容器（模块间的唯一解析缝）
     event_bus.gd         类型化事件总线（模块间的唯一广播缝）
     game_state.gd        会话状态与存档数据（只存"决定"，不存可重算的东西）
-    save_system.gd       JSON 存档，模块各自注册序列化器
+    save_system.gd       JSON 存档，模块各自注册序列化器；读档校验地图身份
     mod_host.gd          本项目 mod 的发现、依赖排序、生命周期
     mod_base.gd          mod 基类（扩展点契约）
     mod_context.gd       mod 可触碰的 API 门面
     scripting_runtimes.gd  可选脚本 GDExtension 的探测、状态与安装指引
     scripted_mod.gd      以 Lua / SafeGDScript 写成的 mod 的宿主
     script_bridge.gd     交给外部语言的注册门面（兼容层的契约本体）
+  map/
+    map_source.gd        地图源接口：构建世界、出生点、地图身份
+    plateau_map_source.gd PLATEAU 城市实现：CityGML 加载 + 碰撞 + 地面 + 出生点
   world/
-    world_builder.gd     阶段编排：地形 → 环境 → mod → 散布 → 地标 → mod
-    terrain_config.gd    岛屿形状参数（Resource，可被 mod 替换）
-    terrain_generator.gd 噪声分层 + Terrain3D 填充 + CPU 高度场
-    terrain_query.gd     地表查询服务（唯一被允许"问地面"的地方）
-    environment.gd       天空/太阳/雾/海面（含昼夜循环）
-    world_scatter.gd     确定性散布（抖动网格 + MultiMesh）
-    prop_factory.gd      程序化植被网格 + 顶点色材质
-    poi_marker.gd        可发现地标（含四种程序化几何）
-    poi_placer.gd        地标选址与放置
+    surface_query.gd     地表查询服务（物理射线；唯一被允许"问地面"的地方）
   player/
     player.gd            角色控制器（移动/体力/重力/蹲下/可被"接管"）
     camera_rig.gd        第三人称环绕相机
@@ -76,6 +82,7 @@ src/
     destination_chooser.gd  按 标签 + 距离/权重 选具体地点
     route_cache.gd       路线缓存：共享、有界、换地图版本必须失效
     agent_route.gd       模式 → 具体地点；创建时解析目的地，逐段懒加载路径
+    mobility_readiness.gd  地图能否启用人流：可选能力报告，区分"不能启用"与"会做替代"
   combat/                只提供接口 + 参考实现，不做平衡
     damage_info.gd       一次伤害事件（数据）
     damageable.gd        "可被伤害"契约
@@ -89,12 +96,13 @@ src/
     loading_screen.gd    启动进度（纯观察者）
     hud.gd               准星/提示/通知/体力/小地图/调试
     pause_menu.gd        暂停、存读档、返回出生点、mod 列表
-mods/lighthouse/         示例 mod（地形、散布、地标、物品、战斗）
+mods/lighthouse/         示例 mod（世界注入、物品、战斗、自存档）
 mods/garage/             示例 mod（新增一种载具）
 mods-unpacked/           godot-mod-loader 的解包 mod 目录（见下）
 examples/scripted_mods/  Lua / SafeGDScript mod 范例（需另装 GDExtension）
-addons/terrain_3d/       Terrain3D 地形后端
+addons/plateau/          godot-plateau GDExtension（PLATEAU CityGML 加载）
 addons/mod_loader/       GodotModding/godot-mod-loader（zip 式 mod 加载器）
+tools/plateau/           数据扫描 / 下载 / 标签覆盖率分析（scan_cities、inspect_gml）
 tools/                   check_scripts / smoke_test / check_runtimes
 ```
 
@@ -103,12 +111,11 @@ tools/                   check_scripts / smoke_test / check_runtimes
 | 决定 | 原因 |
 |---|---|
 | **场景在代码里构建**，不用 `.tscn` | 结构可作为 diff 审查，不会与脚本漂移，且能被无头测试验证。`startup.tscn` 只挂一个脚本。 |
-| **地形后端通过 `ClassDB` 按名实例化** | Terrain3D 是 GDExtension。这样即使卸载插件，工程依然可加载、可校验，地形后端可整体替换。 |
-| **`TerrainQuery` 服务统一回答地表问题** | 玩家出生、散布、地标选址、mod 都走同一缝；换地形实现不影响调用方。 |
-| **散布用抖动网格而非拒绝采样** | 密度是"米间距"这种可推理的量，同种子必定复现，且不会因随机失败而出现空洞。 |
-| **一个道具 = 一个带顶点色的网格** | 一个 `MultiMeshInstance3D` 就能承载上千实例、一次绘制。顶点色 G 通道在树干/树冠之间混色。 |
+| **地图源是服务缝（`map_source`）** | 启动流程不知道地图从哪来；mod 或未来实现可以注册自己的地图，核心其余部分零改动。 |
+| **`SurfaceQuery` 服务统一回答地表问题** | 物理射线只打地图专用物理层，玩家出生、停车选址、mod 都走同一缝；换地图实现不影响调用方。 |
+| **PLATEAU SDK 全程 `ClassDB` 探测 + `Variant`** | GDExtension 类名绝不写成类型：SDK 缺席时工程仍可编译，失败是可诊断的运行时错误。 |
 | **战斗只有接口** | `Damageable` 与 `Attacker` 是两个方向的契约；核心只给参考实现，规则由游戏或 mod 提供。 |
-| **存档存"决定"而非"状态"** | 世界由种子确定重生成，所以存档里只有一个整数种子，加上发现记录与各模块自注册的数据段。 |
+| **存档存"决定"而非"状态"** | 发现记录与模块自注册的数据段之外，世界身份是 `map_id`：读档校验，不匹配明确拒绝，绝不把玩家静默放进另一座城市。 |
 | **角色可以被"接管"** | 上车与自由视角都要夺走角色的控制权。做法是 `Player.take_control()` 挂起自身的移动/重力并关掉碰撞体，而不是把角色 reparent 进载具——那样两个碰撞体会互相推挤。 |
 | **座位就是一个 `Interactable`** | 上下车复用已有的探测/提示/按键链路，所以「加一种载具」在玩家、HUD、输入映射里各占 0 行。 |
 | **两套 mod 加载器按清单文件名分工** | 本项目的 `ModHost` 认 `mod.json`，`godot-mod-loader` 认 `manifest.json`。互不扫描对方的目录，因此可以同时存在而不需要任何适配代码。 |
@@ -144,58 +151,33 @@ tools/                   check_scripts / smoke_test / check_runtimes
 
 ---
 
-## 世界生成
+## 地图：PLATEAU 渋谷
 
-`TerrainConfig` 控制形状（`res://src/world/terrain_config.gd`）：
+默认地图从 **PLATEAU**（日本国土交通省 MLIT 的全国 3D 都市模型）加载，城市选**渋谷区**
+（90,544 栋建筑，`bldg:usage` 用途标签 100% 覆盖——这是多城市扫描的实测结论，见
+[docs/CITY_MAP_PLAN.md](docs/CITY_MAP_PLAN.md) 的 M0 结论）。
 
-| 参数 | 默认 | 含义 |
-|---|---|---|
-| `seed` | 20260930 | 所有噪声层的种子，决定整座岛 |
-| `island_radius` | 420 m | 陆地半径 |
-| `max_height` | 48 m | 最高海拔 |
-| `continent_weight` / `hill_weight` / `mountain_weight` | .62/.28/.10 | 大陆 / 丘陵 / 山脊的占比 |
-| `height_curve` | 1.25 | 低地压平、山峰保留 |
-| `sample_step` | 2 m | CPU 高度场采样步长 |
-| `region_size` | 256 | Terrain3D 区域像素尺寸 |
-| `vertex_spacing` | 1 m | 顶点间距 |
+- 数据格式 CityGML（EPSG:6697 / JGD2011 第 9 区），经社区 GDExtension
+  **[`shiena/godot-plateau`](https://github.com/shiena/godot-plateau)**（MIT）加载，
+  SDK 全程 `ClassDB` 探测、可整体替换。
+- 加载管线：逐文件 `load` → `extract_meshes`（每栋一网格）→ `PLATEAUImporter.import_to_scene`
+  （内建 `generate_collision`）→ 统一盖地图物理层 → 高度归零 → 平地出生点。
+- 许可：**政府標準利用規約 / CC BY 4.0 / ODbL** 等多许可，允许商用；署名要求见
+  `docs/CITY_MAP_PLAN.md` §3。
+- 人流（`src/mobility/`）是**地图无关**的：它只认"被标注过的地点"。渋谷的标签可以直接
+  驱动它；没有标签的地图（mod 手工地图、未整备的乡村自治体）只是这项功能不开，不是地图不可用。
 
-生成是**种子确定性**的：同一 `seed` 必定得到同一座岛，同一批植被位置，同一组地标。
-
-实测剖面（种子 20260930，中心向外）：`0m:17.7 → 120m:20.5 → 260m:10.8 → 400m:1.1`。
-
----
-
-## 计划中：城市地图（地图层尚未实现；移动核心已实现）
-
-下一步打算把默认地图换成 **PLATEAU**（日本国土交通省 MLIT 的全国 3D 都市模型）构建的真实城市
-街区，并让城市里的人流由**地图自身的语义**驱动。完整开发计划（数据选型、许可合规、管线、
-架构改动、里程碑、风险）见 [docs/CITY_MAP_PLAN.md](docs/CITY_MAP_PLAN.md)。
-
-一句话摘要：地图用 **PLATEAU**（CityGML，**CC BY 4.0 / 政府標準利用規約**，约 250+ 城市，
-允许商用），Godot 侧用社区 GDExtension **[`shiena/godot-plateau`](https://github.com/shiena/godot-plateau)**
-（MIT，带 LOD 自动切换与动态瓦片，含**路网 API**）。**不使用任何真实轨迹数据**：
-人流由地图的标签驱动，"人一天怎么走"由活动模式表达。范围是**街区优先 2–3 km² + 架构预留流式**。
-
-**M0 已完成**（结论见计划里的"M0 结论"一节）：
-
-- ✅ **SDK 在 Godot 4.7.2 上可用**（38 个类零错误注册；真实 CityGML 解析 102 ms、
-  建场景 32 ms；坐标与轴序正确）——原先最大的未知已解除。
-- ❌ **但 `bldg:usage`（用途）不是通用属性**：实测某自治体 24,418 栋建筑里出现 **0 次**。
-  标签来源因此改为**适配器链**（`bldg:usage` → 用途地域 `urf:function` → 手工/mod 标注），
-  且**城市选择要过"标签覆盖率"门槛**（用 `tools/plateau/inspect_gml.py` 出报告）。
-- 三个数据坑已记录：**属性键是小写的**（照 SDK 文档的驼峰写法会静默取不到）、
-  **`9999`/`0001` 是"未知"哨兵**（实测占约 46%）、**`get_latitude()` 不可信**。
-
-> 这一节描述的是**计划与已完成的可行性验证**，城市地图本身尚未实现——当前默认地图仍是
-> 程序化生成的岛屿。但**地图无关的移动核心已经写好并通过断言**（`src/mobility/`，68 条）：
-> 它只认"被标注过的地点"，因此换城市、换语言、甚至换成手工标注的地图都不需要改行为层。
+程序化岛屿（噪声地形、植被散布、地标发现、Terrain3D）已随城市地图切换**整体移除**；
+`MapSource` 接口保留，mod 可以注册自己的地图来源。
 
 ---
 
 ## 存档
 
 - 路径：`user://saves/<slot>.json`，默认槽位 `slot1`。
-- 内容：`meta` + `state`（种子/时间/发现记录/出生点/模块状态）+ `sections`（各模块自注册的数据）。
+- 内容：`meta` + `state`（地图身份/种子/时间/发现记录/出生点/模块状态）+ `sections`（各模块自注册的数据）。
+- **读档校验 `map_id`**：存档与当前地图不匹配（含岛屿时代的旧存档）会被拒绝并说明原因——
+  发现记录与路线都指向另一个世界，静默换城不可接受。
 - 模块通过 `SaveSystem.register_persistent(id, serializer, deserializer)` 接入，
   **不需要**改核心存档格式；模块被删掉后旧存档依然可读（缺失的 section 会被跳过）。
 
@@ -211,7 +193,7 @@ res://mods/my_mod/
     mod.gd       # extends ModBase
 ```
 
-示例 mod `mods/lighthouse/` 演示了地形、散布、地标、物品、战斗、事件与自存档；
+示例 mod `mods/lighthouse/` 演示世界注入（在地图就绪后放一座会转灯的灯塔）、物品、战斗与自存档；
 `mods/garage/` 演示新增一种载具。
 
 ### 两套加载器，各管一半
@@ -237,12 +219,15 @@ res://mods/my_mod/
 
 - 战斗只有接口与参考实现，**没有**敌人 AI、伤害数字、连招或平衡。
 - `M` 地图键已注册但大地图界面尚未实现；小地图（右上角俯视）可用。
-- 海面是着色器平面，没有水下玩法与游泳。
-- 散布的岩石/树没有 LOD；小地图尺寸下这是刻意的取舍。
-- 地形使用 Terrain3D 的默认材质；未做贴图绘制管线，只做了高度分层的控制图。
-- **载具只有一辆皮卡加一个 mod 范例**，且不参与存档：车辆的位姿像地形和散布一样
-  由世界重新生成，而不是被存下来。车辆没有 LOD、没有音效，也没有轮胎转动动画。
+- 默认加载 LOD1 白模（无纹理）；`DSH_MAP_LOD=2` 可看带纹理的 LOD2，观感与性能未调。
+- **地面是平的**：城市 DEM 地形（PLATEAUTerrain / HeightMapAligner）尚未接入，
+  现在是一块 y=0 的大平面，建筑立在上面。
+- 建筑碰撞用 SDK 的 `generate_collision` 一把生成；按需生成、分块流式是下一步。
+- **载具只有一辆皮卡加一个 mod 范例**，且不参与存档：车辆的位姿像地图一样
+  由启动重新生成，而不是被存下来。车辆没有 LOD、没有音效，也没有轮胎转动动画。
 - **自由视角是调试工具**，不是玩法：它不保存、不接受被 mod 扩展。
+- 人流核心（`src/mobility/`）已就绪但**尚未有 agent 在街上走**：地点表的构建
+  （`bldg:usage` → 活动标签）与导航烘焙是下一个里程碑。
 - Godot Sandbox / Lua GDExtension 的**运行绑定按各自公开 API 编写，但默认测试环境
   里两者都未安装**，因此那两条路径只在装了扩展的机器上才会被真正执行；
   探测与降级路径由 `tools/check_runtimes.ps1` 覆盖。
@@ -260,12 +245,13 @@ res://mods/my_mod/
 
 | 资源 | 许可 | 位置 |
 |---|---|---|
-| [Terrain3D](https://github.com/TokisanGames/Terrain3D) 地形插件 | MIT | `addons/terrain_3d/LICENSE.txt`（版权归 Cory Petkovsek、Roope Palmroos 及贡献者） |
+| [godot-plateau](https://github.com/shiena/godot-plateau) PLATEAU 加载 GDExtension | MIT | `addons/plateau/`（版权归 Shiena 及贡献者） |
 | [godot-mod-loader](https://github.com/GodotModding/godot-mod-loader) mod 加载器 | CC0 1.0 | `addons/mod_loader/LICENSE`（版权归 GodotModding 及贡献者） |
 | [JSON_Schema_Validator](https://github.com/GodotModding/godot-mod-loader)（上者的依赖） | MIT | `addons/JSON_Schema_Validator/JSON_Schema_validator_LICENSE`（版权归 Sahedo） |
-| [ambientCG](https://ambientcg.com) 地形贴图：Ground037 / Rock023 / Rock030 | CC0 1.0 | `assets/terrain/textures/asset_licenses.txt` |
 
-CC0 属公有领域，无需署名；这里列出仅为来源可追溯。
+游戏内容所用的 **PLATEAU 城市数据不入库**（下载到 `data/`，已 gitignore），其许可为
+政府標準利用規約（第 2.0 版）/ CC BY 4.0 / ODC BY / ODbL；按 CC BY 4.0 的要求，
+对外发布使用了数据的作品时需要署名「国土交通省 PLATEAU」。
 
 载具与自由视角的**玩法来源**是 [craftablescience/godot-3d-sandbox](https://github.com/craftablescience/godot-3d-sandbox)（MIT）：
 只借用设计，未复制其代码或资源，全部按 Godot 4 API 重写。

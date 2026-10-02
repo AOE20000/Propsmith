@@ -321,7 +321,7 @@ func _respawn() -> void:
 	release_external_control()
 	var target: Vector3 = GameState.spawn_position
 	if not GameState.has_spawn_position:
-		var query: TerrainQuery = Services.get_as(&"terrain_query", &"TerrainQuery") as TerrainQuery
+		var query: SurfaceQuery = Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery
 		target = query.sample_height(Vector3.ZERO, 2.0) if query != null else Vector3(0.0, 6.0, 0.0)
 	global_position = target
 	velocity = Vector3.ZERO

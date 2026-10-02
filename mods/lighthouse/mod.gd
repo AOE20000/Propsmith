@@ -2,53 +2,58 @@ extends ModBase
 ## Reference mod. It touches every extension point the core exposes, so it doubles
 ## as living documentation for the modding guide in `docs/MODDING.md`:
 ##
-##   - `add_poi_factory`      a new landmark with its own geometry
-##   - `add_prop_factory`     a new scattered prop
-##   - `add_terrain_modifier` a deterministic reshape of the heightfield
+##   - `_on_world_populate`   direct world injection: the mod builds and places its
+##                            own content once the map is ready
 ##   - `add_item_definition`  a new collectible — registered and validated, but note
 ##                            that the core has no inventory or pickup system yet, so
 ##                            this one has no visible effect (see docs/MODDING.md)
 ##   - `add_combat_provider`  an alternative attacker implementation
 ##   - `serialize/deserialize` persistence without touching the core save format
 ##   - `emit_mod_signal`      a channel other mods can listen on
+##
+## The island-era extension points (`add_poi_factory`, `add_prop_factory`,
+## `add_terrain_modifier`) left with the island: their consumers — the scatter and
+## landmark placers — were island systems. The registries still accept them (the
+## contract is stable and asserted), but nothing consumes them on a city map, so
+## this mod demonstrates the seam a city map actually has: placing content in
+## `world_populate`.
 
-const VISIT_COUNT_KEY: String = "visits"
+const VISITS_KEY: String = "injections"
 
-var _visit_count: int = 0
+var _injection_count: int = 0
 
 
 func _on_register() -> void:
 	display_name = "灯塔与风化石"
-	version = "1.0.0"
+	version = "2.0.0"
 	author = "example"
 
-	context.add_poi_factory(&"lighthouse_point", "断崖灯塔", _make_lighthouse, 1.0)
-	context.add_prop_factory(&"weathered_stone", _make_weathered_stone, 0.6, 38.0)
 	context.add_item_definition(&"lighthouse_log", {
 		"display_name": "灯塔日志",
 		"description": "灯塔守夜人留下的记录。",
 		"stackable": false,
 	})
 	context.add_combat_provider(&"heavy_swing", _make_heavy_swing)
-	context.add_terrain_modifier(&"lighthouse_plateau", _raise_plateau, 40)
 
-	# React to the game's own events instead of polling.
-	Events.poi_discovered.connect(_on_poi_discovered)
-	Events.collectible_picked_up.connect(_on_collectible)
-
-	log_message("已注册：灯塔地标、风化石、地形改造、重击攻击、日志道具")
+	log_message("已注册：重击攻击、日志道具")
 
 
 func _on_world_populate(world: Node3D) -> void:
-	# Place a light near the island centre so the mod's effect is visible in a test
-	# run without hunting for the landmark.
-	var query: TerrainQuery = Services.get_as(&"terrain_query", &"TerrainQuery") as TerrainQuery
-	if query == null:
+	# The map source has already found a legal standing spot; injecting beside it
+	# means the mod's content is visible in the first seconds of play, on any map
+	# the host loads. A mod that needs a specific location should search for one —
+	# the surface query service answers "what is the ground doing here".
+	var query: SurfaceQuery = Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery
+	if query == null or not query.is_ready():
+		log_message("地表查询不可用，跳过灯塔注入")
 		return
-	var marker := Node3D.new()
+	var marker := _make_lighthouse()
 	marker.name = "LighthouseModMarker"
-	marker.position = query.sample_height(Vector3(0.0, 0.0, 0.0), 3.0)
+	marker.position = query.sample_height(Vector3(0.0, 0.0, 0.0), 0.0)
 	world.add_child(marker)
+
+	_injection_count += 1
+	emit_mod_signal(&"content_injected", {"node": "LighthouseModMarker"})
 	log_message("世界已就绪，mod 内容已注入")
 
 
@@ -58,26 +63,19 @@ func _on_tick(_delta: float) -> void:
 
 
 func serialize() -> Dictionary:
-	if _visit_count == 0:
+	if _injection_count == 0:
 		return {}
-	return {VISIT_COUNT_KEY: _visit_count}
+	return {VISITS_KEY: _injection_count}
 
 
 func deserialize(data: Dictionary) -> void:
-	_visit_count = int(data.get(VISIT_COUNT_KEY, 0))
-	if _visit_count > 0:
-		log_message("读取到 %d 次地标发现记录" % _visit_count)
+	_injection_count = int(data.get(VISITS_KEY, 0))
+	if _injection_count > 0:
+		log_message("读取到 %d 次内容注入记录" % _injection_count)
 
 
 func _on_unload() -> void:
-	log_message("已卸载（visit=%d）" % _visit_count)
-
-
-func _on_poi_discovered(poi_id: StringName, display_name: String, _position: Vector3) -> void:
-	_visit_count += 1
-	emit_mod_signal(&"poi_seen", {"id": String(poi_id), "name": display_name})
-	if poi_id == &"lighthouse_point":
-		Events.notify("灯塔的灯又亮了一次", Events.NotifyLevel.SUCCESS)
+	log_message("已卸载（injections=%d）" % _injection_count)
 
 
 func _on_collectible(_item_id: StringName, _amount: int) -> void:
@@ -85,14 +83,15 @@ func _on_collectible(_item_id: StringName, _amount: int) -> void:
 
 
 ## A tall tower with a rotating beam, built from primitives so the mod needs no
-## assets of its own.
+## assets of its own. Materials are local: the island-era `PoiGeometry` helpers
+## went with the island, and a mod should not reach into core classes for paint.
 func _make_lighthouse() -> Node3D:
 	var root := Node3D.new()
 	root.name = "Lighthouse"
 
-	var stone := PoiGeometry.standard_material(Color(0.82, 0.8, 0.76))
-	var trim := PoiGeometry.standard_material(Color(0.72, 0.26, 0.22))
-	var beam := PoiGeometry.emissive_material(Color(1.0, 0.94, 0.72), 4.0)
+	var stone := _flat_material(Color(0.82, 0.8, 0.76))
+	var trim := _flat_material(Color(0.72, 0.26, 0.22))
+	var beam := _emissive_material(Color(1.0, 0.94, 0.72), 4.0)
 
 	var height: float = 16.0
 	var shaft := CylinderMesh.new()
@@ -141,8 +140,8 @@ func _make_lighthouse() -> Node3D:
 	roof_node.position = Vector3(0.0, height + 3.4, 0.0)
 	root.add_child(roof_node)
 
-	# The beam pivots so the light sweeps the sea; a rotating spotlight is enough
-	# to read as "lighthouse" without any animation asset.
+	# A rotating spotlight is enough to read as "lighthouse" without any animation
+	# asset; in the city it reads as a beacon over the rooftops.
 	var pivot := Node3D.new()
 	pivot.name = "BeamPivot"
 	pivot.position = Vector3(0.0, height + 1.2, 0.0)
@@ -164,17 +163,20 @@ func _make_lighthouse() -> Node3D:
 	return root
 
 
-## A prop factory returns one Mesh; the scatter system handles instancing, so a
-## mod never places thousands of nodes itself.
-func _make_weathered_stone() -> Mesh:
-	var primitive := SphereMesh.new()
-	primitive.radius = 1.1
-	primitive.height = 1.5
-	primitive.radial_segments = 7
-	primitive.rings = 4
-	var array_mesh := ArrayMesh.new()
-	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, primitive.surface_get_arrays(0))
-	return PropFactory.paint(array_mesh, 1.0, 0.62)
+func _flat_material(color: Color) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.roughness = 0.85
+	return material
+
+
+func _emissive_material(color: Color, energy: float) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.emission_enabled = true
+	material.emission = color
+	material.emission_energy_multiplier = energy
+	return material
 
 
 ## An alternative attacker. A game swaps it in by overriding the `melee_basic`
@@ -192,18 +194,6 @@ func _make_heavy_swing() -> Node:
 	attack.knockback = 7.0
 	weapon.attack = attack
 	return weapon
-
-
-## Deterministic reshape, called once per heightfield sample. `falloff` is the
-## island mask, so the change fades out with the coast.
-func _raise_plateau(world_x: float, world_z: float, height: float, falloff: float) -> float:
-	const CENTRE := Vector2(120.0, -90.0)
-	const RADIUS: float = 55.0
-	var distance: float = Vector2(world_x, world_z).distance_to(CENTRE)
-	if distance >= RADIUS:
-		return height
-	var influence: float = pow(1.0 - distance / RADIUS, 2.0)
-	return height + influence * 9.0 * falloff
 
 
 ## Tiny helper node so the beacon turns. Shipped inside the mod rather than in the

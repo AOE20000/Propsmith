@@ -114,6 +114,17 @@ func load_game(slot: String = DEFAULT_SLOT) -> bool:
 		last_error = "save file has no readable state"
 		return false
 
+	# Map identity is checked before anything is applied: a save made in another
+	# city (or on the removed island, whose saves carry no map id at all) must be
+	# refused outright, because its places, discoveries and routes all point into
+	# a world that is not the one running.
+	var saved_map_id: String = String((state as Dictionary).get("map_id", ""))
+	var running_map_id: String = GameState.map_id
+	if saved_map_id != running_map_id:
+		last_error = "存档属于其他地图（存档：%s，当前：%s）— 拒绝读取" % [saved_map_id, running_map_id]
+		push_error("SaveSystem: " + last_error)
+		return false
+
 	GameState.from_dict(state)
 
 	var sections: Variant = payload.get("sections", {})
