@@ -39,17 +39,24 @@ func _on_register() -> void:
 
 
 func _on_world_populate(world: Node3D) -> void:
-	# The map source has already found a legal standing spot; injecting beside it
-	# means the mod's content is visible in the first seconds of play, on any map
-	# the host loads. A mod that needs a specific location should search for one —
-	# the surface query service answers "what is the ground doing here".
+	# The map source has already found where the content clusters; anchoring to
+	# that (not the world origin, which is a coordinate convention) and standing
+	# a few metres aside keeps the beacon in the streets without occupying the
+	# player's spawn point.
 	var query: SurfaceQuery = Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery
 	if query == null or not query.is_ready():
 		log_message("地表查询不可用，跳过灯塔注入")
 		return
+	var anchor: Vector3 = Vector3.ZERO
+	var source: Variant = Services.get_service(&"map_source")
+	if source is MapSource:
+		anchor = (source as MapSource).spawn_anchor
 	var marker := _make_lighthouse()
 	marker.name = "LighthouseModMarker"
-	marker.position = query.sample_height(Vector3(0.0, 0.0, 0.0), 0.0)
+	# 24 m out: far enough that the third-person camera (a 5.4 m spring arm) can
+	# never end up inside the shaft — the beacon is a pure visual mesh with no
+	# collider, so the arm's collision response cannot save it.
+	marker.position = query.sample_height(anchor + Vector3(24.0, 0.0, 0.0), 0.0)
 	world.add_child(marker)
 
 	_injection_count += 1

@@ -39,11 +39,17 @@ const GROUND_THICKNESS: float = 2.0
 ## Spawn search: rings outward from the origin, accepting the first outdoor
 ## spot — `height_at` near the ground plane and nearly flat. Rooftops are also
 ## flat, but their sampled height is far above 0, which is what excludes them.
-const SPAWN_MAX_RADIUS: float = 96.0
+const SPAWN_MAX_RADIUS: float = 160.0
 const SPAWN_RING_STEP: float = 8.0
 const SPAWN_RING_SAMPLES: int = 12
 const SPAWN_MAX_SLOPE_DEGREES: float = 12.0
 const SPAWN_GROUND_TOLERANCE: float = 1.5
+## How far from a candidate the "is there a building here at all" probes run.
+const NEARBY_BUILDING_RADIUS: float = 16.0
+## Hard clearance: a candidate with a building face within this distance would
+## put the player against a wall with the third-person camera inside geometry,
+## which the first "fully surrounded" pick demonstrated from inside a building.
+const SPAWN_CLEARANCE_RADIUS: float = 5.0
 
 var city: String = ""
 ## Facts filled in during `build`, reported by `describe()`.
@@ -57,6 +63,11 @@ var city_offset: Vector3 = Vector3.ZERO
 
 var _spawn_position: Vector3 = Vector3.ZERO
 var _reference_point: Vector3 = Vector3.ZERO
+## Mean of per-building AABB centres, in world space — where the buildings
+## actually cluster. The AABB midpoint of the whole district can sit in a park,
+## a rail cutting or a river, which is exactly where the first spawn search
+## dropped the player: skyline in the distance, nothing around.
+var _density_centre: Vector3 = Vector3.ZERO
 
 
 func build(world_root: Node3D, seed_value: int) -> bool:
@@ -130,6 +141,7 @@ func build(world_root: Node3D, seed_value: int) -> bool:
 	ModHost.notify_world_generate(world_root)
 
 	_spawn_position = _find_spawn_position()
+	spawn_anchor = _density_centre
 	progress.call("通知 Mod 补充内容", 0.98)
 	ModHost.notify_world_populate(world_root)
 
@@ -300,6 +312,8 @@ func _build_ground_plane(world_root: Node3D) -> void:
 func _settle_city_transform(city_container: Node3D) -> void:
 	var minimum := Vector3.INF
 	var maximum := -Vector3.INF
+	var centre_sum := Vector3.ZERO
+	var centre_count: int = 0
 	var stack: Array[Node] = [city_container]
 	while not stack.is_empty():
 		var node: Node = stack.pop_back()
@@ -311,11 +325,17 @@ func _settle_city_transform(city_container: Node3D) -> void:
 				var aabb: AABB = mesh_instance.global_transform * mesh_instance.mesh.get_aabb()
 				minimum = minimum.min(aabb.position)
 				maximum = maximum.max(aabb.position + aabb.size)
+				centre_sum += aabb.get_center()
+				centre_count += 1
 	if not is_finite(minimum.x):
 		return
 	var centre := (minimum + maximum) * 0.5
 	city_container.position = Vector3(-centre.x, -minimum.y, -centre.z)
 	city_offset = Vector3(-centre.x, -minimum.y, -centre.z)
+	# Building centres measured *before* the container moved; shifting them once
+	# here is cheaper than walking the tree again. This is the spawn anchor.
+	if centre_count > 0:
+		_density_centre = centre_sum / float(centre_count) + city_container.position
 
 
 ## Sky, sun and light fog. Deliberately minimal: the island's environment stage
@@ -350,30 +370,78 @@ func _build_environment(world_root: Node3D) -> void:
 	world_root.add_child(sun)
 
 
-## Rings outward from the origin, first outdoor flat spot wins. The origin is the
-## reference point's ground — in a built-up ward it can sit inside a building's
-## footprint, which is why the search exists at all.
+## Rings outward from the building cluster, first outdoor flat spot wins —
+## with one extra requirement the first version lacked: the spot must have
+## buildings *nearby*, because the district's geometric midpoint can be a park,
+## a river or a rail yard, and "flat ground at the origin" once meant spawning
+## on empty tarmac with the skyline a street district away.
+##
+## Rooftops are also flat, but their sampled height is far above 0, which is
+## what excludes them.
 func _find_spawn_position() -> Vector3:
 	var query: SurfaceQuery = Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery
 	if query == null or not query.is_ready():
 		return Vector3(0.0, 2.0, 0.0)
 
+	var anchor: Vector3 = _density_centre
+	var best_position := Vector3.ZERO
+	var best_score: float = -1.0
 	var radius: float = SPAWN_RING_STEP
 	while radius <= SPAWN_MAX_RADIUS:
 		for step: int in SPAWN_RING_SAMPLES:
 			var angle: float = TAU * float(step) / float(SPAWN_RING_SAMPLES)
-			var x: float = cos(angle) * radius
-			var z: float = sin(angle) * radius
+			var x: float = anchor.x + cos(angle) * radius
+			var z: float = anchor.z + sin(angle) * radius
 			var height: float = query.height_at(x, z)
-			if absf(height - 0.0) > SPAWN_GROUND_TOLERANCE:
+			if absf(height) > SPAWN_GROUND_TOLERANCE:
 				continue
 			if query.slope_degrees_at(x, z) > SPAWN_MAX_SLOPE_DEGREES:
 				continue
-			return Vector3(x, height + 1.0, z)
+			if not _is_clear_of_buildings(query, x, z):
+				continue
+			var score: float = _nearby_building_fraction(query, x, z)
+			if score > best_score:
+				best_score = score
+				best_position = Vector3(x, height + 1.0, z)
+			if score >= 0.99:
+				# Fully surrounded is as good as this probe gets; take it and
+				# don't walk the remaining rings.
+				radius = SPAWN_MAX_RADIUS + 1.0
+				break
 		radius += SPAWN_RING_STEP
-	# Outdoors nowhere nearby: spawn on top of whatever is here and let physics
-	# settle it, rather than failing the boot.
-	return Vector3(0.0, query.height_at(0.0, 0.0) + 2.0, 0.0)
+	if best_score >= 0.0:
+		return best_position
+	# No legal outdoor spot near the cluster: spawn on top of whatever is at the
+	# anchor and let physics settle it, rather than failing the boot.
+	return Vector3(anchor.x, query.height_at(anchor.x, anchor.z) + 2.0, anchor.z)
+
+
+## Fraction of probe rays around (x, z) that hit a building footprint — the
+## measure of "this is a street between buildings" the spawn search scores by.
+func _nearby_building_fraction(query: SurfaceQuery, x: float, z: float) -> float:
+	var hits: int = 0
+	var total: int = 0
+	for step: int in SPAWN_RING_SAMPLES:
+		var angle: float = TAU * float(step) / float(SPAWN_RING_SAMPLES)
+		var kind: StringName = query.surface_kind(
+			x + cos(angle) * NEARBY_BUILDING_RADIUS, z + sin(angle) * NEARBY_BUILDING_RADIUS
+		)
+		total += 1
+		if kind == &"building":
+			hits += 1
+	return float(hits) / float(maxi(total, 1))
+
+
+## The clearance half of the spawn test: nothing architectural within arm's
+## reach of the candidate, so the player stands in the open and the third-person
+## camera starts outside geometry. Four probes, not eight — corners are close
+## enough to the axes at this radius.
+func _is_clear_of_buildings(query: SurfaceQuery, x: float, z: float) -> bool:
+	for angle_step: int in 4:
+		var angle: float = TAU * float(angle_step) / 4.0
+		if query.surface_kind(x + cos(angle) * SPAWN_CLEARANCE_RADIUS, z + sin(angle) * SPAWN_CLEARANCE_RADIUS) == &"building":
+			return false
+	return true
 
 
 func _find_gml_files(city_name: String, kind: String) -> PackedStringArray:

@@ -26,6 +26,13 @@ func find_spawn_position() -> Vector3:
 	return Vector3(0.0, 2.0, 0.0)
 
 
+## The part of the map content clusters around — for a city, where the buildings
+## are dense. Mods that want to be "in the middle of things" should anchor to
+## this rather than to the world origin, which is a coordinate convention, not a
+## place anyone wants to stand.
+var spawn_anchor: Vector3 = Vector3.ZERO
+
+
 ## Identity written into every save. Loading a save whose map_id differs from
 ## the running map is refused by `SaveSystem` — silently teleporting a player
 ## into a different city is the failure mode this exists to prevent.
