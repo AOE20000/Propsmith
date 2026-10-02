@@ -1,0 +1,72 @@
+# Propsmith 主角基准模型 —— Hamr spec
+# 参数仅使用 Hamr 0.8.0 实际生效字段（见 docs/local/hamr.md 参数清单）。
+# 视觉与游戏内 Configura 默认形象呼应：米白 T + 藏青裤 + 棕靴 + 深棕发。
+name: "Propsmith Protagonist"
+version: "1.0"
+
+body:
+  height_cm: 165
+  build: average
+  skin:
+    base_hex: "#C9916A"
+    undertone: warm
+    tan_level: 0.4
+  proportions:
+    shoulder_width: 0.42
+    bust: 0.50
+    waist: 0.34
+    hip_width: 0.58
+    leg_length: 0.55
+
+hair:
+  style: ponytail
+  length: medium
+  volume: 0.6
+  curl_tightness: 0.2
+  shell_layers: 6
+  color:
+    roots: "#3A2A1E"
+    mid: "#4A3628"
+    tips: "#5A4432"
+
+face:
+  jaw: V-shape
+  cheekbones: medium
+  eyes:
+    shape: cat-tilt
+    iris_hex: "#4169E1"
+    size: 1.1
+  nose_size: small
+  nose_bridge: narrow
+  lip_fullness: 0.55
+  default_expression: slight-smile
+
+clothing:
+  - name: white_tee
+    type: top
+    primary_hex: "#E6E1D5"
+    accent_hex: "#D9D2C4"
+    trim_hex: "#C9C2B4"
+  - name: navy_pants
+    type: bottom
+    primary_hex: "#2F4156"
+    accent_hex: "#3A4F66"
+    trim_hex: "#243342"
+  - name: brown_boots
+    type: accessories
+    primary_hex: "#5A4632"
+    accent_hex: "#6B543C"
+    trim_hex: "#3E3021"
+
+physics:
+  hair:
+    stiffness: 0.35
+    gravity: 0.3
+    drag: 0.4
+
+export:
+  format: vrm1
+  title: "Propsmith Protagonist"
+  author: "Propsmith"
+  version: "1.0"
+  license: CC-BY-4.0

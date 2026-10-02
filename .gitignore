@@ -21,3 +21,9 @@ addons/plateau/**/~*
 
 # Local-only development references (playtest notes against commercial titles)
 docs/local/
+
+# Vendored toolchain (Blender portable, MB-Lab / VRM addon copies, installer
+# zips) — hundreds of MB of third-party binaries kept out of the repository but
+# on the same drive, so the toolchain survives a disk cleanup while git stays
+# lean. Rebuilt by tools/hamr/run.ps1 and docs/local/hamr.md.
+vendor/

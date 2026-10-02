@@ -1,0 +1,5 @@
+{
+  "blender_path": "D:/workbuddy/blender-4.2.23/blender-4.2.23-windows-x64/blender.exe",
+  "comment": "Hamr 走 PATH 找 blender 可执行；本包装读取此字段注入 PATH。换 Blender 只改这一行。",
+  "note": "用 4.2 LTS（Hamr 0.8.0 支持矩阵止于 Blender 4.0；5.x 移除 ShaderNodeNewObject 等节点，构建必失败）。addon（io_scene_vrm / mb-lab / mblab）实体在该 Blender 的 4.2/scripts/addons，经 junction 挂到 %APPDATA%\\Blender Foundation\\Blender\\4.2\\scripts\\addons（C 盘零占用）；Blender 自带 Python 已装 pyyaml/pillow/pydantic/rich/click 并写入 hamr_src.pth（见 docs/local/hamr.md）。D:\\Blender\\blender-4.2.9 为未配置的重复副本，可删。"
+}
