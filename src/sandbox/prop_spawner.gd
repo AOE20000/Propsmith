@@ -44,6 +44,10 @@ func spawn(prop_id: StringName, at: Vector3, yaw: float = 0.0) -> RigidBody3D:
 		])
 		return null
 	var prop: RigidBody3D = produced
+	# The catalog id rides in metadata, not in the node name: Godot silently
+	# renames same-named siblings, so a name-derived id would corrupt the
+	# duplicator the moment two crates exist.
+	prop.set_meta(&"prop_id", prop_id)
 	prop.name = "Prop_%s" % prop_id
 	_container.add_child(prop)
 	prop.global_position = at
@@ -58,8 +62,9 @@ func undo() -> bool:
 	while not _undo_stack.is_empty():
 		var node: Node = _undo_stack.pop_back()
 		if is_instance_valid(node):
+			var prop_id: StringName = node.get_meta(&"prop_id", &"")
 			node.queue_free()
-			Events.prop_removed.emit(StringName(node.name.trim_prefix("Prop_")))
+			Events.prop_removed.emit(prop_id)
 			return true
 	return false
 
@@ -70,9 +75,9 @@ func remove(prop: Node) -> void:
 	if prop == null or not is_instance_valid(prop):
 		return
 	_undo_stack.erase(prop)
-	var id := StringName(String(prop.name).trim_prefix("Prop_"))
+	var prop_id: StringName = prop.get_meta(&"prop_id", &"")
 	prop.queue_free()
-	Events.prop_removed.emit(id)
+	Events.prop_removed.emit(prop_id)
 
 
 ## Delete every spawned prop (the spawn menu's "clear" button).

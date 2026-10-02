@@ -22,7 +22,7 @@ class_name ModContent
 ## a running game or a populated autoload, which the previous arrangement could not be.
 
 ## Kinds a context can contribute, and the order collision reporting visits them.
-const KINDS: Array[StringName] = [&"poi", &"prop", &"item", &"combat", &"terrain", &"vehicle"]
+const KINDS: Array[StringName] = [&"poi", &"prop", &"item", &"combat", &"terrain", &"vehicle", &"tool"]
 
 var _contexts: Dictionary = {}
 
@@ -94,6 +94,7 @@ static func registry_for(context: ModContext, kind: StringName) -> Dictionary:
 		&"combat": return context.combat_providers
 		&"terrain": return context.terrain_modifiers
 		&"vehicle": return context.vehicle_factories
+		&"tool": return context.tools
 	return {}
 
 

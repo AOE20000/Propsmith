@@ -9,7 +9,7 @@ class_name ToolBelt
 ## are registered by id (&"weapon", &"wrench", and later the tool gun) — a mod
 ## that adds a tool joins this list rather than inventing its own input scheme.
 
-const TOOLS: Array[StringName] = [&"weapon", &"wrench"]
+const TOOLS: Array[StringName] = [&"weapon", &"wrench", &"toolgun"]
 
 var current: StringName = &"weapon"
 
@@ -31,6 +31,7 @@ func display_name_for(tool_id: StringName) -> String:
 	match tool_id:
 		&"weapon": return "武器"
 		&"wrench": return "物理扳手"
+		&"toolgun": return "工具枪"
 	return String(tool_id)
 
 

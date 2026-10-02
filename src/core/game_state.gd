@@ -8,7 +8,9 @@ extends Node
 ## `FREECAM` is a session mode rather than a paused state: interaction and attacks
 ## already suspend themselves when the mode is not `EXPLORING`, so the debug camera
 ## gets a coherent session without either of them learning that a camera exists.
-enum Mode { BOOT, EXPLORING, FREECAM, PAUSED, MAP, DEAD }
+## `BUILDING` is the sandbox's paused build mode: the world freezes, the mouse is
+## free, and clicks route to the held tool through the build panel.
+enum Mode { BOOT, EXPLORING, FREECAM, PAUSED, MAP, DEAD, BUILDING }
 
 const SAVE_VERSION: int = 1
 

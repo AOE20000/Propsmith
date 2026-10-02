@@ -66,8 +66,11 @@ func _next_phase() -> void:
 ## content, placed through the same service the spawn menu uses. The player is
 ## first returned to the recorded spawn — the previous shot lifted them into
 ## the air, and props spawned at altitude would land somewhere out of frame.
+## Two crates are then welded and a ball hangs from a rope — the P1 constraint
+## tools, exercised through the same two-shot API a click would drive.
 func _place_props() -> void:
 	var spawner: PropSpawner = Services.get_as(&"prop_spawner", &"PropSpawner") as PropSpawner
+	var store: ConstraintStore = Services.get_as(&"constraint_store", &"ConstraintStore") as ConstraintStore
 	var player: Node3D = get_tree().get_first_node_in_group(&"player") as Node3D
 	var query: SurfaceQuery = Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery
 	if spawner == null or player == null or query == null:
@@ -90,6 +93,26 @@ func _place_props() -> void:
 	ramp_spot.y = query.height_at(ramp_spot.x, ramp_spot.z) + 0.6
 	spawner.spawn(&"ramp", ramp_spot, PI)
 	print("[probe] props placed")
+
+	# Constraints: stack two crates side by side and weld them, then hang a ball
+	# between two planks on a rope — both through the tool's two-shot API, which
+	# is exactly what a click pair would do.
+	if store == null:
+		return
+	var weld := ConstraintTool.new(&"weld", "焊接", &"weld")
+	var left: Vector3 = base + Vector3(-2.4, 0.0, 0.0)
+	var crate_a := spawner.spawn(&"crate", left + Vector3(0.0, 1.2, 0.0))
+	var crate_b := spawner.spawn(&"crate", left + Vector3(0.0, 2.0, 0.0))
+	if crate_a != null and crate_b != null:
+		weld.on_primary({"collider": crate_a, "position": crate_a.global_position, "normal": Vector3.UP})
+		weld.on_primary({"collider": crate_b, "position": crate_b.global_position, "normal": Vector3.DOWN})
+	var rope := ConstraintTool.new(&"rope", "绳索", &"rope")
+	var ball := spawner.spawn(&"ball", left + Vector3(0.0, 0.9, 0.9))
+	var anchor := spawner.spawn(&"plank", left + Vector3(0.0, 2.6, 0.9))
+	if ball != null and anchor != null:
+		rope.on_primary({"collider": ball, "position": ball.global_position, "normal": Vector3.UP})
+		rope.on_primary({"collider": anchor, "position": anchor.global_position, "normal": Vector3.DOWN})
+	print("[probe] constraints placed (%s)" % store.describe())
 
 
 ## Open the spawn menu exactly as the key would (its own toggle logic), so the

@@ -27,6 +27,7 @@ var item_definitions: Dictionary = {}
 var combat_providers: Dictionary = {}
 var terrain_modifiers: Dictionary = {}
 var vehicle_factories: Dictionary = {}
+var tools: Dictionary = {}
 
 
 func _init(owner_mod_id: StringName) -> void:
@@ -120,6 +121,22 @@ func add_vehicle_factory(vehicle_id: StringName, factory: Callable) -> bool:
 	}, "vehicle", "factory")
 
 
+## Add a tool-gun tool. The instance carries its own two-shot/instant state and
+## receives clicks from either input layer (the held tool gun in play, or the
+## paused build panel). The tool gun lists it with `display_name`.
+func add_tool(tool: SandboxTool) -> bool:
+	if not (tool is SandboxTool) or (tool as SandboxTool).tool_id == &"":
+		push_error("[mod:%s] add_tool needs a SandboxTool with a non-empty tool_id" % _mod_id)
+		return false
+	var instance := tool as SandboxTool
+	return _register(tools, instance.tool_id, {
+		"id": instance.tool_id,
+		"display_name": instance.display_name,
+		"tool": instance,
+		"owner": _mod_id,
+	}, "tool")
+
+
 ## Resolve another mod's registered landmark without knowing which mod owns it.
 ##
 ## Currently unused by the core: it exists so a mod can build on another mod's content
@@ -145,6 +162,7 @@ func _registry_by_name(registry_name: String) -> Dictionary:
 		"combat provider": return combat_providers
 		"terrain modifier": return terrain_modifiers
 		"vehicle": return vehicle_factories
+		"tool": return tools
 	return {}
 
 

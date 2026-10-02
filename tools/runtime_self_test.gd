@@ -44,6 +44,7 @@ func _ready() -> void:
 	_run_section("mobility is an optional capability", 18, _check_mobility_readiness)
 	_run_section("place table and pedestrian agent", 10, _check_place_table_and_agent)
 	_run_section("sandbox props", 19, _check_prop_sandbox)
+	_run_section("tool gun and constraints", 15, _check_tools_and_constraints)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("boot summary", 4, _check_summary)
 
@@ -812,7 +813,103 @@ func _check_prop_sandbox() -> void:
 		(wrapped as Node).free()
 
 
-## The one line the boot report prints has to stay parseable and name both runtimes,
+## The tool gun and its constraints: two-shot state, the weld/rope/hinge joints
+## a second click builds, automatic cleanup when a constrained body dies, the
+## instant prop tools, and mod-registered tools joining the roster. Bodies are
+## real (in-tree rigid bodies) so joint paths resolve the way play does.
+func _check_tools_and_constraints() -> void:
+	var gun := ToolGun.new()
+	add_child(gun)
+	Services.register(&"tool_gun", gun)
+	_expect(gun.tools.size() == 7, "seven built-in tools before mods (got %d)" % gun.tools.size())
+	gun.select_by_id(&"weld")
+	_expect(gun.current_tool() != null and gun.current_tool().tool_id == &"weld", "select_by_id must hold the selection")
+
+	var store := ConstraintStore.new()
+	add_child(store)
+	var constraint_root := Node3D.new()
+	add_child(constraint_root)
+	store.setup(constraint_root)
+	Services.register(&"constraint_store", store)
+
+	var body_a: RigidBody3D = PropFactory.build_box(Vector3.ONE, Color.WHITE, 5.0)
+	var body_b: RigidBody3D = PropFactory.build_box(Vector3.ONE, Color.WHITE, 5.0)
+	add_child(body_a)
+	add_child(body_b)
+	body_a.global_position = Vector3.ZERO
+	body_b.global_position = Vector3(3.0, 0.0, 0.0)
+
+	var weld := ConstraintTool.new(&"weld", "焊接", &"weld")
+	weld.selected()
+	weld.on_primary({"collider": body_a, "position": Vector3(0.4, 0.0, 0.0), "normal": Vector3.UP})
+	_expect(store.count() == 0, "one pick must not build a joint yet")
+	weld.on_primary({"collider": body_b, "position": Vector3(2.6, 0.0, 0.0), "normal": Vector3.DOWN})
+	_expect(store.count() == 1, "the second pick must build the weld")
+	_expect(constraint_root.get_child(0) is Generic6DOFJoint3D, "a weld must be a six-DOF joint")
+
+	weld.on_primary({"collider": body_a, "position": Vector3.ZERO, "normal": Vector3.UP})
+	weld.on_primary({"collider": body_a, "position": Vector3.ZERO, "normal": Vector3.UP})
+	_expect(store.count() == 1, "picking the same body twice must build nothing")
+
+	var rope := ConstraintTool.new(&"rope", "绳索", &"rope")
+	rope.on_primary({"collider": body_a, "position": Vector3.ZERO, "normal": Vector3.UP})
+	rope.on_primary({"collider": body_b, "position": Vector3(3.0, 0.0, 0.0), "normal": Vector3.UP})
+	# Jolt has no DampedSpringJoint3D, so the rope is a RopeVisual link that
+	# applies its own pull; what matters here is the rest length it was born with.
+	var rope_link := constraint_root.get_child(constraint_root.get_child_count() - 1) as RopeVisual
+	_expect(rope_link != null and absf(rope_link.length - 3.0) < 0.2,
+		"the rope must rest at the clicked distance (got %.2f)" % (rope_link.length if rope_link != null else -1.0))
+
+	# A freed constrained body must take its joints with it — the store sweeps
+	# for dangling references every frame.
+	body_b.free()
+	store._process(0.0)
+	_expect(store.count() == 0, "freeing a body must drop every constraint touching it")
+
+	var container := Node3D.new()
+	add_child(container)
+	var spawner := PropSpawner.new()
+	add_child(spawner)
+	spawner.setup(container)
+	Services.register(&"prop_spawner", spawner)
+
+	var prop: RigidBody3D = spawner.spawn(&"crate", Vector3(10.0, 0.0, 0.0))
+	var remover := PropTool.new(&"remover", "移除", &"remover")
+	remover.on_primary({"collider": prop, "position": Vector3(10.0, 0.0, 0.0), "normal": Vector3.UP})
+	_expect(spawner.count() == 0, "the remover must delete through the spawner")
+
+	var source: RigidBody3D = spawner.spawn(&"crate", Vector3(10.0, 0.0, 0.0))
+	var duplicator := PropTool.new(&"duplicator", "复制器", &"duplicator")
+	duplicator.on_primary({"collider": source, "position": Vector3(12.0, 0.0, 0.0), "normal": Vector3.UP})
+	_expect(spawner.count() == 2, "the duplicator must spawn a copy through the spawner")
+
+	var visual := source.get_node("Visual") as MeshInstance3D
+	var before: Material = visual.material_override
+	var painter := PropTool.new(&"painter", "上色", &"painter")
+	painter.on_primary({"collider": source, "position": Vector3.ZERO, "normal": Vector3.UP})
+	_expect(visual.material_override != before, "painting must duplicate the material, not mutate the shared one")
+
+	var mass_before: float = source.mass
+	var weight_tool := PropTool.new(&"weight", "配重", &"weight")
+	weight_tool.on_primary({"collider": source, "position": Vector3.ZERO, "normal": Vector3.UP})
+	_expect(source.mass != mass_before, "the weight tool must walk the mass ladder")
+
+	var context := ModContext.new(&"selftest_tool")
+	var custom := ConstraintTool.new(&"custom_weld", "自定义焊", &"weld")
+	_expect(context.add_tool(custom), "a SandboxTool must register through the mod seam")
+	ModHost.contexts["selftest_tool"] = context
+	gun._rebuild_tools()
+	_expect(gun.tools.size() == 8, "a mod tool must join the roster (got %d)" % gun.tools.size())
+	var found: bool = false
+	for tool: SandboxTool in gun.tools:
+		if tool.tool_id == &"custom_weld":
+			found = true
+	_expect(found, "the mod tool must be reachable by id after the rebuild")
+	ModHost.contexts.erase("selftest_tool")
+	context.release_all()
+
+	spawner.clear_all()
+	body_a.free()
 ## or the smoke test's output stops being evidence.
 func _check_summary() -> void:
 	var summary: String = ScriptingRuntimes.summary()

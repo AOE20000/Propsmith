@@ -128,11 +128,17 @@ func _register_core_services(failures: Array[String]) -> void:
 		Services.register(&"vehicle_system", VehicleSystem.new())
 	if not Services.has(&"prop_spawner"):
 		Services.register(&"prop_spawner", PropSpawner.new())
+	if not Services.has(&"constraint_store"):
+		Services.register(&"constraint_store", ConstraintStore.new())
 	if not Services.has(&"tool_belt"):
 		var belt := ToolBelt.new()
 		Services.register(&"tool_belt", belt)
 		# In the tree so the belt can listen for its switch and undo keys.
 		add_child(belt)
+	if not Services.has(&"tool_gun"):
+		var gun := ToolGun.new()
+		Services.register(&"tool_gun", gun)
+		add_child(gun)
 	ModIntegration.publish_core_providers()
 
 	for required: StringName in [&"map_source", &"surface_query"]:
@@ -213,8 +219,9 @@ func _spawn_freecam() -> void:
 
 
 ## The sandbox layer: props container under the world (so teardown takes the
-## props with it), the grab tool, and the spawn menu. Session-level nodes —
-## they survive map rebuilds and rebind to the new world through services.
+## props with it), the grab tool, the tool gun, and the paused build panel.
+## Session-level nodes — they survive map rebuilds and rebind to the new world
+## through services.
 func _spawn_sandbox(failures: Array[String]) -> void:
 	if world == null:
 		return
@@ -228,6 +235,15 @@ func _spawn_sandbox(failures: Array[String]) -> void:
 		return
 	spawner.setup(props)
 
+	var store: ConstraintStore = Services.get_as(&"constraint_store", &"ConstraintStore") as ConstraintStore
+	if store == null:
+		failures.append("constraint_store service has an unexpected type")
+		return
+	var constraints := Node3D.new()
+	constraints.name = "Constraints"
+	world.add_child(constraints)
+	store.setup(constraints)
+
 	var wrench := PhysicsWrench.new()
 	wrench.name = "PhysicsWrench"
 	add_child(wrench)
@@ -235,6 +251,10 @@ func _spawn_sandbox(failures: Array[String]) -> void:
 	var menu := SpawnMenu.new()
 	menu.name = "SpawnMenu"
 	add_child(menu)
+
+	var panel := BuildingPanel.new()
+	panel.name = "BuildingPanel"
+	add_child(panel)
 
 
 func _spawn_ui(failures: Array[String]) -> void:
