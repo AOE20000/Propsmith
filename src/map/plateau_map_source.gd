@@ -60,6 +60,18 @@ var load_duration_ms: int = 0
 ## The offset applied to the city container by `_settle_city_transform`, reported
 ## so the boot log shows how far the data was from the world origin.
 var city_offset: Vector3 = Vector3.ZERO
+## `MobilityReadiness.assess` result for this city's place table, plus how many
+## agents actually spawned. Empty report = no place table was found.
+var mobility_report: Dictionary = {}
+var mobility_agents: int = 0
+
+## Crowd size for the first walking-city milestone. Fixed rather than scaled:
+## the point is to prove the pipeline (table → readiness → routes → bodies that
+## slide along building walls), and a fixed number keeps the boot cost predictable.
+const MOBILITY_AGENT_COUNT: int = 40
+## Tags the builtin patterns actually ask for; absent ones get named as
+## "will be substituted" in the readiness line instead of failing silently.
+const MOBILITY_REQUIRED_TAGS: Array[StringName] = [&"home", &"work", &"food"]
 
 var _spawn_position: Vector3 = Vector3.ZERO
 var _reference_point: Vector3 = Vector3.ZERO
@@ -145,6 +157,9 @@ func build(world_root: Node3D, seed_value: int) -> bool:
 	progress.call("通知 Mod 补充内容", 0.98)
 	ModHost.notify_world_populate(world_root)
 
+	progress.call("生成人流", 0.99)
+	_build_mobility(world_root, seed_value)
+
 	progress.call("完成", 1.0)
 	return true
 
@@ -166,7 +181,95 @@ func describe() -> Dictionary:
 		"collision_bodies": collision_bodies,
 		"reference": _reference_point,
 		"offset": city_offset,
+		"mobility": MobilityReadiness.describe(mobility_report) if not mobility_report.is_empty() else "无地点表（运行 tools/city_export_activity 导出）",
+		"agents": mobility_agents,
 	}
+
+
+## The walking city: load the exported place table, ask `MobilityReadiness` whether
+## tag-driven mobility can run on it, and if so resolve a seeded day for each
+## agent. The path finder is the straight line between places for now — bodies
+## slide along building walls via `move_and_slide`, which keeps people out of
+## geometry without a navigation bake; the route's injection point is where a
+## road-network finder plugs in later.
+func _build_mobility(world_root: Node3D, seed_value: int) -> void:
+	var payload: Dictionary = _load_activity_payload()
+	if payload.is_empty():
+		return
+	# The table was derived from a specific dataset (city, lod, file count). If
+	# the running map no longer matches, positions would be subtly wrong — people
+	# inside walls — so the table is refused rather than trusted. Re-export fixes it.
+	var exported_version: String = String(payload.get("map_version", ""))
+	if exported_version != map_id():
+		push_warning("地点表版本不匹配（表：%s，当前：%s）——重新运行 tools/city_export_activity 导出" % [
+			exported_version, map_id(),
+		])
+		return
+	var candidates: Array[Dictionary] = PlaceTable.parse_payload(payload)
+	if candidates.is_empty():
+		return
+	mobility_report = MobilityReadiness.assess(candidates, MOBILITY_REQUIRED_TAGS)
+	if not bool(mobility_report["enabled"]):
+		return
+
+	var version: String = map_id()
+	var cache := RouteCache.new()
+	cache.set_map_version(version)
+
+	var positions: Dictionary = {}
+	for candidate: Dictionary in candidates:
+		positions[String(candidate.get("id", ""))] = candidate.get("position", Vector3.ZERO)
+	var finder := func(from_key: String, to_key: String) -> PackedVector3Array:
+		var from_position: Variant = positions.get(from_key)
+		var to_position: Variant = positions.get(to_key)
+		if from_position == null or to_position == null:
+			return PackedVector3Array()
+		return PackedVector3Array([Vector3(from_position), Vector3(to_position)])
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("%s|mobility|%d" % [version, seed_value])
+	var patterns: Array[ActivityPattern] = ActivityPattern.all_builtin()
+
+	var container := Node3D.new()
+	container.name = "Pedestrians"
+	world_root.add_child(container)
+
+	var spawned: int = 0
+	var attempts: int = 0
+	while spawned < MOBILITY_AGENT_COUNT and attempts < MOBILITY_AGENT_COUNT * 3:
+		attempts += 1
+		var home: Dictionary = candidates[rng.randi() % candidates.size()]
+		if StringName(home.get("tag", ActivityTag.OTHER)) == ActivityTag.OTHER:
+			continue  # A home nobody annotated is not a home; pick another.
+		var agent := PedestrianAgent.new()
+		container.add_child(agent)
+		var origin: Vector3 = home.get("position", Vector3.ZERO) + Vector3(
+			rng.randf_range(-1.5, 1.5), 0.4, rng.randf_range(-1.5, 1.5)
+		)
+		agent.configure(
+			patterns[rng.randi() % patterns.size()], candidates, cache, version,
+			origin, seed_value + spawned, StringName(home.get("id", &"")), finder,
+		)
+		if not agent.has_day():
+			agent.queue_free()
+			continue
+		spawned += 1
+	mobility_agents = spawned
+
+
+## The place table sits beside the dataset it was derived from; the same
+## DSH_MAP_DATA / DSH_MAP_CITY environment knobs apply.
+func _load_activity_payload() -> Dictionary:
+	var data_root: String = _env_or("DSH_MAP_DATA", "res://data/plateau")
+	var path: String = data_root.path_join(city).path_join("activity.json")
+	if not FileAccess.file_exists(path):
+		return {}
+	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return {}
+	var parsed: Variant = JSON.parse_string(file.get_as_text())
+	file.close()
+	return parsed if parsed is Dictionary else {}
 
 
 ## The SDK is still treated as an optional extension everywhere else in the

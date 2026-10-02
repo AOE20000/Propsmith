@@ -49,11 +49,11 @@ res://mods/my_mod/
 `Callable`**，物品要求 `display_name`——不合格的注册当场被拒，而不是等到世界生成时
 在一个跟错误原因毫无关系的地方炸掉。
 
-> **岛屿时代的三个扩展点在城市地图上暂无消费者**：`add_poi_factory`（地标）、
-> `add_prop_factory`（散布道具）、`add_terrain_modifier`（地形改造）的消费者是程序化
-> 岛屿的散布器与地标放置器，随岛屿一起移除了。注册接口与冲突规则仍然有效且有断言
-> （与"预留"的物品扩展点同理），城市地图上注册它们不会报错，只是没有可见效果。
-> 在城市地图上放内容用 `_on_world_populate` 直接注入——见 `mods/lighthouse/`。
+> **三个旧地形扩展点当前没有消费者**：`add_poi_factory`（地标）、
+> `add_prop_factory`（散布道具）、`add_terrain_modifier`（地形改造）的消费者是旧的
+> 程序化地形系统，已随默认地图切换移除。注册接口与冲突规则仍然有效且有断言
+> （与"预留"的物品扩展点同理），当前地图上注册它们不会报错，只是没有可见效果。
+> 在地图上放内容用 `_on_world_populate` 直接注入——见 `mods/lighthouse/`。
 
 ### 1. 往世界里放自己的东西（推荐入口）
 
@@ -145,8 +145,8 @@ func _raise(x: float, z: float, height: float, falloff: float) -> float:
     return height + pow(1.0 - d / 40.0, 2.0) * 8.0 * falloff
 ```
 
-`falloff` 原是岛屿径向遮罩。注册排序规则（同 `order` 按 id）仍然有断言钉住，
-只是城市地图上没有高度场可以改。
+`falloff` 参数沿自旧地形系统（当时是径向遮罩），当前签名保持不变以稳定 mod API。
+注册排序规则（同 `order` 按 id）仍然有断言钉住，只是当前地图上没有高度场可以改。
 
 ### 6. 事件与自有信号
 

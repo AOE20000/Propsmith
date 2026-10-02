@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://cexportact1pk"]
+
+[ext_resource type="Script" path="res://tools/city_export_activity.gd" id="1_exportact"]
+
+[node name="CityExportActivity" type="Node"]
+script = ExtResource("1_exportact")

@@ -91,8 +91,8 @@ pwsh -File tools\check_runtimes.ps1
 
 | 方法 | 说明 |
 |---|---|
-| `game:terrain_height(x, z)` | 地表高度；地形未就绪时返回 `0.0` |
-| `game:island_falloff(x, z)` | 岛屿径向遮罩（中心 1、海岸 0） |
+| `game:terrain_height(x, z)` | 地表高度；地图未就绪时返回 `0.0` |
+| `game:surface_kind(x, z)` | 表面类型：`"ground"` / `"building"` / `"none"` |
 | `game:player_position()` | 玩家坐标，无玩家时返回零向量 |
 | `game:service_names()` | 本局已注册的服务名 |
 | `game:mod_id()` / `game:runtime()` | 自身身份 |

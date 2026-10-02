@@ -42,6 +42,7 @@ func _ready() -> void:
 	_run_section("dependency load order", 10, _check_load_order)
 	_run_section("map-agnostic mobility core", 82, _check_mobility_core)
 	_run_section("mobility is an optional capability", 18, _check_mobility_readiness)
+	_run_section("place table and pedestrian agent", 10, _check_place_table_and_agent)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("boot summary", 4, _check_summary)
 
@@ -682,6 +683,59 @@ func _check_save_map_identity() -> void:
 
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	GameState.map_id = original_id
+
+
+## The place table is the bridge between an exported dataset and the mobility
+## core: its parser's skip rules and its map-version round-trip are what keep a
+## stale export from silently misplacing a crowd. The agent check pins the
+## pipeline end to end on a synthetic fixture — no dataset required, which is
+## the whole point of running this in CI.
+func _check_place_table_and_agent() -> void:
+	var payload := {
+		"map_version": "plateau:fixture:1:1",
+		"places": [
+			{"id": "b1", "tag": "home", "position": [0.0, 0.0, 0.0]},
+			{"id": "b2", "tag": "work", "position": [100.0, 0.0, 0.0]},
+			{"id": "b3", "tag": "food", "position": [50.0, 0.0, 40.0]},
+			{"id": "b4", "tag": "other", "position": [7.0, 0.0, 7.0]},
+			{"id": "b5", "tag": "home", "position": [7.0]},
+			{"id": "", "tag": "home", "position": [1.0, 0.0, 1.0]},
+		],
+	}
+	var candidates: Array[Dictionary] = PlaceTable.parse_payload(payload)
+	_expect(candidates.size() == 4, "the parser must skip entries without an id or a 3-part position")
+	_expect(StringName(candidates[0].get("id", &"")) == &"b1", "the first valid entry must survive in order")
+	_expect(StringName(candidates[3].get("tag", &"")) == ActivityTag.OTHER, "an `other` tag must be kept so readiness can count it")
+	_expect(PlaceTable.map_version_of(payload) == "plateau:fixture:1:1", "map_version must round-trip")
+
+	var report: Dictionary = MobilityReadiness.assess(candidates, [&"home", &"work", &"food", &"school"])
+	_expect(bool(report["enabled"]), "a home+work+food fixture must enable mobility")
+	_expect((report["missing"] as PackedStringArray).has("school"), "a requested tag with no place must be named missing")
+
+	var agent := PedestrianAgent.new()
+	add_child(agent)
+	var cache := RouteCache.new()
+	cache.set_map_version("fixture")
+	# The home step of the fixture's commute falls back to `b4` (the only other
+	# annotated place), so the position table must carry it too — a finder that
+	# cannot resolve a stop returns an empty path, and this assertion exists to
+	# catch exactly that.
+	var positions := {
+		"b1": Vector3(0, 0, 0), "b2": Vector3(100, 0, 0),
+		"b3": Vector3(50, 0, 40), "b4": Vector3(7, 0, 7),
+	}
+	var finder := func(from_key: String, to_key: String) -> PackedVector3Array:
+		if not positions.has(from_key) or not positions.has(to_key):
+			return PackedVector3Array()
+		return PackedVector3Array([Vector3(positions[from_key]), Vector3(positions[to_key])])
+	agent.configure(ActivityPattern.commute(), candidates, cache, "fixture", Vector3(0, 0.4, 0), 5, &"b1", finder)
+	_expect(agent.has_day(), "a commute must resolve on a home+work fixture")
+	_expect(agent.route.stop_count() == 3, "commute is home->work->home: 3 stops (got %d)" % agent.route.stop_count())
+	_expect(agent.route.current_path().size() == 2, "the first leg's straight line must have two endpoints (got %d: %s)" % [
+		agent.route.current_path().size(), str(agent.route.current_path()),
+	])
+	_expect(agent.progress_fraction() == 0.0, "a freshly configured agent must not have progressed")
+	agent.queue_free()
 
 
 ## The one line the boot report prints has to stay parseable and name both runtimes,
