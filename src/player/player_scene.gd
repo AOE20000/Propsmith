@@ -39,7 +39,7 @@ static func build() -> Player:
 
 	player.add_child(_build_visual())
 	player.add_child(_build_camera_rig())
-	_try_attach_configura_model(player)
+	_attach_appearance(player)
 
 	var weapon := _build_weapon()
 	player.add_child(weapon)
@@ -54,8 +54,17 @@ static func build() -> Player:
 ## replaces the capsule when its imported scene exists — e.g. once Blender is
 ## installed so the bundled `.blend` imports, or a converted `.glb` is dropped
 ## in. Absent model → silent capsule fallback; nothing here may fail the boot.
+##
+## Either way a `CharacterAppearanceController` rides on the player: it owns
+## the look state, applies it to the model when one exists, and persists it
+## through the save system, so a look chosen with the model present survives
+## boots even when a later boot falls back to the capsule.
 const CONFIGURA_MODEL_SCENE: String = "res://addons/Configura/!example/character_scenes/example_model.tscn"
-static func _try_attach_configura_model(player: Player) -> void:
+static func _attach_appearance(player: Player) -> void:
+	var controller := CharacterAppearanceController.new()
+	controller.name = "Appearance"
+	player.add_child(controller)
+
 	if not ResourceLoader.exists(CONFIGURA_MODEL_SCENE, "PackedScene"):
 		return
 	var packed := load(CONFIGURA_MODEL_SCENE) as PackedScene
@@ -68,6 +77,7 @@ static func _try_attach_configura_model(player: Player) -> void:
 	# The model faces the camera convention (+Z); the player walks toward -Z.
 	model.rotation_degrees.y = 180.0
 	player.add_child(model)
+	controller.attach(model)
 	var visual := player.get_node_or_null("Visual") as Node3D
 	if visual != null:
 		visual.visible = false

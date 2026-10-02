@@ -44,6 +44,7 @@ func _ready() -> void:
 	_run_section("mobility is an optional capability", 18, _check_mobility_readiness)
 	_run_section("place table and pedestrian agent", 11, _check_place_table_and_agent)
 	_run_section("sandbox props", 19, _check_prop_sandbox)
+	_run_section("character appearance", 18, _check_character_appearance)
 	_run_section("tool gun and constraints", 15, _check_tools_and_constraints)
 	_run_section("npc citizens", 11, _check_npc_citizens)
 	_run_section("scripted mod bridges", 7, _check_scripted_bridges)
@@ -817,6 +818,104 @@ func _check_prop_sandbox() -> void:
 	# freeing it here is what keeps the headless exit free of leaked geometry.
 	if wrapped is Node:
 		(wrapped as Node).free()
+
+
+## The character look system: the catalog must produce a valid standard config
+## and a fully-populated default state, the applier must drive variant
+## visibility and material colour on a plain node tree (no imported model
+## needed), and the save round-trip must preserve the look exactly. These run
+## on hand-built meshes so the section passes with or without the `.blend`.
+func _check_character_appearance() -> void:
+	var config := CharacterAppearance.build_config()
+	_expect(config != null and not config.options.is_empty(),
+		"the appearance catalog must build a config with options")
+	var ids: Dictionary = {}
+	for option: OptionDefinition in config.options:
+		ids[option.resource_name] = true
+	_expect(ids.size() == config.options.size(),
+		"appearance option ids must be unique within the config")
+
+	var default_state := CharacterAppearance.default_state()
+	_expect(default_state.values.size() == config.options.size(),
+		"the default state must carry a value for every option")
+	for option: OptionDefinition in config.options:
+		if option is MeshSwapOption:
+			var swap := option as MeshSwapOption
+			var value := int(default_state.values.get(option.resource_name, -99))
+			_expect(value >= 0 and value < swap.choices.size(),
+				"default swap value for '%s' must index a real choice" % option.resource_name)
+
+	# Random states must stay inside every option's value range.
+	var randomized := CharacterAppearance.randomized_state()
+	var in_range := true
+	for option: OptionDefinition in config.options:
+		if option is MeshSwapOption:
+			var swap := option as MeshSwapOption
+			var value := int(randomized.values.get(option.resource_name, -99))
+			if value < 0 or value >= swap.choices.size():
+				in_range = false
+	_expect(in_range, "randomized swap values must stay inside the choice range")
+
+	# Apply the default look to a hand-built stand-in: one hair variant visible,
+	# the others hidden, base meshes untouched, optional groups closed.
+	var model := Node3D.new()
+	add_child(model)
+	for variant: String in ["Hair_Fringe", "Hair_Layered", "Hair_Bob",
+			"Shirt_T Shirt", "Pants_Long", "Shoes_Boots", "Accessories_Hat",
+			"Base_Body", "Base_Eyes"]:
+		var mesh := MeshInstance3D.new()
+		mesh.name = variant
+		mesh.mesh = BoxMesh.new()
+		model.add_child(mesh)
+	CharacterAppearance.apply(default_state, model)
+	_expect(_mesh_visible(model, "Hair_Layered"), "the default hair variant must be visible after apply")
+	_expect(not _mesh_visible(model, "Hair_Fringe") and not _mesh_visible(model, "Hair_Bob"),
+		"non-selected hair variants must be hidden after apply")
+	_expect(_mesh_visible(model, "Base_Body") and _mesh_visible(model, "Base_Eyes"),
+		"base meshes must stay visible — the applier only touches variants")
+	_expect(not _mesh_visible(model, "Accessories_Hat"),
+		"the optional accessory group must hide every variant when 'none' is chosen")
+
+	# A colour edit must land on a duplicated override material.
+	var shirt := model.get_node("Shirt_T Shirt") as MeshInstance3D
+	var recolored := CharacterAppearance.default_state()
+	recolored.record("shirt_color", Color(1.0, 0.0, 0.0))
+	CharacterAppearance.apply(recolored, model)
+	var override := shirt.get_surface_override_material(0) as StandardMaterial3D
+	_expect(override != null and override.albedo_color.is_equal_approx(Color(1.0, 0.0, 0.0)),
+		"the shirt colour option must set an override material's albedo")
+
+	# Save round-trip: serialize an edited look, disturb the state, restore,
+	# and expect the exact swap index and colour back.
+	var controller := CharacterAppearanceController.new()
+	add_child(controller)
+	var look := CharacterAppearance.default_state()
+	look.record("hair_style", 2) # choice index of "Bob", as the panel stores it
+	look.record("hair_color", Color(0.1, 0.2, 0.3))
+	controller.replace_state(look)
+	var snapshot: Dictionary = controller.serializable()
+	controller.replace_state(CharacterAppearance.randomized_state())
+	controller.restore(snapshot)
+	_expect(int(controller.current_state().values.get("hair_style", -1)) == 2
+		and (controller.current_state().values.get("hair_color") as Color).is_equal_approx(Color(0.1, 0.2, 0.3)),
+		"the save round-trip must restore swap indices and colours exactly")
+
+	# A partial save (missing keys) must default the rest instead of failing.
+	controller.restore({"values": {"hair_style": SaveSystem.encode_variant(7)}})
+	_expect(int(controller.current_state().values.get("hair_style", -1)) == 7
+		and controller.current_state().values.has("shirt_style"),
+		"a partial save must restore known keys and default the rest")
+
+	_expect(not CharacterAppearance.palette("shirt_color").is_empty(),
+		"the panel must be offered swatches for every colour option")
+	controller.free()
+	SaveSystem.unregister_persistent(&"player_appearance")
+	model.free()
+
+
+func _mesh_visible(model: Node, mesh_name: String) -> bool:
+	var mesh := model.get_node_or_null(NodePath(mesh_name)) as MeshInstance3D
+	return mesh != null and mesh.visible
 
 
 ## The tool gun and its constraints: two-shot state, the weld/rope/hinge joints

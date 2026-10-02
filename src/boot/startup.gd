@@ -282,6 +282,10 @@ func _spawn_sandbox(failures: Array[String]) -> void:
 	panel.name = "BuildingPanel"
 	add_child(panel)
 
+	var wardrobe := CharacterPanel.new()
+	wardrobe.name = "CharacterPanel"
+	add_child(wardrobe)
+
 
 func _spawn_ui(failures: Array[String]) -> void:
 	hud = CanvasLayer.new()
@@ -337,7 +341,7 @@ func _finish(failures: Array[String], validate_only: bool) -> void:
 		return
 
 	print("[boot] world ready: map=%s mods=%d" % [GameState.map_id, ModHost.mods.size()])
-	Events.notify("城市已加载 — F1 调试 · F3 自由视角 · F5 保存 · F9 读取 · Esc 菜单", Events.NotifyLevel.SUCCESS)
+	Events.notify("城市已加载 — F1 调试 · F3 自由视角 · V 换装 · F5 保存 · F9 读取 · Esc 菜单", Events.NotifyLevel.SUCCESS)
 
 
 func _count_nodes(node: Node) -> int:

@@ -21,9 +21,10 @@ func _ready() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not event.is_action_pressed(&"pause"):
 		return
-	# The build panel owns Esc while it is open — closing it must not also
-	# toggle the pause menu underneath.
-	if GameState.mode == GameState.Mode.BUILDING:
+	# The build panel and the character panel own Esc while open — closing
+	# either must not also toggle the pause menu underneath.
+	if GameState.mode == GameState.Mode.BUILDING \
+			or GameState.mode == GameState.Mode.CUSTOMIZING:
 		return
 	toggle()
 	get_viewport().set_input_as_handled()
