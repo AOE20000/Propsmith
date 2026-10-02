@@ -76,14 +76,24 @@ func restore(data: Dictionary) -> void:
 	apply_current()
 
 
-## The imported model ships an `Idle_loop` clip; force it to loop and start it.
-## A model without the clip simply stays in its rest pose.
+## Play the imported idle clip on loop. The example model's clip is "Idle" —
+## the glTF name "Idle_loop" loses its loop suffix in the Blender import — so
+## the exact name is tried first and any name containing "idle" second, which
+## also gives a renamed mod model its best chance. A model without an idle
+## clip simply stays in its rest pose.
 func _play_idle(model: Node) -> void:
 	var player := model.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	if player == null:
 		return
-	var animation_name := &"Idle_loop"
-	if not player.has_animation(animation_name):
+	var animation_name := &""
+	if player.has_animation(&"Idle"):
+		animation_name = &"Idle"
+	else:
+		for candidate: String in player.get_animation_list():
+			if candidate.to_lower().contains("idle"):
+				animation_name = StringName(candidate)
+				break
+	if animation_name == &"":
 		return
 	var animation := player.get_animation(animation_name)
 	if animation != null:

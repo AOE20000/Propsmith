@@ -60,6 +60,41 @@ const COLOR_GROUPS: Dictionary = {
 	&"eye_color": {"label": "瞳色", "prefix": "Base_", "meshes": ["Base_Eyes"]},
 }
 
+## Body-proportion groups, driven by bone **rest** edits rather than poses:
+## the idle animation rewrites poses every frame, but the skin binds through
+## rests, so a rest edit keeps shaping the mesh through playback instead of
+## being stomped by the next animation frame. Rest scaling also cascades to
+## child bones, which is what makes a spine edit read as height.
+##
+## Values live in [-1, 1]; `strength` is the scale delta at ±1. Ops accumulate
+## across groups on top of the cached original rests, so overlapping targets
+## (height and leg length both scale the thigh) compose instead of fighting.
+## The named skeleton is the imported example's Rigify rig; bones a mod model
+## does not have are skipped silently.
+const DEFORM_GROUPS: Dictionary = {
+	&"body_height": {
+		"label": "身高", "strength": 0.13,
+		"scale_y": ["spine", "spine.001", "spine.002", "spine.003", "spine.004",
+			"spine.005", "spine.006", "thigh.L", "thigh.R", "shin.L", "shin.R"],
+	},
+	&"shoulder_width": {
+		"label": "肩宽", "strength": 0.35,
+		"scale_x": ["spine.003"],
+	},
+	&"arm_length": {
+		"label": "臂长", "strength": 0.16,
+		"scale_y": ["upper_arm.L", "upper_arm.R"],
+	},
+	&"leg_length": {
+		"label": "腿长", "strength": 0.12,
+		"scale_y": ["thigh.L", "thigh.R", "shin.L", "shin.R"],
+	},
+	&"body_build": {
+		"label": "体型", "strength": 0.28,
+		"scale_xz": ["spine.001", "spine.002", "spine.003"],
+	},
+}
+
 ## The curated default. Chosen as one coherent outfit rather than plugin
 ## defaults: layered hair, warm skin, white tee / navy trousers / brown boots.
 const DEFAULTS: Dictionary = {
@@ -76,6 +111,11 @@ const DEFAULTS: Dictionary = {
 	&"shoes_color": Color(0.35, 0.27, 0.20),
 	&"accessory_color": Color(0.79, 0.65, 0.36),
 	&"eye_color": Color.WHITE,
+	&"body_height": 0.0,
+	&"shoulder_width": 0.0,
+	&"arm_length": 0.0,
+	&"leg_length": 0.0,
+	&"body_build": 0.0,
 }
 
 ## Realistic skin tones for randomization — never HSV noise.
@@ -148,6 +188,16 @@ static func build_config() -> CharacterConfig:
 		for mesh_name: String in _meshes_for(id, group):
 			option.mesh_paths.append(NodePath(mesh_name))
 		config.options.append(option)
+	for id: StringName in DEFORM_GROUPS:
+		var option := DeformOption.new()
+		option.resource_name = String(id)
+		option.display_name = DEFORM_GROUPS[id]["label"]
+		option.group = "体形"
+		option.deform_type = DeformOption.DeformType.BIDIRECTIONAL
+		option.min_value = -1.0
+		option.max_value = 1.0
+		option.default_value = float(DEFAULTS.get(id, 0.0))
+		config.options.append(option)
 	return config
 
 
@@ -215,6 +265,10 @@ static func randomized_state(rng: RandomNumberGenerator = null) -> CharacterStat
 	state.values["pants_color"] = outfit[1]
 	state.values["shoes_color"] = outfit[2]
 	state.values["accessory_color"] = outfit[3]
+	# Proportions stay near the authored body: a random look may be a little
+	# taller, broader or heavier, never a caricature.
+	for id: StringName in DEFORM_GROUPS:
+		state.values[String(id)] = random.randf_range(-0.45, 0.45)
 	state.last_modified = Time.get_unix_time_from_system()
 	return state
 
@@ -239,8 +293,9 @@ static func palette(option_id: String) -> Array[Color]:
 
 
 ## Apply a whole state to a model root: hide every non-selected variant, tint
-## the colour groups. Missing meshes are skipped silently — a model without a
-## variant is a valid look, and the capsule fallback needs nothing here.
+## the colour groups, and drive body proportions through the skeleton's rests.
+## Missing meshes or bones are skipped silently — a model without a variant is
+## a valid look, and the capsule fallback needs nothing here.
 static func apply(state: CharacterState, model_root: Node) -> void:
 	if model_root == null:
 		return
@@ -254,6 +309,11 @@ static func apply(state: CharacterState, model_root: Node) -> void:
 			_apply_swap(option as MeshSwapOption, value, meshes)
 		elif option is ColorOption:
 			_apply_color(option as ColorOption, value, meshes)
+		# Deform groups are resolved against the skeleton(s) below, not per
+		# option: their edits accumulate across groups, so they are applied in
+		# one reset-and-rebuild pass per skeleton.
+	for skeleton: Node in model_root.find_children("*", "Skeleton3D", true, false):
+		_apply_deforms(state, skeleton as Skeleton3D)
 
 
 ## Name → MeshInstance3D lookup built once per pass. Variant nodes are found by
@@ -293,3 +353,89 @@ static func _apply_color(option: ColorOption, value: Variant, meshes: Dictionary
 			if material is StandardMaterial3D:
 				(material as StandardMaterial3D).albedo_color = color
 				mesh.set_surface_override_material(surface, material)
+
+
+## Drive every body-proportion group into one skeleton, in a single
+## reset-and-rebuild pass so repeated applies never drift.
+##
+## The authored rests (and the skeleton's base Y) are cached on the skeleton as
+## meta the first time this runs; every pass restores them first, then layers
+## each group's scale delta on top. Because a lengthened leg pushes the foot
+## below the floor line, the pass ends by re-anchoring the skeleton so the
+## lowest foot bone sits exactly where it started — height changes read on the
+## body, not as sinking into the ground.
+static func _apply_deforms(state: CharacterState, skeleton: Skeleton3D) -> void:
+	if skeleton == null or skeleton.get_bone_count() == 0:
+		return
+	var baseline: Dictionary = skeleton.get_meta(&"appearance_rest_baseline", {})
+	if baseline.is_empty():
+		baseline = {}
+		for bone: int in skeleton.get_bone_count():
+			baseline[skeleton.get_bone_name(bone)] = skeleton.get_bone_rest(bone)
+		skeleton.set_meta(&"appearance_rest_baseline", baseline)
+		skeleton.set_meta(&"appearance_base_y", skeleton.position.y)
+	var base_y: float = float(skeleton.get_meta(&"appearance_base_y", 0.0))
+
+	# Restore, then accumulate: a group's edit is written against the authored
+	# rest, so height + leg length on the same thigh compose predictably.
+	var edited: Dictionary = {}
+	for bone_name: String in baseline:
+		var index := skeleton.find_bone(bone_name)
+		if index >= 0:
+			skeleton.set_bone_rest(index, baseline[bone_name])
+			edited[bone_name] = index
+	skeleton.position.y = base_y
+
+	for id: StringName in DEFORM_GROUPS:
+		var value := clampf(float(state.values.get(String(id), 0.0)), -1.0, 1.0)
+		if is_zero_approx(value):
+			continue
+		var group: Dictionary = DEFORM_GROUPS[id]
+		var factor := 1.0 + value * float(group["strength"])
+		for op: String in ["scale_y", "scale_x", "scale_xz"]:
+			for bone_name: String in group.get(op, []):
+				var index: int = edited.get(bone_name, -1)
+				if index < 0:
+					continue
+				var rest: Transform3D = skeleton.get_bone_rest(index)
+				var scale: Vector3 = rest.basis.get_scale()
+				match op:
+					"scale_y":
+						scale.y *= factor
+					"scale_x":
+						scale.x *= factor
+					"scale_xz":
+						scale.x *= factor
+						scale.z *= factor
+				rest.basis = Basis(rest.basis.get_rotation_quaternion()).scaled(scale)
+				skeleton.set_bone_rest(index, rest)
+
+	# Re-anchor: the lowest foot-bone rest must return to its authored height,
+	# whatever the combination of length edits did to the chain above it.
+	var anchor := skeleton.find_bone(&"heel.02.L")
+	if anchor < 0:
+		anchor = skeleton.find_bone(&"foot.L")
+	if anchor < 0:
+		return
+	var authored_anchor_y := base_y + _global_rest_y(skeleton, anchor, baseline)
+	skeleton.position.y = authored_anchor_y - _global_rest_y(skeleton, anchor, {})
+
+
+## World-rest height of a bone: its global rest origin's Y relative to the
+## skeleton. `overrides` lets the caller measure against the authored rests
+## instead of the ones currently set.
+static func _global_rest_y(skeleton: Skeleton3D, bone: int, overrides: Dictionary) -> float:
+	var rest: Transform3D = skeleton.get_bone_rest(bone)
+	if not overrides.is_empty():
+		rest = overrides.get(skeleton.get_bone_name(bone), rest)
+	# The child's origin lives in its parent's scaled space, so every ancestor
+	# with a Y rest scale stretches the distance to this bone.
+	var y: float = rest.origin.y
+	var parent := skeleton.get_bone_parent(bone)
+	while parent >= 0:
+		var parent_rest: Transform3D = skeleton.get_bone_rest(parent)
+		if not overrides.is_empty():
+			parent_rest = overrides.get(skeleton.get_bone_name(parent), parent_rest)
+		y = parent_rest.origin.y + y * parent_rest.basis.get_scale().y
+		parent = skeleton.get_bone_parent(parent)
+	return y

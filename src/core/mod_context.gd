@@ -29,6 +29,7 @@ var terrain_modifiers: Dictionary = {}
 var vehicle_factories: Dictionary = {}
 var tools: Dictionary = {}
 var npc_factories: Dictionary = {}
+var player_models: Dictionary = {}
 
 
 func _init(owner_mod_id: StringName) -> void:
@@ -162,6 +163,22 @@ func add_npc_factory(npc_id: StringName, display_name: String, factory: Callable
 	}, "npc", "factory")
 
 
+## Replace the default player humanoid. `factory` is a Callable returning a
+## **Node3D** — the model root as it should stand on the player (feet at the
+## origin, facing +Z; the player scene flips it to face -Z). The first
+## id-ordered registration wins, exactly like every other kind, and the
+## appearance panel keeps working against whatever the model exposes: its
+## variant meshes, materials and bones are matched by name, and anything a
+## model lacks is silently skipped rather than erroring.
+func add_player_model(model_id: StringName, display_name: String, factory: Callable) -> bool:
+	return _register_delivering(player_models, model_id, {
+		"id": model_id,
+		"display_name": display_name,
+		"factory": factory,
+		"owner": _mod_id,
+	}, "player model", "factory")
+
+
 ## Resolve another mod's registered landmark without knowing which mod owns it.
 ##
 ## Currently unused by the core: it exists so a mod can build on another mod's content
@@ -189,6 +206,7 @@ func _registry_by_name(registry_name: String) -> Dictionary:
 		"vehicle": return vehicle_factories
 		"tool": return tools
 		"npc": return npc_factories
+		"player model": return player_models
 	return {}
 
 

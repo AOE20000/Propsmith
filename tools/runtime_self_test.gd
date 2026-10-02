@@ -44,7 +44,7 @@ func _ready() -> void:
 	_run_section("mobility is an optional capability", 18, _check_mobility_readiness)
 	_run_section("place table and pedestrian agent", 11, _check_place_table_and_agent)
 	_run_section("sandbox props", 19, _check_prop_sandbox)
-	_run_section("character appearance", 18, _check_character_appearance)
+	_run_section("character appearance", 29, _check_character_appearance)
 	_run_section("tool gun and constraints", 15, _check_tools_and_constraints)
 	_run_section("npc citizens", 11, _check_npc_citizens)
 	_run_section("scripted mod bridges", 7, _check_scripted_bridges)
@@ -908,6 +908,84 @@ func _check_character_appearance() -> void:
 
 	_expect(not CharacterAppearance.palette("shirt_color").is_empty(),
 		"the panel must be offered swatches for every colour option")
+
+	# Body proportions drive bone *rests* on a hand-built rig (a root spine, a
+	# downward leg chain, and the heel anchor the applier pins to the floor).
+	var rig := Skeleton3D.new()
+	model.add_child(rig)
+	var spine := rig.add_bone("spine")
+	rig.set_bone_rest(spine, Transform3D(Basis(), Vector3(0, 1.0, 0)))
+	var spine1 := rig.add_bone("spine.001")
+	rig.set_bone_parent(spine1, spine)
+	rig.set_bone_rest(spine1, Transform3D(Basis(), Vector3(0, 0.12, 0)))
+	var thigh := rig.add_bone("thigh.L")
+	rig.set_bone_parent(thigh, spine)
+	rig.set_bone_rest(thigh, Transform3D(Basis(), Vector3(0.09, -0.95, 0)))
+	var shin := rig.add_bone("shin.L")
+	rig.set_bone_parent(shin, thigh)
+	rig.set_bone_rest(shin, Transform3D(Basis(), Vector3(0, -0.45, 0)))
+	var foot := rig.add_bone("foot.L")
+	rig.set_bone_parent(foot, shin)
+	rig.set_bone_rest(foot, Transform3D(Basis(), Vector3(0, -0.42, 0)))
+	var heel := rig.add_bone("heel.02.L")
+	rig.set_bone_parent(heel, foot)
+	rig.set_bone_rest(heel, Transform3D(Basis(), Vector3(0, -0.06, 0)))
+	var authored_spine1_rest: Transform3D = rig.get_bone_rest(spine1)
+	var base_skeleton_y: float = rig.position.y
+
+	# Zeroed proportions must not touch the authored rests.
+	CharacterAppearance.apply(default_state, model)
+	_expect(rig.get_bone_rest(spine1).basis.get_scale().is_equal_approx(Vector3.ONE),
+		"zeroed proportions must leave the authored bone rests untouched")
+
+	# Full height must scale the spine rest and pin the foot back to the floor.
+	var taller := CharacterAppearance.default_state()
+	taller.record("body_height", 1.0)
+	CharacterAppearance.apply(taller, model)
+	_expect(rig.get_bone_rest(spine1).basis.get_scale().y > 1.1,
+		"full height must scale the spine rest")
+	_expect(rig.position.y > base_skeleton_y,
+		"a lengthened body must re-anchor the skeleton so the foot stays on the floor")
+
+	# Re-applying the same state must be a no-op — the reset pass exists so
+	# panel edits can fire dozens of times without drift.
+	CharacterAppearance.apply(taller, model)
+	var after_first_apply: float = rig.position.y
+	CharacterAppearance.apply(taller, model)
+	_expect(is_equal_approx(rig.position.y, after_first_apply),
+		"applying the same proportions twice must not drift the anchor")
+
+	# Back to zero: rests and the anchor must return exactly to authored values.
+	CharacterAppearance.apply(default_state, model)
+	_expect(rig.get_bone_rest(spine1).basis.get_scale().is_equal_approx(Vector3.ONE)
+		and is_equal_approx(rig.position.y, base_skeleton_y),
+		"zeroed proportions must restore the authored rests and anchor exactly")
+	_expect(authored_spine1_rest == rig.get_bone_rest(spine1),
+		"the rest baseline cache must round-trip the authored transform")
+
+	# Random proportions must stay inside the slider range.
+	var random_in_range := true
+	for deform_id: StringName in CharacterAppearance.DEFORM_GROUPS:
+		var value := float(randomized.values.get(String(deform_id), 99.0))
+		if value < -1.0 or value > 1.0:
+			random_in_range = false
+	_expect(random_in_range, "randomized proportion values must stay inside [-1, 1]")
+
+	# The player-model extension point: registration, collision rule, and the
+	# merged view a consumer reads.
+	_expect(ModContent.KINDS.has(&"player_model"),
+		"player_model must be a registered mod kind")
+	var context := ModContext.new(&"test_mod")
+	_expect(context.add_player_model(&"hero", "测试主角",
+		func() -> Node3D: return Node3D.new()),
+		"a valid player model registration must be accepted")
+	_expect(not context.add_player_model(&"hero", "重复", func() -> Node3D: return null),
+		"a duplicate player model id must be rejected")
+	var content := ModContent.new({"test_mod": context})
+	var merged := content.of(&"player_model")
+	_expect(merged.has("hero") and (merged["hero"] as Dictionary)["factory"].is_valid(),
+		"the merged view must expose the registered player model factory")
+
 	controller.free()
 	SaveSystem.unregister_persistent(&"player_appearance")
 	model.free()

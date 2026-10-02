@@ -52,7 +52,7 @@ res://mods/my_mod/
 > **扩展点现状（P3 起）**：`add_prop_factory`（**真消费者**：生成菜单实例化它，
 > 工厂返回 RigidBody3D）、`add_npc_factory`（**真消费者**：生成菜单的 NPC 区，
 > 工厂返回 CharacterBody3D）、`add_tool_callbacks` / `add_tool`（**真消费者**：
-> 工具枪轮盘与建造面板）。
+> 工具枪轮盘与建造面板）、`add_player_model`（**真消费者**：替换默认玩家形象）。
 > `add_poi_factory` 与 `add_terrain_modifier` 仍是预留（旧地形系统的消费者已移除），
 > `add_item_definition` 也仍预留（无库存系统）——注册都安全，只是无可见效果。
 > 在地图上放内容也可以用 `_on_world_populate` 直接注入——见 `mods/lighthouse/`。
@@ -111,7 +111,20 @@ func _on_register() -> void:
 全控式（继承 `SandboxTool`，状态机自己写）：`context.add_tool(my_tool_instance)`。
 键 3 切到工具枪后，滚轮或建造面板选择工具。
 
-### 5. 新物品（预留，核心尚未消费）
+### 5. 替换默认玩家模型（真消费者：玩家出生形象）
+
+```gdscript
+func _on_register() -> void:
+    # 工厂返回 Node3D——模型根：脚在原点、面向 +Z（玩家会转到 -Z）。
+    # 多个 mod 注册时按 id 序取第一个；外观面板/存档继续工作，
+    # 换装/配色/体形按网格与骨骼名匹配，模型缺的项静默跳过。
+    context.add_player_model(&"my_hero", "我的主角",
+        func() -> Node3D: return (load("res://mods/my_hero/hero.glb") as PackedScene).instantiate())
+```
+
+Lua mod 同款：`bridge.add_player_model("my_hero", "我的主角", factory)`。
+
+### 6. 新物品（预留，核心尚未消费）
 
 ```gdscript
 context.add_item_definition(&"my_relic", {

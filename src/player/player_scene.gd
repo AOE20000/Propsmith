@@ -51,29 +51,26 @@ static func build() -> Player:
 
 
 ## The Configura humanoid (an imported example model with a full options set)
-## replaces the capsule when its imported scene exists — e.g. once Blender is
-## installed so the bundled `.blend` imports, or a converted `.glb` is dropped
-## in. Absent model → silent capsule fallback; nothing here may fail the boot.
+## is the built-in default body; a mod-registered `player_model` replaces it
+## (first id-ordered registration wins, like every other kind). Absent mod and
+## absent model → silent capsule fallback; nothing here may fail the boot.
 ##
 ## Either way a `CharacterAppearanceController` rides on the player: it owns
 ## the look state, applies it to the model when one exists, and persists it
 ## through the save system, so a look chosen with the model present survives
-## boots even when a later boot falls back to the capsule.
+## boots even when a later boot falls back to the capsule. A modded model keeps
+## the panel working: variants, colours and proportions are matched by name and
+## anything the model does not have is skipped.
 const CONFIGURA_MODEL_SCENE: String = "res://addons/Configura/!example/character_scenes/example_model.tscn"
 static func _attach_appearance(player: Player) -> void:
 	var controller := CharacterAppearanceController.new()
 	controller.name = "Appearance"
 	player.add_child(controller)
 
-	if not ResourceLoader.exists(CONFIGURA_MODEL_SCENE, "PackedScene"):
-		return
-	var packed := load(CONFIGURA_MODEL_SCENE) as PackedScene
-	if packed == null:
-		return
-	var model := packed.instantiate() as Node3D
+	var model := _instantiate_player_model()
 	if model == null:
 		return
-	model.name = "ConfiguraModel"
+	model.name = "PlayerModel"
 	# The model faces the camera convention (+Z); the player walks toward -Z.
 	model.rotation_degrees.y = 180.0
 	player.add_child(model)
@@ -81,6 +78,26 @@ static func _attach_appearance(player: Player) -> void:
 	var visual := player.get_node_or_null("Visual") as Node3D
 	if visual != null:
 		visual.visible = false
+
+
+## Mod override first, built-in Configura second, null means capsule. A mod
+## factory failing is a warning, not a boot failure: the fallback body exists
+## precisely so a broken contribution costs the player their custom look, not
+## the game.
+static func _instantiate_player_model() -> Node3D:
+	var entries := ModHost.content_ordered(&"player_model")
+	if not entries.is_empty():
+		var factory: Callable = entries[0].get("factory")
+		var modded: Node3D = factory.call() as Node3D
+		if modded != null:
+			return modded
+		push_warning("[player] mod player model factory returned null — falling back")
+	if not ResourceLoader.exists(CONFIGURA_MODEL_SCENE, "PackedScene"):
+		return null
+	var packed := load(CONFIGURA_MODEL_SCENE) as PackedScene
+	if packed == null:
+		return null
+	return packed.instantiate() as Node3D
 
 
 ## A visible body. Deliberately a plain capsule with a facing marker rather than a

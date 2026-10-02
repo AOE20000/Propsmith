@@ -16,6 +16,7 @@ const PANEL_WIDTH: float = 760.0
 var _open: bool = false
 var _swappers: Dictionary = {}
 var _pickers: Dictionary = {}
+var _sliders: Dictionary = {}
 
 
 func _ready() -> void:
@@ -111,6 +112,12 @@ func _build() -> void:
 	rows.add_child(spacer)
 	for id: StringName in CharacterAppearance.COLOR_GROUPS:
 		rows.add_child(_build_color_row(String(id), CharacterAppearance.COLOR_GROUPS[id]))
+	var proportions_header := Label.new()
+	proportions_header.text = "体形（滑杆实时生效）"
+	proportions_header.modulate = Color(0.7, 0.78, 0.88)
+	rows.add_child(proportions_header)
+	for id: StringName in CharacterAppearance.DEFORM_GROUPS:
+		rows.add_child(_build_deform_row(String(id), CharacterAppearance.DEFORM_GROUPS[id]))
 
 	column.add_child(_build_footer())
 
@@ -170,6 +177,39 @@ func _build_color_row(option_id: String, group: Dictionary) -> HBoxContainer:
 	)
 	_pickers[option_id] = picker
 	row.add_child(picker)
+	return row
+
+
+## A proportion slider: [-1, 1] drives bone-rest scaling live, so the body
+## reshapes while the slider moves. The readout keeps the raw value visible —
+## "taller" alone hides how much headroom is left before the clamp.
+func _build_deform_row(option_id: String, group: Dictionary) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	row.add_child(_row_label(group["label"]))
+
+	var slider := HSlider.new()
+	slider.min_value = -1.0
+	slider.max_value = 1.0
+	slider.step = 0.02
+	slider.custom_minimum_size = Vector2(0.0, 24.0)
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(slider)
+
+	var readout := Label.new()
+	readout.custom_minimum_size = Vector2(46.0, 0.0)
+	readout.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	readout.modulate = Color(0.7, 0.85, 0.95)
+	row.add_child(readout)
+
+	slider.value_changed.connect(func(value: float) -> void:
+		readout.text = "%+.0f%%" % (value * 100.0)
+		var controller := _controller()
+		if controller != null:
+			controller.set_option(option_id, value)
+	)
+	_sliders[option_id] = {"slider": slider, "readout": readout}
 	return row
 
 
@@ -241,3 +281,10 @@ func _sync_controls() -> void:
 		var picker: ColorPickerButton = _pickers[option_id]
 		var value: Variant = state.values.get(option_id, Color.WHITE)
 		picker.color = value if value is Color else Color.WHITE
+	for option_id: String in _sliders:
+		var row: Dictionary = _sliders[option_id]
+		var slider: HSlider = row["slider"]
+		var readout: Label = row["readout"]
+		var value := clampf(float(state.values.get(option_id, 0.0)), -1.0, 1.0)
+		slider.set_value_no_signal(value)
+		readout.text = "%+.0f%%" % (value * 100.0)

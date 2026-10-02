@@ -161,6 +161,16 @@ func add_npc(npc_id: String, display_name: String, mesh_factory: Callable) -> bo
 	return _context.add_npc_factory(StringName(npc_id), display_name, wrapped)
 
 
+## Replace the default player humanoid from a scripted mod: the factory returns
+## the model root (Node3D). Same consumer as `ModContext.add_player_model` —
+## the appearance panel and the save system keep working against the modded
+## look, matched by mesh/bone name wherever the model supports it.
+func add_player_model(model_id: String, display_name: String, factory: Callable) -> bool:
+	if _context == null:
+		return false
+	return _context.add_player_model(StringName(model_id), display_name, factory)
+
+
 ## Wrap a Mesh into a simple rigid body: box collider fitted to the AABB with a
 ## sensible default mass. The lowest-friction path for a scripted mod to get a
 ## prop into the spawn menu without hand-rolling physics bodies.

@@ -40,6 +40,7 @@ $benignPatterns = @(
     "at: push_warning",
     "at: push_error",
     "[mod:selftest] prop id 'selftest_prop' already taken",
+    "[mod:test_mod] player model id 'hero' already taken",
     "[selftest] watch: 'player_died_secretly' is not a published event",
     "[selftest] on: 'before_frame' is not a hook",
     "[ModHost] mod 'selftest_second': prop id 'shared_id' is already claimed",
