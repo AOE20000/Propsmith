@@ -17,4 +17,4 @@ tools/plateau/.scan/
 data/
 
 # PLATEAU GDExtension reloadable copies (same mechanism as terrain_3d had)
-addons/plateau/~*
+addons/plateau/**/~*
