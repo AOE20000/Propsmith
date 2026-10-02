@@ -179,22 +179,69 @@ func undo() -> bool:
 
 
 ## Delete a specific prop (the wrench's remove action). Also erased from the
-## undo stack so undo can never resurrect it.
+## undo stack so undo can never resurrect it. Freed **immediately** — these
+## calls come from input callbacks, and a same-frame constraint sweep must see
+## the removal, not a pending queue_free.
 func remove(prop: Node) -> void:
 	if prop == null or not is_instance_valid(prop):
 		return
 	_undo_stack.erase(prop)
 	var prop_id: StringName = prop.get_meta(&"prop_id", &"")
-	prop.queue_free()
+	prop.free()
 	Events.prop_removed.emit(prop_id)
 
 
-## Delete every spawned prop (the spawn menu's "clear" button).
+## Delete every spawned prop (the spawn menu's "clear" button). Freed
+## immediately for the same reason `remove` is: the constraint store's sweep
+## runs this frame and must see the removal.
 func clear_all() -> void:
 	for node: Node in _undo_stack:
 		if is_instance_valid(node):
-			node.queue_free()
+			node.free()
 	_undo_stack.clear()
+
+
+## The serialized form of every spawned **prop** (id, transform, frozen state).
+## Citizens and mod NPCs are session content, not decisions — identified by the
+## absence of a `prop_id` meta — and are skipped here by design.
+func serialize_props() -> Array:
+	var out: Array = []
+	for node: Node in _undo_stack:
+		if not is_instance_valid(node) or not (node is RigidBody3D):
+			continue
+		var prop := node as RigidBody3D
+		var prop_id: StringName = prop.get_meta(&"prop_id", &"")
+		if prop_id == &"":
+			continue
+		var euler: Vector3 = prop.rotation
+		out.append({
+			"id": String(prop_id),
+			"instance": prop.get_instance_id(),
+			"position": [prop.global_position.x, prop.global_position.y, prop.global_position.z],
+			"rotation": [euler.x, euler.y, euler.z],
+			"frozen": prop.freeze,
+		})
+	return out
+
+
+## Rebuild one prop from a saved record. Returns the node so the constraint
+## restorer can map saved indices back to live bodies.
+func restore_prop(record: Dictionary) -> RigidBody3D:
+	var prop_id := StringName(String(record.get("id", "")))
+	var position_values: Array = record.get("position", [0.0, 1.0, 0.0])
+	var rotation_values: Array = record.get("rotation", [0.0, 0.0, 0.0])
+	var prop := spawn(prop_id, Vector3(
+		float(position_values[0]), float(position_values[1]), float(position_values[2])
+	))
+	if prop == null:
+		return null
+	prop.rotation = Vector3(
+		float(rotation_values[0]), float(rotation_values[1]), float(rotation_values[2])
+	)
+	if bool(record.get("frozen", false)):
+		prop.freeze = true
+		PropFactory.set_frozen_look(prop, true)
+	return prop
 
 
 func count() -> int:

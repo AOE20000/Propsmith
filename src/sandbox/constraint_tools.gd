@@ -63,40 +63,32 @@ func _build(first_body: Node3D, first: Dictionary, second_body: Node3D, second: 
 		return
 	var point_a: Vector3 = SandboxTool.world_point_of(first)
 	var point_b: Vector3 = SandboxTool.world_point_of(second)
+	var extra := {}
+	var link: Node = null
 	match kind:
 		&"weld":
-			_build_weld(store, first_body, second_body, point_a)
+			extra = {"anchor": point_a}
+			link = store.build_link(&"weld", first_body, second_body, extra)
 		&"rope":
-			_build_rope(store, first_body, second_body, point_a, point_b)
+			extra = {
+				"length": point_a.distance_to(point_b),
+				"local_a": first_body.global_transform.affine_inverse() * point_a,
+				"local_b": second_body.global_transform.affine_inverse() * point_b,
+			}
+			link = store.build_link(&"rope", first_body, second_body, extra)
 		&"hinge":
-			_build_hinge(store, first_body, second_body, point_b, first.get("normal", Vector3.UP))
-
-
-func _build_weld(store: ConstraintStore, a: Node3D, b: Node3D, anchor: Vector3) -> void:
-	var joint := Generic6DOFJoint3D.new()
-	joint.name = "Weld_%d" % (store.count() + 1)
-	joint.position = anchor
-	# Six axes locked by default: the pair moves as one solid.
-	store.register(joint, a, b, &"weld")
-	Events.notify("已焊接", Events.NotifyLevel.SUCCESS)
-
-
-func _build_rope(store: ConstraintStore, a: Node3D, b: Node3D, point_a: Vector3, point_b: Vector3) -> void:
-	# Jolt does not ship DampedSpringJoint3D (verified via ClassDB), so the rope
-	# is a self-contained link: visual bar plus a per-frame restoring pull.
-	var rope := RopeVisual.new()
-	rope.name = "Rope_%d" % (store.count() + 1)
-	rope.length = point_a.distance_to(point_b)
-	rope.bind_ends(a, a.global_transform.affine_inverse() * point_a, b, b.global_transform.affine_inverse() * point_b)
-	store.register(rope, a, b, &"rope")
-	Events.notify("已连接绳索（%.1f 米）" % rope.length, Events.NotifyLevel.SUCCESS)
-
-
-func _build_hinge(store: ConstraintStore, a: Node3D, b: Node3D, pivot: Vector3, axis: Vector3) -> void:
-	var joint := HingeJoint3D.new()
-	joint.name = "Hinge_%d" % (store.count() + 1)
-	# The hinge turns around the joint's local Z: aim -Z along the clicked
-	# surface normal, so "the face you first clicked" becomes the spin axis.
-	joint.look_at_from_position(pivot, pivot + axis.normalized(), Vector3.UP)
-	store.register(joint, a, b, &"hinge")
-	Events.notify("已安装铰链", Events.NotifyLevel.SUCCESS)
+			extra = {
+				"pivot": point_b,
+				"axis": (first.get("normal", Vector3.UP) as Vector3).normalized(),
+			}
+			link = store.build_link(&"hinge", first_body, second_body, extra)
+	if link == null:
+		return
+	store.register(link, first_body, second_body, kind, extra)
+	match kind:
+		&"weld":
+			Events.notify("已焊接", Events.NotifyLevel.SUCCESS)
+		&"rope":
+			Events.notify("已连接绳索（%.1f 米）" % float(extra.get("length", 0.0)), Events.NotifyLevel.SUCCESS)
+		&"hinge":
+			Events.notify("已安装铰链", Events.NotifyLevel.SUCCESS)

@@ -117,11 +117,21 @@ func _settle_and_verify() -> void:
 		get_tree().quit(EXIT_BOOT_FAILED)
 
 
+## Which map the session runs on, chosen by `DSH_MAP_SOURCE` (`playground` or
+## the default `plateau`). Mod-registered sources join through the same seam
+## later; the switch lives in exactly one place.
+func _make_map_source() -> MapSource:
+	match OS.get_environment("DSH_MAP_SOURCE"):
+		"playground":
+			return PlaygroundMapSource.new()
+	return PlateauMapSource.new()
+
+
 ## Services are registered by the module that owns them, so swapping a module
 ## means changing one registration rather than editing the boot order.
 func _register_core_services(failures: Array[String]) -> void:
 	if not Services.has(&"map_source"):
-		Services.register(&"map_source", PlateauMapSource.new())
+		Services.register(&"map_source", _make_map_source())
 	if not Services.has(&"surface_query"):
 		Services.register(&"surface_query", SurfaceQuery.new())
 	if not Services.has(&"vehicle_system"):
@@ -139,6 +149,14 @@ func _register_core_services(failures: Array[String]) -> void:
 		var gun := ToolGun.new()
 		Services.register(&"tool_gun", gun)
 		add_child(gun)
+	# The persistence node registers the sandbox section with the save system;
+	# bound explicitly so it talks to exactly the services registered above.
+	var persistence := SandboxPersistence.new()
+	add_child(persistence)
+	persistence.setup(
+		Services.get_as(&"prop_spawner", &"PropSpawner") as PropSpawner,
+		Services.get_as(&"constraint_store", &"ConstraintStore") as ConstraintStore,
+	)
 	ModIntegration.publish_core_providers()
 
 	for required: StringName in [&"map_source", &"surface_query"]:

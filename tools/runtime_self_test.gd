@@ -47,6 +47,7 @@ func _ready() -> void:
 	_run_section("tool gun and constraints", 15, _check_tools_and_constraints)
 	_run_section("npc citizens", 11, _check_npc_citizens)
 	_run_section("scripted mod bridges", 7, _check_scripted_bridges)
+	_run_section("map sources and blueprints", 13, _check_map_sources_and_blueprints)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("boot summary", 4, _check_summary)
 
@@ -1034,6 +1035,99 @@ func gun_roster_contains(context: ModContext, tool_id: StringName) -> bool:
 			break
 	ModHost.contexts.erase(context.get_mod_id())
 	return found
+
+
+## P4: the second map source proves the seam, and the blueprint persistence
+## proves that spawned props and constraints round-trip as decisions. The
+## playground builds without any dataset; the blueprint test serializes a real
+## spawn+weld session, wipes it, and rebuilds it through the restore path.
+func _check_map_sources_and_blueprints() -> void:
+	# --- PlaygroundMapSource: a whole map from code, no dataset ---
+	# The self-test scene never runs the boot sequence, so the services the
+	# playground expects must be registered here. Declared at function scope:
+	# GDScript variables are block-scoped, and the blueprint half of this test
+	# uses the same spawner the persistence node resolves through services.
+	var test_spawner: PropSpawner = null
+	if not Services.has(&"surface_query"):
+		Services.register(&"surface_query", SurfaceQuery.new())
+	if not Services.has(&"prop_spawner"):
+		test_spawner = PropSpawner.new()
+		add_child(test_spawner)
+		Services.register(&"prop_spawner", test_spawner)
+	if test_spawner == null:
+		test_spawner = Services.get_as(&"prop_spawner", &"PropSpawner") as PropSpawner
+	var sandbox_container := Node3D.new()
+	add_child(sandbox_container)
+	test_spawner.setup(sandbox_container)
+	var playground := PlaygroundMapSource.new()
+	var world := Node3D.new()
+	add_child(world)
+	_expect(playground.build(world, 7), "the playground must build headlessly")
+	_expect(playground.map_id() == "playground:1", "the playground identity must be stable")
+	_expect(world.get_node_or_null("Ground") != null, "the playground must have ground")
+	var query: SurfaceQuery = Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery
+	_expect(query != null and query.is_ready(), "the playground must publish surface queries")
+	_expect(playground.find_spawn_position().y > 0.0, "the playground spawn must stand above ground")
+	# Citizens degrade to wandering here — the readiness-driven report a mod
+	# map without annotations would also produce.
+	var wandering: bool = false
+	for child: Node in world.get_node("Pedestrians").get_children():
+		if child is PedestrianAgent and (child as PedestrianAgent).wandering:
+			wandering = true
+	_expect(wandering, "playground citizens must wander (no place table on this map)")
+	playground.teardown(world)
+
+	# --- Blueprint round-trip: the persistence node is bound to the services
+	# registered above (test_spawner is that very instance), so the serialize
+	# and restore see the same spawner the game would. The store may already be
+	# registered by the tools section — reuse it rather than fighting the
+	# register guard.
+	var store: ConstraintStore = Services.get_as(&"constraint_store", &"ConstraintStore") as ConstraintStore
+	if store == null:
+		store = ConstraintStore.new()
+		add_child(store)
+		store.setup(constraint_root_for(store))
+		Services.register(&"constraint_store", store)
+
+	var crate_a: RigidBody3D = test_spawner.spawn(&"crate", Vector3(1.0, 1.0, 0.0))
+	var crate_b: RigidBody3D = test_spawner.spawn(&"crate", Vector3(1.0, 2.0, 0.0))
+	# The weld is built directly through the store here: the tool→store chain
+	# is covered in the tools section, and this section is about persistence.
+	var weld_link: Node = store.build_link(&"weld", crate_a, crate_b, {"anchor": Vector3(1.0, 1.5, 0.0)})
+	store.register(weld_link, crate_a, crate_b, &"weld")
+	crate_b.freeze = true
+	PropFactory.set_frozen_look(crate_b, true)
+	_expect(store.count() == 1, "the session to save must hold one weld")
+
+	var persistence := SandboxPersistence.new()
+	add_child(persistence)
+	persistence.setup(test_spawner, store)
+	var blueprint: Dictionary = persistence.serialize()
+	_expect((blueprint.get("props", []) as Array).size() == 2, "the blueprint must hold both props")
+	_expect((blueprint.get("constraints", []) as Array).size() == 1, "the blueprint must hold the weld")
+
+	test_spawner.clear_all()
+	store._process(0.0)
+	_expect(test_spawner.count() == 0 and store.count() == 0, "the wipe must leave nothing behind")
+
+	persistence.deserialize(blueprint)
+	_expect(test_spawner.count() == 2, "the restore must rebuild both props")
+	_expect(store.count() == 1, "the restore must rebuild the weld")
+	var restored_frozen: bool = false
+	for node: Node in test_spawner._undo_stack:
+		if node is RigidBody3D and (node as RigidBody3D).freeze:
+			restored_frozen = true
+	_expect(restored_frozen, "the frozen flag must survive the round-trip")
+
+	test_spawner.clear_all()
+
+
+## A fresh constraint container per store, keyed by the store node so two tests
+## never share one.
+func constraint_root_for(_store: ConstraintStore) -> Node3D:
+	var root := Node3D.new()
+	add_child(root)
+	return root
 
 
 ## The one line the boot report prints has to stay parseable and name both runtimes,

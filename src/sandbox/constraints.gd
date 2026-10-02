@@ -30,7 +30,9 @@ func setup(container: Node3D) -> void:
 ## container and, for joints, wires node_a/node_b. That wiring must happen
 ## *after* the joint is in the tree — `get_path_to` needs a common ancestor —
 ## which is exactly why the store owns this step instead of the tools.
-func register(link: Node, a: Node3D, b: Node3D, kind: StringName) -> void:
+## `extra` carries the parameters a save needs to rebuild it (rope locals and
+## rest length, hinge pivot and axis).
+func register(link: Node, a: Node3D, b: Node3D, kind: StringName, extra: Dictionary = {}) -> void:
 	if _container == null:
 		push_warning("ConstraintStore: no container bound; call setup() after the map builds")
 		link.queue_free()
@@ -40,7 +42,39 @@ func register(link: Node, a: Node3D, b: Node3D, kind: StringName) -> void:
 		var joint := link as Joint3D
 		joint.node_a = joint.get_path_to(a)
 		joint.node_b = joint.get_path_to(b)
-	_records.append({"link": link, "a": a, "b": b, "kind": kind})
+	_records.append({"link": link, "a": a, "b": b, "kind": kind, "extra": extra})
+
+
+## Build a constraint link from saved parameters — the single rebuilder shared
+## by the tools (live clicks) and the persistence layer (restores). Returns the
+## parentless link node; the caller registers it with the store.
+func build_link(kind: StringName, a: Node3D, b: Node3D, extra: Dictionary) -> Node:
+	match kind:
+		&"weld":
+			var weld := Generic6DOFJoint3D.new()
+			weld.name = "Weld_%d" % (count() + 1)
+			weld.position = extra.get("anchor", Vector3.ZERO)
+			return weld
+		&"rope":
+			var rope := RopeVisual.new()
+			rope.name = "Rope_%d" % (count() + 1)
+			rope.length = float(extra.get("length", 1.0))
+			rope.bind_ends(
+				a, extra.get("local_a", Vector3.ZERO) as Vector3,
+				b, extra.get("local_b", Vector3.ZERO) as Vector3,
+			)
+			return rope
+		&"hinge":
+			var hinge := HingeJoint3D.new()
+			hinge.name = "Hinge_%d" % (count() + 1)
+			var pivot: Vector3 = extra.get("pivot", Vector3.ZERO)
+			var axis: Vector3 = (extra.get("axis", Vector3.UP) as Vector3).normalized()
+			# The hinge turns around the joint's local Z: aim -Z along the saved
+			# axis so a restored hinge spins the way it was placed.
+			hinge.look_at_from_position(pivot, pivot + axis, Vector3.UP)
+			return hinge
+	push_warning("ConstraintStore: unknown constraint kind '%s'" % kind)
+	return null
 
 
 func count() -> int:
@@ -49,6 +83,30 @@ func count() -> int:
 
 func describe() -> String:
 	return "constraints=%d" % _records.size()
+
+
+## Serialized form of every live constraint whose ends are both in the saved
+## prop list. `index_of` maps a body to its saved index; ends that do not map
+## (a mod NPC, a freed body) drop the record — a constraint with a dangling
+## half is not a decision worth keeping.
+func serialize_constraints(index_of: Callable) -> Array:
+	var out: Array = []
+	for record: Dictionary in _records:
+		var a: Variant = record.get("a")
+		var b: Variant = record.get("b")
+		if not is_instance_valid(a) or not is_instance_valid(b):
+			continue
+		var ai: int = index_of.call(a)
+		var bi: int = index_of.call(b)
+		if ai < 0 or bi < 0:
+			continue
+		out.append({
+			"kind": String(record.get("kind", &"weld")),
+			"a": ai,
+			"b": bi,
+			"extra": record.get("extra", {}),
+		})
+	return out
 
 
 func _process(_delta: float) -> void:
