@@ -24,6 +24,11 @@ const GRAVITY: float = 18.0
 const WANDER_RADIUS: float = 30.0
 ## Seconds a fallen citizen stays before the world takes them back.
 const CORPSE_LINGER: float = 4.0
+## The sample VRM avatar used as a humanoid appearance when its imported scene
+## exists. The `.vrm` source lives in `vrm_samples/` (CC-BY, see
+## LICENSE_SAMPLES.txt); the VRM importer turns it into a PackedScene on import.
+## Absent or not yet imported → the capsule stays, silently.
+const VRM_APPEARANCE_SCENE: String = "res://vrm_samples/Godette_vrm_v4.vrm"
 
 var route: AgentRoute = null
 ## True when no annotated places were available: the citizen still walks, just
@@ -79,6 +84,29 @@ func configure_wander(origin: Vector3, seed: int) -> void:
 	global_position = origin
 	_wander_rng.seed = hash("wander|%s|%d" % [origin, seed])
 	_refresh_waypoints()
+
+
+## Swap the capsule for the sample VRM humanoid. Returns false when the model's
+## imported scene is unavailable (importer disabled, .vrm not yet imported) —
+## the caller keeps the capsule and nothing else changes.
+func apply_vrm_appearance() -> bool:
+	if not ResourceLoader.exists(VRM_APPEARANCE_SCENE, "PackedScene"):
+		return false
+	var packed := load(VRM_APPEARANCE_SCENE) as PackedScene
+	if packed == null:
+		return false
+	var model := packed.instantiate() as Node3D
+	if model == null:
+		return false
+	model.name = "VRMModel"
+	# The avatar faces +Z; the citizen walks toward its -Z target, so turn the
+	# model to match the movement code's facing assumption.
+	model.rotation_degrees.y = 180.0
+	add_child(model)
+	var visual := get_node_or_null("Visual") as MeshInstance3D
+	if visual != null:
+		visual.visible = false
+	return true
 
 
 func _physics_process(delta: float) -> void:

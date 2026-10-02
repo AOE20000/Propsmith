@@ -206,6 +206,10 @@ res://mods/my_mod/
 | [godot-plateau](https://github.com/shiena/godot-plateau) PLATEAU 加载 GDExtension | MIT | `addons/plateau/`（版权归 Shiena 及贡献者） |
 | [godot-mod-loader](https://github.com/GodotModding/godot-mod-loader) mod 加载器 | CC0 1.0 | `addons/mod_loader/LICENSE`（版权归 GodotModding 及贡献者） |
 | [JSON_Schema_Validator](https://github.com/GodotModding/godot-mod-loader)（上者的依赖） | MIT | `addons/JSON_Schema_Validator/JSON_Schema_validator_LICENSE`（版权归 Sahedo） |
+| [Configura](https://github.com/Team-Figoose/Configura) 角色创建框架 | MIT | `addons/Configura/LICENSE.txt`（版权归 Configura Team） |
+| [godot-vrm](https://github.com/Snowdaw/godot-vrm) VRM 导入/导出 | MIT | `addons/vrm/LICENSE`（版权归 V-Sekai Contributors 及 VRM Consortium） |
+| [Godot-MToon-Shader](https://github.com/Snowdaw/godot-vrm)（上者的 VRM 动漫画着色器） | MIT | `addons/Godot-MToon-Shader/LICENSE` |
+| [Godette VRM 示例模型](https://github.com/SirRichard94/low-poly-godette) | CC-BY 3.0 | `vrm_samples/Godette_vrm_v4.vrm` 与 `vrm_samples/LICENSE_SAMPLES.txt`（模型版权归 SirRichard94，VRM 适配归 Lyuma） |
 
 游戏内容所用的 **PLATEAU 城市数据不入库**（下载到 `data/`，已 gitignore），其许可为
 政府標準利用規約（第 2.0 版）/ CC BY 4.0 / ODC BY / ODbL；对外发布使用了数据的作品时需要

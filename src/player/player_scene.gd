@@ -39,6 +39,7 @@ static func build() -> Player:
 
 	player.add_child(_build_visual())
 	player.add_child(_build_camera_rig())
+	_try_attach_configura_model(player)
 
 	var weapon := _build_weapon()
 	player.add_child(weapon)
@@ -49,9 +50,34 @@ static func build() -> Player:
 	return player
 
 
+## The Configura humanoid (an imported example model with a full options set)
+## replaces the capsule when its imported scene exists — e.g. once Blender is
+## installed so the bundled `.blend` imports, or a converted `.glb` is dropped
+## in. Absent model → silent capsule fallback; nothing here may fail the boot.
+const CONFIGURA_MODEL_SCENE: String = "res://addons/Configura/!example/character_scenes/example_model.tscn"
+static func _try_attach_configura_model(player: Player) -> void:
+	if not ResourceLoader.exists(CONFIGURA_MODEL_SCENE, "PackedScene"):
+		return
+	var packed := load(CONFIGURA_MODEL_SCENE) as PackedScene
+	if packed == null:
+		return
+	var model := packed.instantiate() as Node3D
+	if model == null:
+		return
+	model.name = "ConfiguraModel"
+	# The model faces the camera convention (+Z); the player walks toward -Z.
+	model.rotation_degrees.y = 180.0
+	player.add_child(model)
+	var visual := player.get_node_or_null("Visual") as Node3D
+	if visual != null:
+		visual.visible = false
+
+
 ## A visible body. Deliberately a plain capsule with a facing marker rather than a
 ## character model: the world is a prototype, and a stand-in that reads clearly
 ## from behind is more useful than a placeholder mesh that hides the camera.
+## The Configura humanoid model (see `_try_attach_configura_model`) replaces
+## this capsule when its imported scene is available.
 static func _build_visual() -> Node3D:
 	var visual := Node3D.new()
 	visual.name = "Visual"

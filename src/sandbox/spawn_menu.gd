@@ -143,6 +143,25 @@ func _rebuild_list() -> void:
 		_list.add_child(_action_button(String(entry.get("display_name", "")), func() -> void:
 			npc_spawner.call(npc_id)
 		))
+	# The VRM appearance is a per-citizen choice: same schedule logic, humanoid
+	# skin when the sample model has been imported.
+	_list.add_child(_action_button("市民（VRM 外观）", func() -> void:
+		if _spawner == null:
+			_spawner = Services.get_as(&"prop_spawner", &"PropSpawner") as PropSpawner
+		if _spawner == null:
+			return
+		var camera: Camera3D = get_viewport().get_camera_3d()
+		var target: Vector3 = Vector3.ZERO
+		if camera != null:
+			var probe := PhysicsRayQueryParameters3D.create(
+				camera.global_position,
+				camera.global_position - camera.global_transform.basis.z * 60.0,
+				1,
+			)
+			var hit: Dictionary = camera.get_world_3d().direct_space_state.intersect_ray(probe)
+			target = (hit["position"] as Vector3) + Vector3.UP if not hit.is_empty() else camera.global_position - camera.global_transform.basis.z * 3.0
+		_spawner.spawn_citizen(target, randi(), &"vrm")
+	))
 
 	var spacer2 := Control.new()
 	spacer2.custom_minimum_size = Vector2(0.0, 8.0)
