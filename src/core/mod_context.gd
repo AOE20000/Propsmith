@@ -52,14 +52,20 @@ func add_poi_factory(poi_id: StringName, display_name: String, factory: Callable
 	}, "poi", "factory")
 
 
-## Add a scattered prop (tree, rock, ruin). `factory` is a Callable returning a Mesh
-## for one instance.
-func add_prop_factory(prop_id: StringName, factory: Callable, density: float = 1.0, max_slope_degrees: float = 35.0) -> bool:
+## Add a spawnable prop. `factory` is a Callable building a **RigidBody3D**
+## (mesh + collision + mass fully configured); the sandbox spawn menu lists it
+## and the prop spawner instantiates it on demand. This used to feed the old
+## terrain scatterer (a Mesh factory) — the seam kept its kind and id rules,
+## and gained the consumer the sandbox provides.
+func add_prop_factory(prop_id: StringName, display_name: String, factory: Callable, category: String = "misc") -> bool:
+	if display_name.strip_edges().is_empty():
+		push_error("[mod:%s] prop '%s' needs a display name: it is what the spawn menu shows" % [_mod_id, prop_id])
+		return false
 	return _register_delivering(prop_factories, prop_id, {
 		"id": prop_id,
+		"display_name": display_name,
 		"factory": factory,
-		"density": density,
-		"max_slope_degrees": max_slope_degrees,
+		"category": category,
 		"owner": _mod_id,
 	}, "prop", "factory")
 

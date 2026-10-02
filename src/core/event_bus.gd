@@ -54,6 +54,13 @@ signal game_loaded(slot: String)
 signal notification_posted(text: String, level: int)
 signal mods_loaded(mod_ids: PackedStringArray)
 
+## Sandbox props. Broadcast-only: sessions without the sandbox module simply
+## never emit these.
+signal prop_spawned(prop: Node, prop_id: StringName)
+signal prop_removed(prop_id: StringName)
+signal prop_frozen(prop: Node, frozen: bool)
+signal hand_tool_changed(tool_id: StringName)
+
 enum NotifyLevel { INFO, SUCCESS, WARNING }
 
 

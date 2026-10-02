@@ -30,6 +30,13 @@ func _process(delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not event.is_action_pressed(&"attack"):
 		return
+	# The tool belt owns the primary button when another tool is held: the same
+	# mouse button grabs with the wrench, so the weapon stands down. Checked
+	# through the service (null → weapon, which keeps combat working in test
+	# scenes that never register the sandbox).
+	var belt: Variant = Services.get_service(&"tool_belt")
+	if belt != null and (belt as ToolBelt).current != &"weapon":
+		return
 	if GameState.mode != GameState.Mode.EXPLORING:
 		return
 	if attacker == null or _request_budget < 1.0:

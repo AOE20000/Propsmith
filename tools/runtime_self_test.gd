@@ -43,6 +43,7 @@ func _ready() -> void:
 	_run_section("map-agnostic mobility core", 82, _check_mobility_core)
 	_run_section("mobility is an optional capability", 18, _check_mobility_readiness)
 	_run_section("place table and pedestrian agent", 10, _check_place_table_and_agent)
+	_run_section("sandbox props", 19, _check_prop_sandbox)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("boot summary", 4, _check_summary)
 
@@ -228,9 +229,9 @@ func _check_bridge() -> void:
 func _check_collision_rule() -> void:
 	var first := ModContext.new(&"selftest_first")
 	var second := ModContext.new(&"selftest_second")
-	_expect(first.add_prop_factory("shared_id", func() -> Mesh: return SphereMesh.new()), "first mod could not register")
-	_expect(second.add_prop_factory("shared_id", func() -> Mesh: return SphereMesh.new()), "second mod was refused its own registry entry")
-	_expect(second.add_prop_factory("unique_id", func() -> Mesh: return BoxMesh.new()), "second mod could not register a unique id")
+	_expect(first.add_prop_factory("shared_id", "first prop", func() -> RigidBody3D: return RigidBody3D.new()), "first mod could not register")
+	_expect(second.add_prop_factory("shared_id", "second prop", func() -> RigidBody3D: return RigidBody3D.new()), "second mod was refused its own registry entry")
+	_expect(second.add_prop_factory("unique_id", "unique prop", func() -> RigidBody3D: return RigidBody3D.new()), "second mod could not register a unique id")
 
 	ModHost.contexts["selftest_first"] = first
 	ModHost.contexts["selftest_second"] = second
@@ -736,6 +737,79 @@ func _check_place_table_and_agent() -> void:
 	])
 	_expect(agent.progress_fraction() == 0.0, "a freshly configured agent must not have progressed")
 	agent.queue_free()
+
+
+## The sandbox's first milestone: a prop catalogue whose factories build valid
+## rigid bodies, a spawner whose spawn/undo/remove never leak or resurrect a
+## node, and the belt that arbitrates the shared primary button. All exercised
+## on the built-in catalogue — headless, no data, no rendering.
+func _check_prop_sandbox() -> void:
+	var entries: Array[Dictionary] = PropCatalog.entries()
+	_expect(entries.size() >= 6, "the built-in catalogue must offer at least 6 props")
+	var ids: Dictionary = {}
+	for entry: Dictionary in entries:
+		ids[String(entry.get("id", ""))] = true
+	_expect(ids.size() == entries.size(), "prop ids must be unique across built-ins and mods")
+
+	var definition: Dictionary = PropCatalog.find(&"crate")
+	_expect(not definition.is_empty(), "crate must be in the catalogue")
+	var body: Variant = (definition["factory"] as Callable).call()
+	_expect(body is RigidBody3D, "a prop factory must build a RigidBody3D")
+	var shape := (body as RigidBody3D).get_node_or_null("Body") as CollisionShape3D
+	_expect(shape != null and shape.shape != null, "a built prop must carry a collision shape")
+	_expect((body as RigidBody3D).mass > 0.0, "a built prop must have positive mass")
+	(body as RigidBody3D).free()
+
+	var container := Node3D.new()
+	add_child(container)
+	var spawner := PropSpawner.new()
+	add_child(spawner)
+	spawner.setup(container)
+	var spawned: RigidBody3D = spawner.spawn(&"crate", Vector3.ZERO)
+	_expect(spawned != null and spawned.get_parent() == container, "spawn must parent the prop to the bound container")
+	_expect(spawner.count() == 1, "one spawn must leave one live prop")
+	_expect(spawner.undo(), "undo must report a popped spawn")
+	_expect(spawner.count() == 0, "undo must empty the spawner")
+	_expect(spawned == null or spawned.is_queued_for_deletion(), "undo must free the spawned prop")
+	_expect(not spawner.undo(), "undo on an empty stack must report nothing to do")
+
+	var context := ModContext.new(&"selftest_props")
+	_expect(
+		context.add_prop_factory(&"mod_crate", "mod crate", func() -> RigidBody3D:
+			return PropFactory.build_box(Vector3.ONE, Color.WHITE, 4.0),
+		),
+		"a rigid-body factory must register through the mod seam"
+	)
+	ModHost.contexts["selftest_props"] = context
+	var mod_entry: Dictionary = ModHost.content(&"prop").get("mod_crate", {})
+	_expect(not mod_entry.is_empty(), "the mod prop must appear in the merged catalogue view")
+	ModHost.contexts.erase("selftest_props")
+	context.release_all()
+
+	var belt := ToolBelt.new()
+	_expect(belt.current == &"weapon", "the belt must start on the weapon")
+	belt.switch_to(&"wrench")
+	_expect(belt.current == &"wrench", "switching must change the held tool")
+	belt.switch_to(&"not_a_tool")
+	_expect(belt.current == &"wrench", "an unknown tool id must be refused")
+
+	# The scripted-mod bridge wraps a Mesh factory into a rigid body — the
+	# low-friction path for Lua mods — and the wrapped product must be valid.
+	var wrapped_context := ModContext.new(&"selftest_wrapped")
+	var bridge := ScriptBridge.new(wrapped_context, &"selftest_wrapped")
+	_expect(
+		bridge.add_prop("wrapped_prop", func() -> Mesh: return BoxMesh.new()),
+		"the bridge must accept a Mesh factory"
+	)
+	var wrapped_factory: Callable = (wrapped_context.prop_factories.get(&"wrapped_prop", {}) as Dictionary).get("factory", Callable())
+	var wrapped: Variant = wrapped_factory.call()
+	_expect(wrapped is RigidBody3D and (wrapped as RigidBody3D).get_node_or_null("Body") != null,
+		"the bridge wrapper must produce a rigid body with a collider")
+	wrapped_context.release_all()
+	# The wrapper's product was never added to the tree, so nothing owns it:
+	# freeing it here is what keeps the headless exit free of leaked geometry.
+	if wrapped is Node:
+		(wrapped as Node).free()
 
 
 ## The one line the boot report prints has to stay parseable and name both runtimes,

@@ -66,6 +66,7 @@ func _ready() -> void:
 	_spawn_player(failures)
 	_spawn_vehicles(failures)
 	_spawn_freecam()
+	_spawn_sandbox(failures)
 	_spawn_ui(failures)
 
 	GameState.mode = GameState.Mode.EXPLORING
@@ -125,6 +126,13 @@ func _register_core_services(failures: Array[String]) -> void:
 		Services.register(&"surface_query", SurfaceQuery.new())
 	if not Services.has(&"vehicle_system"):
 		Services.register(&"vehicle_system", VehicleSystem.new())
+	if not Services.has(&"prop_spawner"):
+		Services.register(&"prop_spawner", PropSpawner.new())
+	if not Services.has(&"tool_belt"):
+		var belt := ToolBelt.new()
+		Services.register(&"tool_belt", belt)
+		# In the tree so the belt can listen for its switch and undo keys.
+		add_child(belt)
 	ModIntegration.publish_core_providers()
 
 	for required: StringName in [&"map_source", &"surface_query"]:
@@ -202,6 +210,31 @@ func _spawn_freecam() -> void:
 	# parenting it to the character would make it inherit the motion it exists to
 	# escape.
 	world.add_child(freecam)
+
+
+## The sandbox layer: props container under the world (so teardown takes the
+## props with it), the grab tool, and the spawn menu. Session-level nodes —
+## they survive map rebuilds and rebind to the new world through services.
+func _spawn_sandbox(failures: Array[String]) -> void:
+	if world == null:
+		return
+	var props := Node3D.new()
+	props.name = "Props"
+	world.add_child(props)
+
+	var spawner: PropSpawner = Services.get_as(&"prop_spawner", &"PropSpawner") as PropSpawner
+	if spawner == null:
+		failures.append("prop_spawner service has an unexpected type")
+		return
+	spawner.setup(props)
+
+	var wrench := PhysicsWrench.new()
+	wrench.name = "PhysicsWrench"
+	add_child(wrench)
+
+	var menu := SpawnMenu.new()
+	menu.name = "SpawnMenu"
+	add_child(menu)
 
 
 func _spawn_ui(failures: Array[String]) -> void:
@@ -285,6 +318,10 @@ func _report_world() -> void:
 		for key: String in info:
 			summary.append("%s=%s" % [key, str(info[key])])
 		print("[boot] map: " + ", ".join(summary))
+
+	var spawner: PropSpawner = Services.get_as(&"prop_spawner", &"PropSpawner") as PropSpawner
+	if spawner != null:
+		print("[boot] sandbox: %s" % spawner.describe())
 
 	if player != null and is_instance_valid(player):
 		print("[boot] player spawn: (%.1f, %.1f, %.1f)" % [

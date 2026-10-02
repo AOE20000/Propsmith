@@ -104,10 +104,51 @@ func add_poi(poi_id: String, display_name: String, factory: Callable, weight: fl
 	return _context.add_poi_factory(StringName(poi_id), display_name, factory, weight)
 
 
-func add_prop(prop_id: String, factory: Callable, density: float = 1.0, max_slope_degrees: float = 35.0) -> bool:
+## Low-friction prop registration for scripted mods: the mod supplies a **Mesh**
+## factory and the bridge wraps it into a rigid body (box collider fitted to the
+## mesh's AABB, reasonable default mass), which is what the spawn menu and the
+## prop spawner consume. A scripted mod that wants full physics control calls
+## `add_prop_definition` with its own RigidBody3D factory instead.
+func add_prop(prop_id: String, factory: Callable, display_name: String = "") -> bool:
 	if _context == null:
 		return false
-	return _context.add_prop_factory(StringName(prop_id), factory, density, max_slope_degrees)
+	var wrapped := func() -> RigidBody3D:
+		var mesh_value: Variant = factory.call()
+		if not (mesh_value is Mesh):
+			push_warning("[mod:%s] add_prop factory did not return a Mesh" % _context.get_mod_id())
+			return null
+		return ScriptBridge.rigid_body_from_mesh(mesh_value)
+	return _context.add_prop_factory(
+		StringName(prop_id), display_name if not display_name.is_empty() else String(prop_id), wrapped
+	)
+
+
+## Full-control prop registration: `factory` must build a configured RigidBody3D.
+func add_prop_definition(prop_id: String, display_name: String, factory: Callable, category: String = "mod") -> bool:
+	if _context == null:
+		return false
+	return _context.add_prop_factory(StringName(prop_id), display_name, factory, category)
+
+
+## Wrap a Mesh into a simple rigid body: box collider fitted to the AABB with a
+## sensible default mass. The lowest-friction path for a scripted mod to get a
+## prop into the spawn menu without hand-rolling physics bodies.
+static func rigid_body_from_mesh(mesh: Mesh) -> RigidBody3D:
+	var body := RigidBody3D.new()
+	var mesh_instance := MeshInstance3D.new()
+	mesh_instance.name = "Visual"
+	mesh_instance.mesh = mesh
+	body.add_child(mesh_instance)
+	var aabb: AABB = mesh.get_aabb()
+	var shape := CollisionShape3D.new()
+	shape.name = "Body"
+	var box := BoxShape3D.new()
+	box.size = aabb.size.max(Vector3.ONE * 0.1)
+	shape.shape = box
+	shape.position = aabb.get_center()
+	body.add_child(shape)
+	body.mass = 8.0
+	return body
 
 
 func add_item(item_id: String, definition: Dictionary) -> bool:
