@@ -40,7 +40,8 @@ func _ready() -> void:
 	_run_section("script bridge registration", 26, _check_bridge)
 	_run_section("cross-mod id collision rule", 21, _check_collision_rule)
 	_run_section("dependency load order", 10, _check_load_order)
-	_run_section("map-agnostic mobility core", 68, _check_mobility_core)
+	_run_section("map-agnostic mobility core", 82, _check_mobility_core)
+	_run_section("mobility is an optional capability", 18, _check_mobility_readiness)
 	_run_section("boot summary", 4, _check_summary)
 
 	print("")
@@ -387,6 +388,25 @@ func _check_mobility_core() -> void:
 	_expect(ActivityTag.normalize("ホテル") == ActivityTag.normalize("hotel"), "lodging label must not depend on language")
 	_expect(ActivityTag.normalize("謎の用途") == ActivityTag.OTHER, "an unknown Japanese use type must degrade to `other`")
 
+	# --- PLATEAU's `bldg:usage` is a *numeric codelist*, not a label. These codes are what real
+	# data actually contains (a measured Tokyo ward carried a code on 100% of its buildings), so
+	# they are the values the default map source will hand the adapter.
+	_expect(ActivityTag.normalize("401") == ActivityTag.WORK, "PLATEAU 401 業務施設 must map to work")
+	_expect(ActivityTag.normalize("431") == ActivityTag.WORK, "PLATEAU 431 運輸倉庫施設 must map to work")
+	_expect(ActivityTag.normalize("441") == ActivityTag.WORK, "PLATEAU 441 工場 must map to work")
+	_expect(ActivityTag.normalize("411") == ActivityTag.HOME, "PLATEAU 411 住宅 must map to home")
+	_expect(ActivityTag.normalize("412") == ActivityTag.HOME, "PLATEAU 412 共同住宅 must map to home")
+	_expect(ActivityTag.normalize("413") == ActivityTag.HOME, "PLATEAU 413 shop-with-residence must map to home")
+	_expect(ActivityTag.normalize("403") == ActivityTag.HOME, "PLATEAU 403 宿泊施設 must group with home")
+	_expect(ActivityTag.normalize("402") == ActivityTag.SHOP, "PLATEAU 402 商業施設 must map to shop")
+	_expect(ActivityTag.normalize("404") == ActivityTag.SHOP, "PLATEAU 404 商業系複合施設 must map to shop")
+	_expect(ActivityTag.normalize("421") == ActivityTag.SERVICE, "PLATEAU 421 官公庁施設 must map to service")
+	_expect(ActivityTag.normalize("422") == ActivityTag.SCHOOL, "PLATEAU 422 文教厚生施設 must map to school")
+	_expect(ActivityTag.normalize("454") == ActivityTag.OTHER, "PLATEAU 454 その他 carries no activity")
+	_expect(ActivityTag.normalize("461") == ActivityTag.OTHER, "PLATEAU 461 不明 carries no activity")
+	# A pipeline that resolves codes to names before normalising must land in the same place.
+	_expect(ActivityTag.normalize("業務施設") == ActivityTag.normalize("401"), "a PLATEAU label must agree with its code")
+
 	# --- Distance and weight are the two variables the score is built from ---
 	_expect(
 		DestinationChooser.score(0.0, 1.0, 1.0, 100.0) > DestinationChooser.score(500.0, 1.0, 1.0, 100.0),
@@ -569,6 +589,60 @@ func _stub_places_without(tag: StringName) -> Array[Dictionary]:
 ## Stands in for a navigation mesh: a straight two-point line for any hop.
 func _stub_polyline(_from_key: String, _to_key: String) -> PackedVector3Array:
 	return PackedVector3Array([Vector3.ZERO, Vector3(1.0, 0.0, 0.0)])
+
+
+## Tag-driven mobility is an optional feature. A map without annotations — a mod's hand-made
+## map, an unlabelled dataset — must report the feature as *unavailable* rather than run it on
+## empty meaning. These assertions pin the difference between "cannot run" and "will have to
+## substitute", because collapsing those two is how a map ends up full of plausible-looking
+## people going nowhere.
+func _check_mobility_readiness() -> void:
+	# Cannot run: nothing to route between.
+	var empty: Dictionary = MobilityReadiness.assess([] as Array[Dictionary])
+	_expect(not bool(empty["enabled"]), "a map with no places must report the feature as off")
+	_expect(not String(empty["reason"]).is_empty(), "a disabled report must say why")
+
+	# Cannot run: places exist but none is annotated. This is the mod-map case.
+	var unlabelled: Array[Dictionary] = []
+	for index: int in 10:
+		unlabelled.append(DestinationChooser.make_candidate(StringName("b%d" % index), ActivityTag.OTHER, Vector3(index, 0, 0)))
+	var bare: Dictionary = MobilityReadiness.assess(unlabelled)
+	_expect(not bool(bare["enabled"]), "an unannotated map must report the feature as off")
+	_expect(int(bare["tagged_count"]) == 0, "unannotated places must not count as tagged")
+	_expect(String(bare["reason"]).contains("活动标签"), "the reason must name the missing annotations")
+
+	# Cannot run: only one activity exists, so everyone would go to the same kind of place.
+	var single: Array[Dictionary] = [
+		DestinationChooser.make_candidate(&"h1", ActivityTag.HOME, Vector3.ZERO),
+		DestinationChooser.make_candidate(&"h2", ActivityTag.HOME, Vector3(50, 0, 0)),
+	]
+	var one_kind: Dictionary = MobilityReadiness.assess(single)
+	_expect(not bool(one_kind["enabled"]), "a single activity type must report the feature as off")
+
+	# Runs: two activities are enough for a day to mean something.
+	var mixed: Array[Dictionary] = _stub_places()
+	var report: Dictionary = MobilityReadiness.assess(mixed, [ActivityTag.HOME, ActivityTag.WORK, ActivityTag.TRANSIT])
+	_expect(bool(report["enabled"]), "a well-annotated map must enable the feature")
+	_expect(int(report["tagged_count"]) == mixed.size(), "every stub place carries a real tag")
+	_expect((report["coverage"] as Dictionary).get(ActivityTag.HOME, 0) == 2, "coverage must count per tag")
+
+	var usable: Array = report["usable_tags"]
+	_expect(not usable.has(ActivityTag.OTHER), "`other` is the absence of an annotation, not an activity")
+	_expect(usable.size() >= 2, "usable tags must list the distinct activities")
+
+	# Missing must NOT disable: the fallback ladder is the mechanism for it.
+	var missing: PackedStringArray = report["missing"]
+	_expect(missing.has("transit"), "a requested tag with no place must be reported missing")
+	_expect(not missing.has("home"), "a requested tag that exists must not be reported missing")
+	_expect(MobilityReadiness.will_substitute(report), "a report with missing tags indicates substitution")
+	_expect(bool(report["enabled"]), "missing tags must not disable the feature — the ladder covers them")
+
+	var complete: Dictionary = MobilityReadiness.assess(mixed, [ActivityTag.HOME, ActivityTag.WORK])
+	_expect(not MobilityReadiness.will_substitute(complete), "nothing missing means no substitution")
+
+	# The two reports a UI would actually show.
+	_expect(String(MobilityReadiness.describe(bare)).contains("未启用"), "the disabled description must say so")
+	_expect(String(MobilityReadiness.describe(report)).contains("启用"), "the enabled description must say so")
 
 
 ## The one line the boot report prints has to stay parseable and name both runtimes,

@@ -10,3 +10,5 @@ addons/terrain_3d/bin/~*
 
 # Agent workspace state (memory notes, caches) — not project source
 .workbuddy/
+# PLATEAU multi-city scan output (downloaded datasets and coverage reports)
+tools/plateau/.scan/

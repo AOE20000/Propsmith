@@ -61,6 +61,9 @@ const ALIASES: Dictionary = {
 		"hotel", "logiesfunctie",
 		"住宅", "共同住宅", "住居", "一戸建て", "マンション", "アパート", "ホテル", "宿泊施設", "旅館",
 		"家", "住处", "居住", "住房", "公寓", "小区",
+		# PLATEAU `bldg:usage` codes — see the note on PLATEAU_USAGE below.
+		"403", "411", "412", "413", "414", "415",
+		"店舗等併用住宅", "店舗等併用共同住宅", "作業所併用住宅",
 	],
 	WORK: [
 		"work", "workplace", "office", "company", "business", "corporate", "industrial",
@@ -68,24 +71,38 @@ const ALIASES: Dictionary = {
 		"bedrijf",
 		"事務所", "工場", "倉庫", "会社", "オフィス", "ビル", "官公庁", "庁舎",
 		"公司", "办公室", "写字楼", "企业", "上班", "厂", "工业",
+		# PLATEAU codes: business premises, transport/warehouse, factory, agriculture/forestry/
+		# fishery, utility plant. All are places people go to work.
+		"401", "431", "441", "451", "452",
+		"業務施設", "運輸倉庫施設", "農林漁業用施設", "供給処理施設",
 	],
 	FOOD: [
 		"food", "restaurant", "cafe", "cafeteria", "bar", "pub", "eatery", "dining", "diner",
 		"fastfood", "snack", "takeaway", "bistro",
 		"飲食店", "レストラン", "食堂", "喫茶店", "カフェ", "居酒屋", "料理店", "そば屋",
 		"饭店", "餐厅", "餐馆", "咖啡", "饮食", "小吃", "酒吧",
+		# NOTE: PLATEAU's usage codelist has **no restaurant category**. Eating out arrives as
+		# either 402 商業施設 (commercial premises) or 461 不明, so on a PLATEAU map a `food`
+		# step always falls through the ladder to `shop`. That is a real limit of the dataset,
+		# not a gap in this table — hence no codes listed here on purpose.
 	],
 	SHOP: [
 		"shop", "shops", "store", "supermarket", "grocery", "market", "retail",
 		"convenience", "mall", "bakery", "butcher", "winkel", "winkelfunctie",
 		"店舗", "商店", "小売店", "スーパー", "コンビニ", "市場", "百貨店",
-		"商店", "超市", "零售", "便利店", "商场",
+		"超市", "零售", "便利店", "商场",
+		# PLATEAU codes: commercial premises, commercial complex.
+		"402", "404",
+		"商業施設", "商業系複合施設",
 	],
 	SCHOOL: [
 		"school", "university", "college", "education", "academy", "campus",
 		"kindergarten", "library", "onderwijsfunctie", "celfunctie",
 		"学校", "小学校", "中学校", "高等学校", "大学", "幼稚園", "保育園", "図書館", "教育施設",
 		"学院", "教育", "幼儿园",
+		# PLATEAU 422 文教厚生施設 covers education *and* welfare; education is the reading
+		# that matters for a daily activity pattern.
+		"422", "文教厚生施設",
 	],
 	LEISURE: [
 		"leisure", "park", "garden", "sport", "sports", "gym", "fitness", "museum",
@@ -101,6 +118,9 @@ const ALIASES: Dictionary = {
 		"病院", "医院", "診療所", "薬局", "銀行", "郵便局", "警察署", "消防署", "神社", "寺院",
 		"教会", "福祉施設",
 		"诊所", "药房", "政府", "派出所", "服务",
+		# PLATEAU codes: government premises, defence facility.
+		"421", "453",
+		"官公庁施設", "防衛施設",
 	],
 	TRANSIT: [
 		"transit", "station", "stations", "stop", "busstop", "tram", "metro", "subway",
@@ -111,9 +131,36 @@ const ALIASES: Dictionary = {
 	OTHER: [
 		"other", "unknown", "misc", "unspecified",
 		"その他", "不明", "未設定",
+		# PLATEAU codes for "other" and "unknown" — the two that carry no activity at all.
+		"454", "461",
 		"其他", "未知",
 	],
 }
+
+## PLATEAU `bldg:usage` is a **numeric codelist**, not a Japanese label, and the code-to-label
+## table above is transcribed from the MLIT codelist that ships with the standard:
+##
+##   401 業務施設      402 商業施設      403 宿泊施設      404 商業系複合施設
+##   411 住宅          412 共同住宅      413 店舗等併用住宅  414 店舗等併用共同住宅
+##   415 作業所併用住宅  421 官公庁施設    422 文教厚生施設  431 運輸倉庫施設
+##   441 工場          451 農林漁業用施設  452 供給処理施設  453 防衛施設
+##   454 その他        461 不明
+##
+## Source: `Building_usage.xml` from 都市計画基礎調査実施要領（第4版）,
+## https://www.geospatial.jp/iur/codelists/3.2/Building_usage.xml
+##
+## Both the codes and their labels are listed above. The codes are what actually appears in
+## real data (a measured Tokyo ward had 100% of its buildings carrying a code), and the labels
+## are there for pipelines that resolve codes to names first. Carrying both means the adapter
+## works whether or not the codelist file was downloaded with the dataset.
+##
+## Two consequences worth knowing before debugging behaviour:
+##   - **There is no restaurant/`food` code.** Eating out arrives as 商業施設 or 不明, so a
+##     `food` step always falls through the fallback ladder to `shop`. A dataset limitation,
+##     not a bug.
+##   - 411/412/413/414/415 are all *residential*, including the shop-with-residence codes.
+##     Someone lives there, so they are `home` — the mixed use is expressed by the building
+##     also being a workplace, which the activity pattern does not model.
 
 ## Per-tag fallback ladder used when a map simply has no destination of the requested
 ## kind. Order matters: nearest allowed concept first, `other` last as the universal net.

@@ -60,39 +60,52 @@ def _element_values(text: str, local_name: str) -> collections.Counter:
     return collections.Counter(m.group("value").strip() for m in pattern.finditer(text))
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--dataset", required=True, help="extracted dataset root (contains udx/)")
-    parser.add_argument("--max-files", type=int, default=0, help="limit building files read (0 = all)")
-    args = parser.parse_args()
+def analyze(dataset_root: str, max_files: int = 0) -> dict:
+    """Measure one extracted dataset. Returns a plain dict so callers can tabulate.
 
-    udx = os.path.join(args.dataset, "udx")
-    if not os.path.isdir(udx):
-        print(f"error: {udx} not found — point --dataset at an extracted CityGML package", file=sys.stderr)
-        return 2
+    This is the single source of truth for "what can this municipality drive?"; the CLI
+    below and `scan_cities.py` both go through it, so a multi-city comparison and a
+    single-city report can never disagree about the numbers.
+    """
+    udx = os.path.join(dataset_root, "udx")
+    result: dict = {
+        "dataset": dataset_root,
+        "ok": os.path.isdir(udx),
+        "buildings": 0,
+        "coverage": {},
+        "usage_values": {},
+        "sentinels": {},
+        "urf_files": 0,
+        "urf_codes": [],
+        "tran_files": 0,
+        "license_lines": [],
+        "readme": "",
+    }
+    if not result["ok"]:
+        return result
 
-    readme = os.path.join(args.dataset, "README.md")
+    readme = os.path.join(dataset_root, "README.md")
     if os.path.isfile(readme):
-        # The dataset README is the authoritative place the license is stated.
-        for line in _read(readme).splitlines():
+        text = _read(readme)
+        result["readme"] = text
+        for line in text.splitlines():
             if any(k in line for k in ("政府標準利用規約", "クリエイティブ・コモンズ", "ODC BY", "ODbL", "準拠する標準")):
-                print(f"  license/spec: {line.strip()}")
+                result["license_lines"].append(line.strip())
 
     bldg_files = sorted(glob.glob(os.path.join(udx, "bldg", "*.gml")))
-    if args.max_files:
-        bldg_files = bldg_files[: args.max_files]
-    print(f"\nbuilding files: {len(bldg_files)}")
+    if max_files:
+        bldg_files = bldg_files[:max_files]
 
-    buildings = 0
-    present = collections.Counter()
+    present: collections.Counter = collections.Counter()
     usage_values: collections.Counter = collections.Counter()
-    sentinel_hits = collections.Counter()
+    sentinels: collections.Counter = collections.Counter()
+    buildings = 0
 
     for path in bldg_files:
         text = _read(path)
         buildings += len(re.findall(r"<[A-Za-z0-9_]+:Building[ >]", text))
-        # Any element whose local name ends in "usage", prefix-agnostic: a missing attribute
-        # must be proven missing, not assumed missing because of a guessed prefix.
+        # Prefix-agnostic: a missing attribute must be *proven* missing, not assumed
+        # missing because the guessed prefix was wrong.
         usage_values.update(_element_values(text, "usage"))
         for name in INTERESTING:
             local = name.split(":")[1]
@@ -101,49 +114,79 @@ def main() -> int:
                 present[name] += sum(values.values())
                 for value in values:
                     if value in SENTINELS:
-                        sentinel_hits[f"{name}={value}"] += values[value]
+                        sentinels[f"{name}={value}"] += values[value]
 
-    print(f"buildings:        {buildings}")
+    result["buildings"] = buildings
+    result["coverage"] = {name: present.get(name, 0) for name in INTERESTING}
+    result["usage_values"] = dict(usage_values)
+    result["sentinels"] = dict(sentinels)
+
+    urf_files = sorted(glob.glob(os.path.join(udx, "urf", "**", "*.gml"), recursive=True))
+    result["urf_files"] = len(urf_files)
+    codes: set = set()
+    for path in urf_files:
+        codes.update(_element_values(_read(path), "function").keys())
+    result["urf_codes"] = sorted(codes, key=lambda value: (len(value), value))
+    result["tran_files"] = len(glob.glob(os.path.join(udx, "tran", "**", "*.gml"), recursive=True))
+
+    # LOD2 coverage, when the dataset README states it. PLATEAU publishes a LOD1/LOD2
+    # breakdown there and nowhere machine-readable.
+    match = re.search(r"LOD2[:：]\s*([^\n（(]+)[（(]([^）)]*)[）)]", result["readme"])
+    if match:
+        result["lod2_summary"] = (match.group(1) + match.group(2)).strip()
+    return result
+
+
+def describe(report: dict) -> None:
+    """Human-readable report for one dataset, to stdout."""
+    for line in report["license_lines"]:
+        print(f"  license/spec: {line}")
+    buildings = report["buildings"]
+    print(f"\nbuildings:        {buildings}")
     print("\nper-building attribute coverage:")
-    for name in INTERESTING:
-        count = present.get(name, 0)
+    for name, count in report["coverage"].items():
         share = (100.0 * count / buildings) if buildings else 0.0
-        mark = "OK " if count else "-- "
-        print(f"  {mark}{name:<32} {count:>8}  ({share:5.1f}%)")
-    if sentinel_hits:
+        print(f"  {'OK ' if count else '-- '}{name:<32} {count:>8}  ({share:5.1f}%)")
+    if report["sentinels"]:
         print("\nsentinel values treated as 'unknown' (NOT real data):")
-        for key, count in sentinel_hits.most_common():
+        for key, count in sorted(report["sentinels"].items(), key=lambda kv: -kv[1]):
             print(f"  {key}  x{count}")
-
     print("\nbldg:usage value distribution:")
-    if usage_values:
-        for value, count in usage_values.most_common():
+    if report["usage_values"]:
+        for value, count in sorted(report["usage_values"].items(), key=lambda kv: -kv[1]):
             print(f"  {count:>8}  {value!r}")
     else:
         print("  (none — this municipality carries no building use type)")
+    print(f"\narea-based fallback: urf files={report['urf_files']} codes={report['urf_codes']}  roads={report['tran_files']}")
+    if report.get("lod2_summary"):
+        print(f"LOD2 from README: {report['lod2_summary']}")
 
-    # Area-based fallbacks, for the case where per-building usage is missing.
-    print("\narea-based fallback sources:")
-    for feature, label in (("urf", "zoning 用途地域 urf:function"), ("luse", "land use luse:usage"), ("tran", "roads tran")):
-        files = sorted(glob.glob(os.path.join(udx, feature, "**", "*.gml"), recursive=True))
-        detail = ""
-        if files and feature == "urf":
-            counts: collections.Counter = collections.Counter()
-            for path in files:
-                counts.update(_element_values(_read(path), "function"))
-            detail = f"  distinct function codes: {sorted(counts)}"
-        print(f"  {label:<34} files={len(files)}{detail}")
 
-    lod2 = sum(1 for v in (present.get("bldg:measuredheight", 0),) if v) and "unknown from attributes"
-    print(f"\nLOD: {lod2} — read the dataset README for the LOD1/LOD2 breakdown; LOD2 is often")
-    print("     present only for a handful of landmarks, so 'textured LOD2 city' is not a given.")
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--dataset", required=True, help="extracted dataset root (contains udx/)")
+    parser.add_argument("--max-files", type=int, default=0, help="limit building files read (0 = all)")
+    parser.add_argument("--json", action="store_true", help="emit the report as JSON instead of text")
+    args = parser.parse_args()
 
-    usable = present.get("bldg:usage", 0) > 0
+    report = analyze(args.dataset, args.max_files)
+    if not report["ok"]:
+        print(f"error: {os.path.join(args.dataset, 'udx')} not found — point --dataset at an extracted CityGML package", file=sys.stderr)
+        return 2
+
+    if args.json:
+        import json
+
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
+
+    describe(report)
+    usable = report["coverage"].get("bldg:usage", 0) > 0
     print("\nverdict: " + (
-        "bldg:usage is populated — the tag-driven mobility layer can use this municipality directly."
+        "bldg:usage is populated — tags can come from the buildings themselves."
         if usable else
-        "bldg:usage is ABSENT — drive tags from zoning (urf:function) or hand annotation, "
-        "or pick a municipality that populates usage."
+        "bldg:usage is ABSENT — tags must come from zoning (urf:function) or hand annotation. "
+        "This does NOT make the map unusable, only the tag-driven mobility feature."
     ))
     return 0
 
