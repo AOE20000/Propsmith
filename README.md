@@ -1,4 +1,4 @@
-# FPGames
+# Propsmith
 
 **以 MIT 协议发布的沙盒游乐场**。Godot 4.7 / Forward+ / Jolt Physics。
 

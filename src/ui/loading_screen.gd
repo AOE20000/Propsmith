@@ -42,13 +42,13 @@ func _build() -> void:
 	root.add_child(centre)
 
 	_title = Label.new()
-	_title.text = "FPGames"
+	_title.text = "Propsmith"
 	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_title.add_theme_font_size_override("font_size", 34)
 	centre.add_child(_title)
 
 	var subtitle := Label.new()
-	subtitle.text = "小型开放世界 · 探索原型"
+	subtitle.text = "沙盒游乐场 · 原创原型"
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	subtitle.modulate = Color(0.72, 0.78, 0.85)
 	centre.add_child(subtitle)

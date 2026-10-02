@@ -1,4 +1,4 @@
-# Per-file GDScript syntax check for the FPGames project.
+# Per-file GDScript syntax check for the Propsmith project.
 #
 # Why this exists: `godot --headless --script` does not register autoload
 # singletons, so any script referencing `Events`/`Services`/`GameState` reports a

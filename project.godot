@@ -10,8 +10,8 @@ config_version=5
 
 [application]
 
-config/name="FPGames"
-config/description="Small open world: exploration + modular combat interfaces + mod support."
+config/name="Propsmith"
+config/description="An MIT-licensed sandbox playground: physics props, a tool system, tagged pedestrian life, and script mods."
 run/main_scene="res://src/boot/startup.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"

@@ -1,4 +1,4 @@
-# Headless smoke test for the FPGames project.
+# Headless smoke test for the Propsmith project.
 #
 # Runs the real main scene (map loading, mods, player, HUD) either to completion in
 # validate-only mode or for a fixed number of frames, then reports any error the
