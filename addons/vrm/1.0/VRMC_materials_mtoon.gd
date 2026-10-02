@@ -459,7 +459,7 @@ func _process_vrm_material(orig_mat: Material, gltf_images: Array[Texture2D], gl
 
 
 # Called when the node enters the scene tree for the first time.
-func _import_post(gstate, root):
+func _import_post(gstate: GLTFState, root: Node) -> Error:
 	var images: Array[Texture2D] = gstate.get_images()
 	var gltf_textures: Array[GLTFTexture] = gstate.get_textures()
 	#print(images)
@@ -513,3 +513,5 @@ func _import_post(gstate, root):
 				printerr("Mesh " + str(i) + " material " + str(surf_idx) + " name " + str(surfmat.resource_name) + " has no replacement material.")
 
 	# FIXME: due to head duplication, do we now have some meshes which are not in gltf state?
+
+	return OK

@@ -207,7 +207,7 @@ func _import_preflight(state: GLTFState, extensions = PackedStringArray()) -> Er
 
 
 # Called when the node enters the scene tree for the first time.
-func _import_post(state: GLTFState, root_node: Node):
+func _import_post(state: GLTFState, root_node: Node) -> Error:
 	var gltf_json: Dictionary = state.json
 	var vrm_extension: Dictionary = gltf_json["extensions"]["VRMC_springBone"]
 	if vrm_extension.get("specVersion", "") != "1.0":
@@ -226,7 +226,7 @@ func _import_post(state: GLTFState, root_node: Node):
 	return OK
 
 
-func _export_preflight(state: GLTFState, root: Node):
+func _export_preflight(state: GLTFState, root: Node) -> Error:
 	if not root.has_node("secondary"):
 		print("No secondary node")
 		return ERR_INVALID_DATA
@@ -243,17 +243,15 @@ func _export_preflight(state: GLTFState, root: Node):
 
 
 static func _get_humanoid_skel(root_node: Node3D) -> Skeleton3D:
-	var humanoid_skeleton: Skeleton3D
 	if root_node.has_node("%GeneralSkeleton"):
-		humanoid_skeleton = root_node.get_node("%GeneralSkeleton")
-	else:
-		var skels: Array[Node] = root_node.find_children("*", "Skeleton3D", true)
-		if not skels.is_empty():
-			humanoid_skeleton = skels[0]
-	return humanoid_skeleton
+		return root_node.get_node("%GeneralSkeleton") as Skeleton3D
+	var skels: Array[Node] = root_node.find_children("*", "Skeleton3D", true)
+	if not skels.is_empty():
+		return skels[0] as Skeleton3D
+	return null
 
 
-func _export_post(state: GLTFState):
+func _export_post(state: GLTFState) -> Error:
 	var secondary: vrm_secondary = state.get_additional_data("VRMC_springBone")
 	var collider_groups: Array[vrm_collider_group] = secondary.collider_groups.duplicate()
 	var spring_bones: Array[vrm_spring_bone] = secondary.spring_bones
@@ -385,3 +383,5 @@ func _export_post(state: GLTFState):
 		json_springs.push_back(spring)
 	sbone_extension["springs"] = json_springs
 	sbone_extension["specVersion"] = "1.0"
+
+	return OK

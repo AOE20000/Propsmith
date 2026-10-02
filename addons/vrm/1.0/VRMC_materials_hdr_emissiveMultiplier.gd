@@ -8,7 +8,7 @@ func _import_preflight(state: GLTFState, extensions = PackedStringArray()) -> Er
 
 
 # Called when the node enters the scene tree for the first time.
-func _import_post(state, root):
+func _import_post(state: GLTFState, root: Node) -> Error:
 	var materials = state.materials
 	for i in range(materials.size()):
 		var material: Material = materials[i]
@@ -23,6 +23,7 @@ func _import_post(state, root):
 				material.emission_energy_multiplier = vrmc_emissive["emissiveMultiplier"]
 
 
+	return OK
 func _export(state: GLTFState, extensions = PackedStringArray()) -> Error:
 	if extensions.has("VRMC_materials_hdr_emissiveMultiplier") or extensions.has("KHR_materials_emissive_strength"):
 		return OK
@@ -30,7 +31,8 @@ func _export(state: GLTFState, extensions = PackedStringArray()) -> Error:
 
 
 # Called when the node enters the scene tree for the first time.
-func _export_post(state: GLTFState):
+	return OK
+func _export_post(state: GLTFState) -> Error:
 	var materials = state.materials
 	for i in range(materials.size()):
 		var material: Material = materials[i]
@@ -43,3 +45,5 @@ func _export_post(state: GLTFState):
 				json_material["extensions"]["KHR_materials_emissive_strength"] = {
 					"emissiveStrength": material.emission_energy_multiplier,
 				}
+
+	return OK

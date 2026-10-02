@@ -91,7 +91,7 @@ func _convert_scene_node(gltf_state: GLTFState, gltf_node: GLTFNode, scene_node:
 		constraint.set_node_references_from_paths(applier)
 
 
-func _export_post(gltf_state: GLTFState):
+func _export_post(gltf_state: GLTFState) -> Error:
 	var applier: bone_node_constraint_applier = gltf_state.get_additional_data(&"BoneNodeConstraintApplier")
 	if applier == null:
 		return OK
