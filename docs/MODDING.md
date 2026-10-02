@@ -45,15 +45,17 @@ res://mods/my_mod/
   并把冲突记到**后注册的那个 mod** 的失败说明里，`Esc` 菜单的 mod 列表能直接看到。
   没有这条检查时，后来者的内容会静默消失，作者无从下手。
 
-工厂类扩展点（poi / prop / combat / terrain / vehicle）在注册时就要求传入**有效的
-`Callable`**，物品要求 `display_name`——不合格的注册当场被拒，而不是等到世界生成时
-在一个跟错误原因毫无关系的地方炸掉。
+工厂类扩展点（poi / prop / combat / terrain / vehicle / **tool** / **npc**）在注册时
+就要求传入**有效的 `Callable`**（或 `SandboxTool` 实例），物品要求 `display_name`——
+不合格的注册当场被拒，而不是等到世界生成时在一个跟错误原因毫无关系的地方炸掉。
 
-> **三个旧地形扩展点当前没有消费者**：`add_poi_factory`（地标）、
-> `add_prop_factory`（散布道具）、`add_terrain_modifier`（地形改造）的消费者是旧的
-> 程序化地形系统，已随默认地图切换移除。注册接口与冲突规则仍然有效且有断言
-> （与"预留"的物品扩展点同理），当前地图上注册它们不会报错，只是没有可见效果。
-> 在地图上放内容用 `_on_world_populate` 直接注入——见 `mods/lighthouse/`。
+> **扩展点现状（P3 起）**：`add_prop_factory`（**真消费者**：生成菜单实例化它，
+> 工厂返回 RigidBody3D）、`add_npc_factory`（**真消费者**：生成菜单的 NPC 区，
+> 工厂返回 CharacterBody3D）、`add_tool_callbacks` / `add_tool`（**真消费者**：
+> 工具枪轮盘与建造面板）。
+> `add_poi_factory` 与 `add_terrain_modifier` 仍是预留（旧地形系统的消费者已移除），
+> `add_item_definition` 也仍预留（无库存系统）——注册都安全，只是无可见效果。
+> 在地图上放内容也可以用 `_on_world_populate` 直接注入——见 `mods/lighthouse/`。
 
 ### 1. 往世界里放自己的东西（推荐入口）
 
@@ -74,28 +76,42 @@ func _on_world_populate(world: Node3D) -> void:
 `sample_height(pos, clearance)`、`slope_degrees_at(x, z)`、`is_placeable(x, z, max_slope)`、
 `surface_kind(x, z)`（`ground` / `building` / `none`）。完整例子见 `mods/lighthouse/`。
 
-以下两个注册式扩展点保留给**未来的世界生成管线**（例如城市景点系统、程序化散布）。
-
-### 2. 注册地标（预留，城市地图暂无消费者）
+### 2. 注册可生成道具（真消费者：生成菜单）
 
 ```gdscript
 func _on_register() -> void:
-    context.add_poi_factory(&"my_tower", "我的塔", _make_tower, 1.0)  # 权重
+    # 工厂返回一个配置好的 RigidBody3D（网格 + 碰撞 + 质量）
+    context.add_prop_factory(&"my_crate", "我的箱子", _make_crate, "basic")
 ```
 
-工厂返回一个 `Node3D`。注册与校验照常工作，冲突规则照常生效；只是当前核心没有任何
-模块放置它，也不会有 `Events.poi_discovered` 发生。
+生成菜单的"basic"分类下会出现"我的箱子"；点击即按准星落点生成。
 
-### 3. 注册散布道具（预留，城市地图暂无消费者）
-
-工厂返回**一个** `Mesh`，实例化由散布系统负责（`MultiMesh`），所以不要自己摆几千个节点。
+### 3. 注册 NPC（真消费者：生成菜单 NPC 区）
 
 ```gdscript
 func _on_register() -> void:
-    context.add_prop_factory(&"my_stone", _make_stone, 0.8, 35.0)  # 密度 / 最大坡度
+    # 工厂返回 CharacterBody3D——通常是换皮的 PedestrianAgent：
+    # 日程行走、无地点表时游荡、可被伤害致死，全部自带
+    context.add_npc_factory(&"my_guard", "我的卫兵", _make_guard)
 ```
 
-### 4. 新物品（预留，核心尚未消费）
+### 4. 注册工具（真消费者：工具枪 + 建造面板）
+
+回调式（最简单，Lua mod 同款形状）：
+
+```gdscript
+func _on_register() -> void:
+    context.add_tool_callbacks(&"my_mark", "我的标记", {
+        "on_primary": func(hit: Dictionary) -> void:
+            Events.notify("点击了 %s" % str(hit.get("collider"))),
+        "on_secondary": func(_hit: Dictionary) -> void: pass,
+    })
+```
+
+全控式（继承 `SandboxTool`，状态机自己写）：`context.add_tool(my_tool_instance)`。
+键 3 切到工具枪后，滚轮或建造面板选择工具。
+
+### 5. 新物品（预留，核心尚未消费）
 
 ```gdscript
 context.add_item_definition(&"my_relic", {

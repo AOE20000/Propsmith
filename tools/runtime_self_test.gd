@@ -46,6 +46,7 @@ func _ready() -> void:
 	_run_section("sandbox props", 19, _check_prop_sandbox)
 	_run_section("tool gun and constraints", 15, _check_tools_and_constraints)
 	_run_section("npc citizens", 11, _check_npc_citizens)
+	_run_section("scripted mod bridges", 7, _check_scripted_bridges)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("boot summary", 4, _check_summary)
 
@@ -982,6 +983,59 @@ func _check_npc_citizens() -> void:
 
 
 ## or the smoke test's output stops being evidence.
+## The scripted-mod bridges: a callback tool rides the same roster and clicks
+## as a class tool, and a Mesh NPC wraps into a walking, damageable citizen.
+## These are the P3 acceptance checks — a Lua mod's registrations take exactly
+## this shape through `ScriptBridge`.
+func _check_scripted_bridges() -> void:
+	var context := ModContext.new(&"selftest_bridge2")
+	var bridge := ScriptBridge.new(context, &"selftest_bridge2")
+
+	var fired: Array = []
+	_expect(
+		bridge.add_tool(&"lua_mark", "标记（Lua）", {
+			"on_primary": func(_hit: Dictionary) -> void: fired.append("primary"),
+			"selected": func() -> void: fired.append("selected"),
+		}),
+		"a callback tool must register through the bridge"
+	)
+	var entry: Dictionary = context.tools.get(&"lua_mark", {}) as Dictionary
+	var tool: Variant = entry.get("tool")
+	_expect(tool is CallbackTool, "the bridge must wrap callbacks into a CallbackTool")
+	(tool as CallbackTool).selected()
+	(tool as CallbackTool).on_primary({})
+	_expect(fired == ["selected", "primary"], "the tool must forward lifecycle and click callbacks (got %s)" % str(fired))
+	_expect(gun_roster_contains(context, &"lua_mark"), "the scripted tool must appear in the tool-gun roster")
+
+	_expect(
+		bridge.add_npc(&"lua_guard", "卫兵（Lua）", func() -> Mesh: return CapsuleMesh.new()),
+		"an npc mesh factory must register through the bridge"
+	)
+	var npc_entry: Dictionary = context.npc_factories.get(&"lua_guard", {}) as Dictionary
+	var built: Variant = (npc_entry.get("factory", Callable()) as Callable).call()
+	_expect(built is PedestrianAgent, "the npc wrapper must build a PedestrianAgent")
+	# Health is built in _ready, which runs when the node enters the tree — the
+	# same moment the spawner adds it in play.
+	add_child(built as Node)
+	_expect((built as PedestrianAgent).get_node_or_null("Health") != null, "a wrapped npc must be damageable")
+	(built as Node).free()
+
+	bridge.release()
+	context.release_all()
+
+
+## Whether the tool-gun roster (built-ins plus the given context) contains an id.
+func gun_roster_contains(context: ModContext, tool_id: StringName) -> bool:
+	ModHost.contexts[context.get_mod_id()] = context
+	var found: bool = false
+	for entry: Dictionary in ModHost.content_ordered(&"tool"):
+		if StringName(entry.get("id", &"")) == tool_id:
+			found = true
+			break
+	ModHost.contexts.erase(context.get_mod_id())
+	return found
+
+
 ## The one line the boot report prints has to stay parseable and name both runtimes,
 func _check_summary() -> void:
 	var summary: String = ScriptingRuntimes.summary()

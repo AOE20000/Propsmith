@@ -130,6 +130,37 @@ func add_prop_definition(prop_id: String, display_name: String, factory: Callabl
 	return _context.add_prop_factory(StringName(prop_id), display_name, factory, category)
 
 
+## Low-friction tool registration for scripted mods: the mod supplies callbacks
+## and the bridge wraps them in a `CallbackTool` — the same class shape the
+## core's callback tools use, so a scripted tool rides the held gun and the
+## paused build panel with zero special-casing. Callback keys (all optional):
+## `on_primary(hit)`, `on_secondary(hit)`, `selected()`, `deselected()`.
+func add_tool(tool_id: String, display_name: String, callbacks: Dictionary) -> bool:
+	if _context == null:
+		return false
+	var tool := CallbackTool.new(StringName(tool_id), display_name, callbacks)
+	return _context.add_tool(tool)
+
+
+## Low-friction NPC registration: the mod supplies a **Mesh** for the body and
+## the bridge builds a `PedestrianAgent` wearing it — day plans, wandering,
+## damage and death all come for free, exactly as for the built-in citizen.
+func add_npc(npc_id: String, display_name: String, mesh_factory: Callable) -> bool:
+	if _context == null:
+		return false
+	var wrapped := func() -> CharacterBody3D:
+		var mesh_value: Variant = mesh_factory.call()
+		if not (mesh_value is Mesh):
+			push_warning("[mod:%s] add_npc factory did not return a Mesh" % _context.get_mod_id())
+			return null
+		var agent := PedestrianAgent.new()
+		var visual := agent.get_node_or_null("Visual") as MeshInstance3D
+		if visual != null:
+			visual.mesh = mesh_value
+		return agent
+	return _context.add_npc_factory(StringName(npc_id), display_name, wrapped)
+
+
 ## Wrap a Mesh into a simple rigid body: box collider fitted to the AABB with a
 ## sensible default mass. The lowest-friction path for a scripted mod to get a
 ## prop into the spawn menu without hand-rolling physics bodies.

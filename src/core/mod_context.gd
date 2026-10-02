@@ -138,6 +138,14 @@ func add_tool(tool: SandboxTool) -> bool:
 	}, "tool")
 
 
+## The callback-shaped twin of `add_tool`: same roster, same clicks, but the
+## mod supplies callables instead of a class — the shape a scripted mod (and a
+## quick GDScript prototype) finds easiest.
+func add_tool_callbacks(tool_id: StringName, display_name: String, callbacks: Dictionary) -> bool:
+	var instance := CallbackTool.new(tool_id, display_name, callbacks)
+	return add_tool(instance)
+
+
 ## Add an NPC kind for the spawn menu. `factory` builds a CharacterBody3D —
 ## usually a configured `PedestrianAgent` subclass; the spawner assigns a day
 ## plan (or wandering) after adding it to the world.

@@ -1,0 +1,9 @@
+{
+  "id": "tools_demo",
+  "name": "工具演示：标记、发光球与卫兵",
+  "version": "1.0.0",
+  "author": "example",
+  "enabled": true,
+  "dependencies": [],
+  "description": "P3 验收 mod：回调式工具、道具与 NPC 各注册一个，全部出现在工具轮盘与生成菜单。"
+}
