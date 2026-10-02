@@ -51,6 +51,9 @@ var buildings_loaded: int = 0
 var files_loaded: int = 0
 var collision_bodies: int = 0
 var load_duration_ms: int = 0
+## The offset applied to the city container by `_settle_city_transform`, reported
+## so the boot log shows how far the data was from the world origin.
+var city_offset: Vector3 = Vector3.ZERO
 
 var _spawn_position: Vector3 = Vector3.ZERO
 var _reference_point: Vector3 = Vector3.ZERO
@@ -114,7 +117,7 @@ func build(world_root: Node3D, seed_value: int) -> bool:
 	progress.call("生成碰撞与地表", 0.75)
 	_stamp_ground_physics(city_container)
 	_build_ground_plane(world_root)
-	_settle_city_height(city_container)
+	_settle_city_transform(city_container)
 	# Geometry is in the physics space now, so queries may answer. Marking here
 	# (not in the boot sequence) is what lets this same build() find its own
 	# spawn point below.
@@ -150,6 +153,7 @@ func describe() -> Dictionary:
 		"load_ms": load_duration_ms,
 		"collision_bodies": collision_bodies,
 		"reference": _reference_point,
+		"offset": city_offset,
 	}
 
 
@@ -284,12 +288,18 @@ func _build_ground_plane(world_root: Node3D) -> void:
 	world_root.add_child(ground)
 
 
-## The data carries real elevation (metres above sea level); the game wants the
-## lowest street at 0. Measured from the actual meshes rather than assumed,
-## because "the ground is at sea level" is exactly the kind of thing data does
-## not guarantee.
-func _settle_city_height(city_container: Node3D) -> void:
-	var minimum_y: float = INF
+## The importer leaves vertices in JGD2011 zone-9 *absolute* metre coordinates —
+## measured: Shibuya lands ~11 km west and ~40 km south of the zone origin, and
+## `geo.reference_point` does **not** translate the imported scene (the M0 probe
+## only checked `transform.origin`, which is small, and mistook that for local
+## coordinates). So the plan's §5.3 rule — city centre at the world origin — is
+## implemented here, by hand: one container offset centres the loaded district
+## horizontally and drops its lowest point onto the y = 0 ground plane.
+## Single-precision float drift starts mattering tens of kilometres out, which
+## makes this the first defence, not a nicety.
+func _settle_city_transform(city_container: Node3D) -> void:
+	var minimum := Vector3.INF
+	var maximum := -Vector3.INF
 	var stack: Array[Node] = [city_container]
 	while not stack.is_empty():
 		var node: Node = stack.pop_back()
@@ -297,11 +307,15 @@ func _settle_city_height(city_container: Node3D) -> void:
 			stack.append(child)
 		if node is MeshInstance3D:
 			var mesh_instance: MeshInstance3D = node
-			if mesh_instance.mesh != null:
+			if mesh_instance.mesh != null and mesh_instance.mesh.get_surface_count() > 0:
 				var aabb: AABB = mesh_instance.global_transform * mesh_instance.mesh.get_aabb()
-				minimum_y = minf(minimum_y, aabb.position.y)
-	if is_finite(minimum_y) and absf(minimum_y) > 0.01:
-		city_container.position.y -= minimum_y
+				minimum = minimum.min(aabb.position)
+				maximum = maximum.max(aabb.position + aabb.size)
+	if not is_finite(minimum.x):
+		return
+	var centre := (minimum + maximum) * 0.5
+	city_container.position = Vector3(-centre.x, -minimum.y, -centre.z)
+	city_offset = Vector3(-centre.x, -minimum.y, -centre.z)
 
 
 ## Sky, sun and light fog. Deliberately minimal: the island's environment stage

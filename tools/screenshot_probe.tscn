@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://cshotprobe1fg"]
+
+[ext_resource type="Script" path="res://tools/screenshot_probe.gd" id="1_shotprobe"]
+
+[node name="ScreenshotProbe" type="Node"]
+script = ExtResource("1_shotprobe")

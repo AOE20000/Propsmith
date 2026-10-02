@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://cdiagcity7pk"]
+
+[ext_resource type="Script" path="res://tools/city_diagnose.gd" id="1_diagcity"]
+
+[node name="CityDiagnose" type="Node"]
+script = ExtResource("1_diagcity")
