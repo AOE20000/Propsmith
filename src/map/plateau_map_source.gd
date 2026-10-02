@@ -31,9 +31,10 @@ class_name PlateauMapSource
 const DEFAULT_CITY: String = "shibuya"
 ## JGD2011 plane rectangular coordinate system zone 9 covers Tokyo (and Shibuya).
 const ZONE_ID: int = 9
-## Half-extent of the flat ground plane, in metres. Shibuya ward is ~15 km²,
-## so ±2500 m covers it with margin for the files beyond the first few.
-const GROUND_HALF_EXTENT: float = 2500.0
+## Half-extent of the flat ground plane, in metres. The plane must cover not
+## just the loaded blocks but wherever they sit *in the dataset frame* — a
+## subset of Shibuya can sit ~2 km from the ward centre — plus margin.
+const GROUND_HALF_EXTENT: float = 6000.0
 const GROUND_THICKNESS: float = 2.0
 
 ## Spawn search: rings outward from the origin, accepting the first outdoor
@@ -152,13 +153,17 @@ func build(world_root: Node3D, seed_value: int) -> bool:
 	progress.call("通知 Mod 介入地图", 0.94)
 	ModHost.notify_world_generate(world_root)
 
-	_spawn_position = _find_spawn_position()
-	spawn_anchor = _density_centre
 	progress.call("通知 Mod 补充内容", 0.98)
 	ModHost.notify_world_populate(world_root)
 
 	progress.call("生成人流", 0.99)
-	_build_mobility(world_root, seed_value)
+	_build_mobility(world_root, city_container, seed_value)
+	# The mobility step may re-anchor the city to the place table's whole-dataset
+	# offset — which moves every building by kilometres. The spawn search and the
+	# density anchor therefore run AFTER that, or the player spawns on the old
+	# empty coordinate with the skyline gone.
+	_spawn_position = _find_spawn_position()
+	spawn_anchor = _density_centre
 
 	progress.call("完成", 1.0)
 	return true
@@ -169,7 +174,11 @@ func find_spawn_position() -> Vector3:
 
 
 func map_id() -> String:
-	return "plateau:%s:%d:%d" % [city, _active_lod(), files_loaded]
+	# The dataset fingerprint (all bldg file names, hashed) — deliberately NOT
+	# the loaded-file count: a place table can cover the whole ward while a
+	# session loads one square, and that is the same map. A re-downloaded
+	# dataset changes the names, which is what this must react to.
+	return "plateau:%s:%d:%s" % [city, _active_lod(), _dataset_fingerprint()]
 
 
 func describe() -> Dictionary:
@@ -192,20 +201,39 @@ func describe() -> Dictionary:
 ## slide along building walls via `move_and_slide`, which keeps people out of
 ## geometry without a navigation bake; the route's injection point is where a
 ## road-network finder plugs in later.
-func _build_mobility(world_root: Node3D, seed_value: int) -> void:
-	var payload: Dictionary = _load_activity_payload()
-	if payload.is_empty():
+func _build_mobility(world_root: Node3D, city_container: Node3D, seed_value: int) -> void:
+	var table: Dictionary = _load_place_table()
+	var candidates: Array[Dictionary] = table.get("candidates", [] as Array[Dictionary])
+	if candidates.is_empty():
 		return
-	# The table was derived from a specific dataset (city, lod, file count). If
-	# the running map no longer matches, positions would be subtly wrong — people
-	# inside walls — so the table is refused rather than trusted. Re-export fixes it.
-	var exported_version: String = String(payload.get("map_version", ""))
+	# The table was derived from a specific dataset (fingerprinted by file
+	# names). If the running map no longer matches, positions would be subtly
+	# wrong — people inside walls — so the table is refused rather than trusted.
+	var exported_version: String = String(table.get("map_version", ""))
 	if exported_version != map_id():
 		push_warning("地点表版本不匹配（表：%s，当前：%s）——重新运行 tools/city_export_activity 导出" % [
 			exported_version, map_id(),
 		])
 		return
-	var candidates: Array[Dictionary] = PlaceTable.parse_payload(payload)
+	# The exported offset covers the WHOLE dataset; a session that loaded a
+	# subset settled itself against only that subset's AABB, which sits
+	# kilometres away. Adopting the table's offset (computed over everything)
+	# puts the loaded blocks and the place table into the exact same frame —
+	# people at building footprints, not inside walls. Queries go through the
+	# physics bodies, which move with the container, so nothing else cares.
+	var table_offset: Vector3 = table.get("offset", Vector3.ZERO)
+	if table_offset != Vector3.ZERO:
+		var previous: Vector3 = city_container.position
+		city_container.position = table_offset
+		city_offset = table_offset
+		# The measured building cluster moves with the container; the anchor
+		# used by the spawn search must follow or it points kilometres away.
+		_density_centre += city_container.position - previous
+	# The full ward is ~90k places — scoring all of them per step per agent is
+	# millions of evaluations for no visible gain, since agents only ever walk
+	# near where the session loaded. Keep places near the loaded blocks, then
+	# cap each tag by stride sampling, which preserves spatial spread.
+	candidates = _thin_candidates(candidates)
 	if candidates.is_empty():
 		return
 	mobility_report = MobilityReadiness.assess(candidates, MOBILITY_REQUIRED_TAGS)
@@ -234,6 +262,11 @@ func _build_mobility(world_root: Node3D, seed_value: int) -> void:
 	container.name = "Pedestrians"
 	world_root.add_child(container)
 
+	# Bind once: menu-spawned citizens join the same day-planned crowd.
+	var spawner: PropSpawner = Services.get_as(&"prop_spawner", &"PropSpawner") as PropSpawner
+	if spawner != null:
+		spawner.bind_mobility(candidates, cache, version, finder, patterns)
+
 	var spawned: int = 0
 	var attempts: int = 0
 	while spawned < MOBILITY_AGENT_COUNT and attempts < MOBILITY_AGENT_COUNT * 3:
@@ -241,35 +274,26 @@ func _build_mobility(world_root: Node3D, seed_value: int) -> void:
 		var home: Dictionary = candidates[rng.randi() % candidates.size()]
 		if StringName(home.get("tag", ActivityTag.OTHER)) == ActivityTag.OTHER:
 			continue  # A home nobody annotated is not a home; pick another.
-		var agent := PedestrianAgent.new()
-		container.add_child(agent)
 		var origin: Vector3 = home.get("position", Vector3.ZERO) + Vector3(
 			rng.randf_range(-1.5, 1.5), 0.4, rng.randf_range(-1.5, 1.5)
 		)
-		agent.configure(
-			patterns[rng.randi() % patterns.size()], candidates, cache, version,
-			origin, seed_value + spawned, StringName(home.get("id", &"")), finder,
-		)
-		if not agent.has_day():
-			agent.queue_free()
+		var agent: PedestrianAgent = spawner.spawn_citizen(origin, seed_value + spawned)
+		if agent == null or not agent.has_day():
+			if agent != null:
+				agent.queue_free()
 			continue
+		if container != agent.get_parent():
+			agent.get_parent().remove_child(agent)
+			container.add_child(agent)
 		spawned += 1
 	mobility_agents = spawned
 
 
 ## The place table sits beside the dataset it was derived from; the same
 ## DSH_MAP_DATA / DSH_MAP_CITY environment knobs apply.
-func _load_activity_payload() -> Dictionary:
+func _load_place_table() -> Dictionary:
 	var data_root: String = _env_or("DSH_MAP_DATA", "res://data/plateau")
-	var path: String = data_root.path_join(city).path_join("activity.json")
-	if not FileAccess.file_exists(path):
-		return {}
-	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
-	if file == null:
-		return {}
-	var parsed: Variant = JSON.parse_string(file.get_as_text())
-	file.close()
-	return parsed if parsed is Dictionary else {}
+	return PlaceTable.load_for(city, data_root)
 
 
 ## The SDK is still treated as an optional extension everywhere else in the
@@ -490,6 +514,12 @@ func _find_spawn_position() -> Vector3:
 	var best_position := Vector3.ZERO
 	var best_score: float = -1.0
 	var radius: float = SPAWN_RING_STEP
+	# Citizens spawn clustered on building footprints near the anchor; a player
+	# dropped into that crowd gets shoved by forty bodies. The clear-shape check
+	# keeps the spawn point free of *anything* dynamic, not just buildings.
+	var space := _physics_space()
+	var clear_shape := SphereShape3D.new()
+	clear_shape.radius = SPAWN_CLEARANCE_RADIUS
 	while radius <= SPAWN_MAX_RADIUS:
 		for step: int in SPAWN_RING_SAMPLES:
 			var angle: float = TAU * float(step) / float(SPAWN_RING_SAMPLES)
@@ -502,6 +532,13 @@ func _find_spawn_position() -> Vector3:
 				continue
 			if not _is_clear_of_buildings(query, x, z):
 				continue
+			if space != null:
+				var overlap := PhysicsShapeQueryParameters3D.new()
+				overlap.shape = clear_shape
+				overlap.transform = Transform3D(Basis(), Vector3(x, height, z))
+				overlap.collision_mask = 1
+				if not space.intersect_shape(overlap, 1).is_empty():
+					continue
 			var score: float = _nearby_building_fraction(query, x, z)
 			if score > best_score:
 				best_score = score
@@ -547,6 +584,41 @@ func _is_clear_of_buildings(query: SurfaceQuery, x: float, z: float) -> bool:
 	return true
 
 
+## The physics space for the spawn-time overlap probe.
+func _physics_space() -> PhysicsDirectSpaceState3D:
+	var tree: SceneTree = Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return null
+	return tree.root.world_3d.direct_space_state
+
+
+## Places near the loaded blocks (within ACTIVE_RADIUS of the origin — the
+## reference point sits mid-dataset), then at most MAX_PER_TAG per activity tag
+## by stride, which keeps their spatial spread instead of clustering.
+const ACTIVE_RADIUS: float = 800.0
+const MAX_PER_TAG: int = 300
+
+func _thin_candidates(candidates: Array[Dictionary]) -> Array[Dictionary]:
+	var nearby: Array[Dictionary] = []
+	for candidate: Dictionary in candidates:
+		if (candidate.get("position", Vector3.ZERO) as Vector3).length() <= ACTIVE_RADIUS:
+			nearby.append(candidate)
+	var by_tag: Dictionary = {}
+	for candidate: Dictionary in nearby:
+		var tag: StringName = StringName(candidate.get("tag", ActivityTag.OTHER))
+		if not by_tag.has(tag):
+			by_tag[tag] = []
+		(by_tag[tag] as Array).append(candidate)
+	var thinned: Array[Dictionary] = []
+	for tag: Variant in by_tag:
+		var bucket: Array = by_tag[tag]
+		var stride: int = maxi(1, int(ceil(float(bucket.size()) / float(MAX_PER_TAG))))
+		for index: int in bucket.size():
+			if index % stride == 0:
+				thinned.append(bucket[index])
+	return thinned
+
+
 func _find_gml_files(city_name: String, kind: String) -> PackedStringArray:
 	var data_root: String = _env_or("DSH_MAP_DATA", ProjectSettings.globalize_path("res://data/plateau"))
 	var directory := DirAccess.open(data_root.path_join(city_name).path_join("udx").path_join(kind))
@@ -562,6 +634,12 @@ func _find_gml_files(city_name: String, kind: String) -> PackedStringArray:
 
 func _active_lod() -> int:
 	return int(_env_or("DSH_MAP_LOD", "1"))
+
+
+## The fingerprint over the **full** dataset, independent of how many files the
+## session chose to load.
+func _dataset_fingerprint() -> String:
+	return PlateauReader.dataset_fingerprint(_find_gml_files(city, "bldg"))
 
 
 func _env_or(key: String, fallback: String) -> String:

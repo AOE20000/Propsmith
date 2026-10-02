@@ -158,6 +158,9 @@ func _build_world(failures: Array[String]) -> void:
 		failures.append("map_source service has an unexpected type")
 		return
 	var typed_source: MapSource = source
+	# The sandbox containers must exist *before* the map builds: the map source
+	# spawns citizens during its own build, and they need somewhere to land.
+	_bind_sandbox_containers(world, failures)
 	# Reported because map loading is the one boot stage whose cost is invisible
 	# in every other readout, and the only way to tell an optimisation from a
 	# regression is to print the number that changed.
@@ -222,28 +225,33 @@ func _spawn_freecam() -> void:
 ## props with it), the grab tool, the tool gun, and the paused build panel.
 ## Session-level nodes — they survive map rebuilds and rebind to the new world
 ## through services.
-func _spawn_sandbox(failures: Array[String]) -> void:
-	if world == null:
-		return
+## Props and constraints containers live under the world and are bound to their
+## services *before* the map builds — the map source spawns citizens during its
+## own build, and they need somewhere to land.
+func _bind_sandbox_containers(world: Node3D, failures: Array[String]) -> void:
 	var props := Node3D.new()
 	props.name = "Props"
 	world.add_child(props)
 
-	var spawner: PropSpawner = Services.get_as(&"prop_spawner", &"PropSpawner") as PropSpawner
-	if spawner == null:
-		failures.append("prop_spawner service has an unexpected type")
-		return
-	spawner.setup(props)
-
-	var store: ConstraintStore = Services.get_as(&"constraint_store", &"ConstraintStore") as ConstraintStore
-	if store == null:
-		failures.append("constraint_store service has an unexpected type")
-		return
 	var constraints := Node3D.new()
 	constraints.name = "Constraints"
 	world.add_child(constraints)
+
+	var spawner: PropSpawner = Services.get_as(&"prop_spawner", &"PropSpawner") as PropSpawner
+	var store: ConstraintStore = Services.get_as(&"constraint_store", &"ConstraintStore") as ConstraintStore
+	if spawner == null or store == null:
+		failures.append("sandbox services missing at world bind")
+		return
+	spawner.setup(props)
 	store.setup(constraints)
 
+
+func _spawn_sandbox(failures: Array[String]) -> void:
+	if world == null:
+		return
+
+	# Containers were bound before the map built (the map source spawns
+	# citizens during its own build); only the session nodes are created here.
 	var wrench := PhysicsWrench.new()
 	wrench.name = "PhysicsWrench"
 	add_child(wrench)

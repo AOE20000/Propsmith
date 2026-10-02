@@ -88,6 +88,9 @@ func _place_props() -> void:
 		var spot: Vector3 = base + Vector3(float(index) * 1.2 - 1.8, 0.0, 0.0)
 		spot.y = query.height_at(spot.x, spot.z) + 0.8
 		spawner.spawn(ids[index], spot)
+	# Two citizens right in frame: the P2 proof that the crowd walks the streets.
+	spawner.spawn_citizen(base + Vector3(0.6, 0.4, 1.4), 11)
+	spawner.spawn_citizen(base + Vector3(-0.9, 0.4, 2.2), 12)
 	# Drop a ramp behind the row for silhouette variety.
 	var ramp_spot: Vector3 = base - forward * 2.0
 	ramp_spot.y = query.height_at(ramp_spot.x, ramp_spot.z) + 0.6

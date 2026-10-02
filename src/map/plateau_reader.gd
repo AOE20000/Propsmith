@@ -27,12 +27,12 @@ static func extract_buildings(gml_path: String, lod: int) -> Array:
 	var model: Variant = ClassDB.instantiate(&"PLATEAUCityModel")
 	# The constant comes from ClassDB, not a literal: the SDK owns its enum values.
 	model.log_level = ClassDB.class_get_integer_constant(&"PLATEAUCityModel", "LOG_LEVEL_ERROR")
-	print("[plateau] load %s ..." % gml_path.get_file())
+	printerr("[plateau] load %s ..." % gml_path.get_file())
 	var load_started: int = Time.get_ticks_msec()
 	if not model.load(gml_path):
 		push_warning("PlateauReader: 无法加载 %s" % gml_path)
 		return []
-	print("[plateau]   loaded in %d ms" % (Time.get_ticks_msec() - load_started))
+	printerr("[plateau]   loaded in %d ms" % (Time.get_ticks_msec() - load_started))
 	var extract_started: int = Time.get_ticks_msec()
 	var options: Variant = ClassDB.instantiate(&"PLATEAUMeshExtractOptions")
 	options.coordinate_zone_id = PlateauMapSource.ZONE_ID
@@ -42,7 +42,7 @@ static func extract_buildings(gml_path: String, lod: int) -> Array:
 	options.export_appearance = lod >= 2
 	var flat: Array = []
 	_flatten(model.extract_meshes(options), flat)
-	print("[plateau]   %d buildings in %d ms" % [flat.size(), Time.get_ticks_msec() - extract_started])
+	printerr("[plateau]   %d buildings in %d ms" % [flat.size(), Time.get_ticks_msec() - extract_started])
 	return flat
 
 
@@ -111,3 +111,15 @@ static func usage_of(data: Variant) -> String:
 static func gml_id_of(data: Variant) -> String:
 	var id: Variant = data.get_gml_id()
 	return String(id) if id != null else ""
+
+
+## A short fingerprint of the **dataset** (every bldg file's name, hashed). The
+## map identity uses this instead of the loaded-file count: a place table may
+## cover all 29 grid squares while a session loads one, and that must not read
+## as "a different map" — but a re-downloaded dataset (new year, new names)
+## must. Callers find the files; the reader only hashes the names.
+static func dataset_fingerprint(gml_files: PackedStringArray) -> String:
+	var names: PackedStringArray = PackedStringArray()
+	for path: String in gml_files:
+		names.append(path.get_file())
+	return "%08x" % (hash("\n".join(names)) & 0xFFFFFFFF)

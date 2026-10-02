@@ -3,25 +3,45 @@ extends Node
 ## `bldg:usage`, and write the annotated place table the mobility layer routes
 ## between. Run headless once after downloading a dataset:
 ##
-##   godot --headless --path . res://tools/city_export_activity.tscn --quit-after 6000
+##   godot --headless --path . res://tools/city_export_activity.tscn --quit-after 200000
 ##
 ## Output: `data/plateau/<city>/activity.json` (gitignored, like the dataset
 ## itself — CI uses the synthetic fixture in the tests instead). The position
 ## formula and the map_version string must agree with `PlateauMapSource` — that
 ## agreement is what keeps agents out of walls, so both sides go through
 ## `PlateauReader` and the same constants rather than duplicating arithmetic.
+##
+## Progress goes to a **flush-per-line journal file** (`data/plateau-scan/
+## export_progress.log`), because stdout/stderr are buffered under Windows
+## pipes and vanish entirely if the process dies mid-run — which is exactly how
+## a crash inside one dataset file used to look like "no output at all".
 
-const OUTPUT_SUFFIX: String = "activity.json"
+const OUTPUT_SUFFIX: String = "activity.tsv"
+
+var _journal: FileAccess = null
+
+
+func _log_line(text: String) -> void:
+	printerr(text)
+	if _journal != null:
+		_journal.store_line(text)
+		_journal.flush()
 
 
 func _ready() -> void:
+	printerr("[export] alive")
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://data/plateau-scan"))
+	_journal = FileAccess.open(
+		ProjectSettings.globalize_path("res://data/plateau-scan/export_progress.log"), FileAccess.WRITE
+	)
 	var city: String = _env_or("DSH_MAP_CITY", PlateauMapSource.DEFAULT_CITY)
 	var lod: int = int(_env_or("DSH_MAP_LOD", "1"))
 	var max_files: int = int(_env_or("DSH_MAP_FILES", "0"))  # 0 = every file
 
 	var gml_files: PackedStringArray = _find_gml_files(city, "bldg")
+	_log_line("[export] city=%s lod=%d files=%d" % [city, lod, gml_files.size()])
 	if gml_files.is_empty():
-		printerr("[export] 未找到数据：city=%s（先运行 tools/plateau/scan_cities.py 下载）" % city)
+		_log_line("[export] 未找到数据（先运行 tools/plateau/scan_cities.py 下载）")
 		get_tree().quit(1)
 		return
 	if max_files > 0 and gml_files.size() > max_files:
@@ -30,12 +50,14 @@ func _ready() -> void:
 	var started_at: int = Time.get_ticks_msec()
 	var entries: Array = []
 	for index: int in gml_files.size():
-		var batch: Array = PlateauReader.extract_buildings(gml_files[index], lod)
-		print("[export] %d/%d %s: %d buildings" % [index + 1, gml_files.size(), gml_files[index].get_file(), batch.size()])
+		var gml_path: String = gml_files[index]
+		_log_line("[export] BEGIN %d/%d %s" % [index + 1, gml_files.size(), gml_path.get_file()])
+		var batch: Array = PlateauReader.extract_buildings(gml_path, lod)
+		_log_line("[export] DONE  %d/%d %s: %d buildings" % [index + 1, gml_files.size(), gml_path.get_file(), batch.size()])
 		entries.append_array(batch)
-	print("[export] total buildings=%d in %d ms" % [entries.size(), Time.get_ticks_msec() - started_at])
+	_log_line("[export] total buildings=%d in %d ms" % [entries.size(), Time.get_ticks_msec() - started_at])
 	if entries.is_empty():
-		printerr("[export] no buildings extracted")
+		_log_line("[export] no buildings extracted")
 		get_tree().quit(1)
 		return
 
@@ -65,34 +87,38 @@ func _ready() -> void:
 			"position": [position.x, position.y, position.z],
 		})
 
-	var map_version: String = "plateau:%s:%d:%d" % [city, lod, gml_files.size()]
-	var payload := {
-		"city": city,
-		"lod": lod,
-		"map_version": map_version,
-		"offset": [offset.x, offset.y, offset.z],
-		"buildings": places.size(),
-		"tagged": tagged,
-		"places": places,
-	}
-
+	var map_version: String = "plateau:%s:%d:%s" % [
+		city, lod, PlateauReader.dataset_fingerprint(gml_files),
+	]
+	# TSV, not JSON: Godot's JSON.parse_string crawls on a 10 MB document (the
+	# full ward hung load for minutes), while a split-per-line parse is
+	# milliseconds. Header lines carry the metadata the loader needs.
 	var output_path: String = ProjectSettings.globalize_path(
 		"res://data/plateau".path_join(city).path_join(OUTPUT_SUFFIX)
 	)
 	DirAccess.make_dir_recursive_absolute(output_path.get_base_dir())
 	var file: FileAccess = FileAccess.open(output_path, FileAccess.WRITE)
 	if file == null:
-		printerr("[export] cannot write %s" % output_path)
+		_log_line("[export] cannot write %s" % output_path)
 		get_tree().quit(1)
 		return
-	file.store_string(JSON.stringify(payload))
+	file.store_line("# plateau place table")
+	file.store_line("# city=%s lod=%d map_version=%s" % [city, lod, map_version])
+	file.store_line("# offset=%.3f %.3f %.3f" % [offset.x, offset.y, offset.z])
+	file.store_line("# id\ttag\tx\ty\tz")
+	for place: Dictionary in places:
+		var position_values: Array = place.get("position", [0.0, 0.0, 0.0])
+		file.store_line("%s\t%s\t%.3f\t%.3f\t%.3f" % [
+			String(place.get("id", "")), String(place.get("tag", "other")),
+			float(position_values[0]), float(position_values[1]), float(position_values[2]),
+		])
 	file.close()
 
-	print("[export] %s" % map_version)
-	print("[export] offset=(%.1f, %.1f, %.1f) tagged=%d/%d" % [
+	_log_line("[export] %s" % map_version)
+	_log_line("[export] offset=(%.1f, %.1f, %.1f) tagged=%d/%d" % [
 		offset.x, offset.y, offset.z, tagged, places.size(),
 	])
-	print("[export] wrote %s" % output_path)
+	_log_line("[export] wrote %s" % output_path)
 	get_tree().quit(0)
 
 

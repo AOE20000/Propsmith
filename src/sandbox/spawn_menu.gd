@@ -113,10 +113,54 @@ func _rebuild_list() -> void:
 	var spacer := Control.new()
 	spacer.custom_minimum_size = Vector2(0.0, 8.0)
 	_list.add_child(spacer)
+
+	# NPCs: the built-in citizen plus every mod kind. Spawning uses the same
+	# crosshair placement as props.
+	var npc_spawner := func(npc_id: StringName) -> void:
+		if _spawner == null:
+			_spawner = Services.get_as(&"prop_spawner", &"PropSpawner") as PropSpawner
+		if _spawner == null:
+			return
+		var camera: Camera3D = get_viewport().get_camera_3d()
+		var target: Vector3 = Vector3.ZERO
+		if camera != null:
+			var probe := PhysicsRayQueryParameters3D.create(
+				camera.global_position,
+				camera.global_position - camera.global_transform.basis.z * 60.0,
+				1,
+			)
+			var hit: Dictionary = camera.get_world_3d().direct_space_state.intersect_ray(probe)
+			target = (hit["position"] as Vector3) + Vector3.UP if not hit.is_empty() else camera.global_position - camera.global_transform.basis.z * 3.0
+		_spawner.spawn_npc(npc_id, target, randi())
+
+	var npcs_header := Label.new()
+	npcs_header.text = "npc"
+	npcs_header.add_theme_font_size_override("font_size", 14)
+	npcs_header.modulate = Color(1.0, 1.0, 1.0, 0.6)
+	_list.add_child(npcs_header)
+	for entry: Dictionary in _spawner_npc_entries():
+		var npc_id: StringName = StringName(entry.get("id", &""))
+		_list.add_child(_action_button(String(entry.get("display_name", "")), func() -> void:
+			npc_spawner.call(npc_id)
+		))
+
+	var spacer2 := Control.new()
+	spacer2.custom_minimum_size = Vector2(0.0, 8.0)
+	_list.add_child(spacer2)
 	_list.add_child(_action_button("清空全部道具", func() -> void:
 		if _spawner != null:
 			_spawner.clear_all()
 	))
+
+
+## The spawner is resolved lazily here; its npc catalogue covers the built-in
+## citizen and mod registrations.
+func _spawner_npc_entries() -> Array[Dictionary]:
+	if _spawner == null:
+		_spawner = Services.get_as(&"prop_spawner", &"PropSpawner") as PropSpawner
+	if _spawner != null:
+		return _spawner.npc_entries()
+	return []
 
 
 func _spawn_button(label: String, prop_id: StringName) -> Button:

@@ -28,6 +28,7 @@ var combat_providers: Dictionary = {}
 var terrain_modifiers: Dictionary = {}
 var vehicle_factories: Dictionary = {}
 var tools: Dictionary = {}
+var npc_factories: Dictionary = {}
 
 
 func _init(owner_mod_id: StringName) -> void:
@@ -137,6 +138,22 @@ func add_tool(tool: SandboxTool) -> bool:
 	}, "tool")
 
 
+## Add an NPC kind for the spawn menu. `factory` builds a CharacterBody3D —
+## usually a configured `PedestrianAgent` subclass; the spawner assigns a day
+## plan (or wandering) after adding it to the world.
+func add_npc_factory(npc_id: StringName, display_name: String, factory: Callable, category: String = "people") -> bool:
+	if display_name.strip_edges().is_empty():
+		push_error("[mod:%s] npc '%s' needs a display name: it is what the spawn menu shows" % [_mod_id, npc_id])
+		return false
+	return _register_delivering(npc_factories, npc_id, {
+		"id": npc_id,
+		"display_name": display_name,
+		"factory": factory,
+		"category": category,
+		"owner": _mod_id,
+	}, "npc", "factory")
+
+
 ## Resolve another mod's registered landmark without knowing which mod owns it.
 ##
 ## Currently unused by the core: it exists so a mod can build on another mod's content
@@ -163,6 +180,7 @@ func _registry_by_name(registry_name: String) -> Dictionary:
 		"terrain modifier": return terrain_modifiers
 		"vehicle": return vehicle_factories
 		"tool": return tools
+		"npc": return npc_factories
 	return {}
 
 

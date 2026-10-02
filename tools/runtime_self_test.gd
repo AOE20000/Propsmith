@@ -42,9 +42,10 @@ func _ready() -> void:
 	_run_section("dependency load order", 10, _check_load_order)
 	_run_section("map-agnostic mobility core", 82, _check_mobility_core)
 	_run_section("mobility is an optional capability", 18, _check_mobility_readiness)
-	_run_section("place table and pedestrian agent", 10, _check_place_table_and_agent)
+	_run_section("place table and pedestrian agent", 11, _check_place_table_and_agent)
 	_run_section("sandbox props", 19, _check_prop_sandbox)
 	_run_section("tool gun and constraints", 15, _check_tools_and_constraints)
+	_run_section("npc citizens", 11, _check_npc_citizens)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("boot summary", 4, _check_summary)
 
@@ -693,22 +694,25 @@ func _check_save_map_identity() -> void:
 ## pipeline end to end on a synthetic fixture — no dataset required, which is
 ## the whole point of running this in CI.
 func _check_place_table_and_agent() -> void:
-	var payload := {
-		"map_version": "plateau:fixture:1:1",
-		"places": [
-			{"id": "b1", "tag": "home", "position": [0.0, 0.0, 0.0]},
-			{"id": "b2", "tag": "work", "position": [100.0, 0.0, 0.0]},
-			{"id": "b3", "tag": "food", "position": [50.0, 0.0, 40.0]},
-			{"id": "b4", "tag": "other", "position": [7.0, 0.0, 7.0]},
-			{"id": "b5", "tag": "home", "position": [7.0]},
-			{"id": "", "tag": "home", "position": [1.0, 0.0, 1.0]},
-		],
-	}
-	var candidates: Array[Dictionary] = PlaceTable.parse_payload(payload)
-	_expect(candidates.size() == 4, "the parser must skip entries without an id or a 3-part position")
+	var fixture := "\n".join(PackedStringArray([
+		"# plateau place table",
+		"# city=fixture lod=1 map_version=plateau:fixture:1:aa",
+		"# offset=1.0 0.0 2.0",
+		"# id\ttag\tx\ty\tz",
+		"b1\thome\t0.000\t0.000\t0.000",
+		"b2\twork\t100.000\t0.000\t0.000",
+		"b3\tfood\t50.000\t0.000\t40.000",
+		"b4\tother\t7.000\t0.000\t7.000",
+		"b5\thome\t7.000",
+		"\thome\t1.000\t0.000\t1.000",
+	]))
+	var parsed: Dictionary = PlaceTable.parse_text(fixture)
+	var candidates: Array[Dictionary] = parsed.get("candidates", [] as Array[Dictionary])
+	_expect(candidates.size() == 4, "the parser must skip lines without an id or a 5-column row")
 	_expect(StringName(candidates[0].get("id", &"")) == &"b1", "the first valid entry must survive in order")
 	_expect(StringName(candidates[3].get("tag", &"")) == ActivityTag.OTHER, "an `other` tag must be kept so readiness can count it")
-	_expect(PlaceTable.map_version_of(payload) == "plateau:fixture:1:1", "map_version must round-trip")
+	_expect(String(parsed.get("map_version", "")) == "plateau:fixture:1:aa", "map_version must round-trip")
+	_expect((parsed.get("offset", Vector3.ZERO) as Vector3) == Vector3(1.0, 0.0, 2.0), "the exported offset must round-trip")
 
 	var report: Dictionary = MobilityReadiness.assess(candidates, [&"home", &"work", &"food", &"school"])
 	_expect(bool(report["enabled"]), "a home+work+food fixture must enable mobility")
@@ -910,7 +914,75 @@ func _check_tools_and_constraints() -> void:
 
 	spawner.clear_all()
 	body_a.free()
+
+
+## Citizens: menu-spawnable pedestrians who get a day plan when mobility is
+## bound and wander when it is not, and who die through the regular combat
+## pipeline (HealthComponent in their subtree is all the attacker sees).
+func _check_npc_citizens() -> void:
+	var container := Node3D.new()
+	add_child(container)
+	var spawner := PropSpawner.new()
+	add_child(spawner)
+	spawner.setup(container)
+
+	# Without mobility bound: a wanderer, not a broken schedule.
+	var wanderer: PedestrianAgent = spawner.spawn_citizen(Vector3(0.0, 1.0, 0.0), 3)
+	_expect(wanderer != null and wanderer.wandering, "a citizen without mobility must wander")
+	_expect(wanderer.route == null, "a wanderer carries no route")
+	_expect(spawner.count() == 1, "a spawned citizen counts toward undo")
+	wanderer.free()
+
+	# With mobility bound: a seeded day. The finder needs no real navigation —
+	# the stub returns straight lines, which is the seam's whole point.
+	var cache := RouteCache.new()
+	cache.set_map_version("npc_fixture")
+	var positions := {"h1": Vector3.ZERO, "w1": Vector3(40.0, 0.0, 0.0)}
+	var finder := func(a: String, b: String) -> PackedVector3Array:
+		if not positions.has(a) or not positions.has(b):
+			return PackedVector3Array()
+		return PackedVector3Array([Vector3(positions[a]), Vector3(positions[b])])
+	var candidates: Array[Dictionary] = [
+		DestinationChooser.make_candidate(&"h1", &"home", Vector3.ZERO),
+		DestinationChooser.make_candidate(&"w1", &"work", Vector3(40.0, 0.0, 0.0)),
+	]
+	spawner.bind_mobility(candidates, cache, "npc_fixture", finder, [ActivityPattern.commute()])
+	var citizen: PedestrianAgent = spawner.spawn_citizen(Vector3.ZERO, 5)
+	_expect(citizen != null and not citizen.wandering, "a citizen with mobility bound must walk a plan")
+	_expect(citizen.has_day(), "the plan must resolve on the two-place fixture")
+
+	# Damage: the HealthComponent lives in the citizen's subtree, so a plain
+	# hitbox strike finds it without any wiring.
+	var health := citizen.get_node("Health") as HealthComponent
+	_expect(health != null, "a citizen must carry a HealthComponent")
+	var info := DamageInfo.create(500.0, &"physical", null, citizen, Vector3.ZERO, Vector3.UP)
+	_expect(health.can_receive_damage(info), "a healthy citizen can take damage")
+	health.apply_damage(info)
+	_expect(health.is_defeated(), "a lethal hit must defeat the citizen")
+	_expect(citizen.describe().contains("dead"), "a defeated citizen must report dead")
+	citizen.free()
+
+	# Mod NPC registration joins the menu catalogue.
+	var context := ModContext.new(&"selftest_npc")
+	_expect(
+		context.add_npc_factory(&"mod_cop", "mod 巡警", func() -> CharacterBody3D:
+			return PedestrianAgent.new(),
+		),
+		"an npc factory must register through the mod seam"
+	)
+	ModHost.contexts["selftest_npc"] = context
+	var ids: Dictionary = {}
+	for entry: Dictionary in spawner.npc_entries():
+		ids[String(entry.get("id", ""))] = true
+	_expect(ids.has("citizen") and ids.has("mod_cop"), "the built-in citizen and mod npcs must both be listed")
+	ModHost.contexts.erase("selftest_npc")
+	context.release_all()
+
+	spawner.clear_all()
+
+
 ## or the smoke test's output stops being evidence.
+## The one line the boot report prints has to stay parseable and name both runtimes,
 func _check_summary() -> void:
 	var summary: String = ScriptingRuntimes.summary()
 	for key: Variant in ScriptingRuntimes.RUNTIMES.keys():

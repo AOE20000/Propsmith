@@ -1,4 +1,4 @@
-[gd_scene format=3 uid="uid://cexportact1pk"]
+[gd_scene format=3]
 
 [ext_resource type="Script" path="res://tools/city_export_activity.gd" id="1_exportact"]
 

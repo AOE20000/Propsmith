@@ -15,11 +15,120 @@ class_name PropSpawner
 var _container: Node3D = null
 var _undo_stack: Array[Node] = []
 
+## Mobility context bound by the map source when a place table exists: citizens
+## spawn with a seeded day plan. Without it they degrade to wandering.
+var _mobility_candidates: Array[Dictionary] = []
+var _mobility_cache: RouteCache = null
+var _mobility_version: String = ""
+var _mobility_finder: Callable = Callable()
+var _mobility_patterns: Array[ActivityPattern] = []
+
 
 ## Bind to the world's prop container. Called after each map build.
 func setup(container: Node3D) -> void:
 	_container = container
 	_undo_stack.clear()
+
+
+## Give spawned citizens a day plan. The map source calls this after loading its
+## place table; without the binding, citizens wander instead — visible people,
+## honestly unannotated.
+func bind_mobility(
+	candidates: Array[Dictionary],
+	cache: RouteCache,
+	version: String,
+	finder: Callable,
+	patterns: Array[ActivityPattern],
+) -> void:
+	_mobility_candidates = candidates
+	_mobility_cache = cache
+	_mobility_version = version
+	_mobility_finder = finder
+	_mobility_patterns = patterns
+
+
+## Spawn a citizen: a pedestrian with a seeded day plan when mobility is bound,
+## a wanderer when it is not. Counts toward undo like any spawned thing.
+func spawn_citizen(at: Vector3, seed_value: int) -> PedestrianAgent:
+	if _container == null:
+		push_warning("PropSpawner: no world container bound; call setup() after the map builds")
+		return null
+	var citizen := PedestrianAgent.new()
+	citizen.name = "Citizen"
+	citizen.set_meta(&"npc_kind", &"citizen")
+	_container.add_child(citizen)
+	citizen.global_position = at
+	if _mobility_cache != null and not _mobility_candidates.is_empty() and not _mobility_patterns.is_empty():
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash("citizen|%s|%d" % [_mobility_version, seed_value])
+		var home: Dictionary = _mobility_candidates[rng.randi() % _mobility_candidates.size()]
+		citizen.configure(
+			_mobility_patterns[rng.randi() % _mobility_patterns.size()],
+			_mobility_candidates, _mobility_cache, _mobility_version,
+			home.get("position", at), seed_value, StringName(home.get("id", &"")),
+			_mobility_finder,
+		)
+	else:
+		citizen.configure_wander(at, seed_value)
+	_undo_stack.append(citizen)
+	Events.prop_spawned.emit(citizen, &"citizen")
+	return citizen
+
+
+## Spawn a mod-registered NPC by catalog id (kind `npc`). The factory builds the
+## body; the spawner assigns wander or a day plan exactly as for citizens.
+func spawn_npc(npc_id: StringName, at: Vector3, seed_value: int) -> CharacterBody3D:
+	var definition: Dictionary = {}
+	for entry: Dictionary in npc_entries():
+		if StringName(entry.get("id", &"")) == npc_id:
+			definition = entry
+			break
+	if definition.is_empty():
+		push_warning("PropSpawner: unknown npc id '%s'" % npc_id)
+		return null
+	var factory: Callable = definition.get("factory", Callable())
+	var produced: Variant = factory.call()
+	if not (produced is CharacterBody3D):
+		push_warning("PropSpawner: npc '%s' factory must return a CharacterBody3D (got %s)" % [
+			npc_id, type_string(typeof(produced)),
+		])
+		return null
+	var npc := produced as CharacterBody3D
+	npc.set_meta(&"npc_kind", npc_id)
+	_container.add_child(npc)
+	npc.global_position = at
+	if npc is PedestrianAgent:
+		var agent := npc as PedestrianAgent
+		if _mobility_cache != null and not _mobility_candidates.is_empty():
+			var rng := RandomNumberGenerator.new()
+			rng.seed = hash("npc|%s|%d" % [npc_id, seed_value])
+			var home: Dictionary = _mobility_candidates[rng.randi() % _mobility_candidates.size()]
+			agent.configure(
+				_mobility_patterns[rng.randi() % _mobility_patterns.size()],
+				_mobility_candidates, _mobility_cache, _mobility_version,
+				home.get("position", at), seed_value, StringName(home.get("id", &"")),
+				_mobility_finder,
+			)
+		else:
+			agent.configure_wander(at, seed_value)
+	_undo_stack.append(npc)
+	Events.prop_spawned.emit(npc, npc_id)
+	return npc
+
+
+## NPC definitions for the spawn menu: the built-in citizen plus every
+## mod-registered NPC, in one deterministic order.
+func npc_entries() -> Array[Dictionary]:
+	var out: Array[Dictionary] = [{
+		"id": &"citizen",
+		"display_name": "市民",
+		"category": "people",
+		"factory": func() -> CharacterBody3D: return PedestrianAgent.new(),
+	}]
+	for entry: Variant in ModHost.content_ordered(&"npc"):
+		if entry is Dictionary:
+			out.append(entry)
+	return out
 
 
 ## Instantiate a prop by catalog id at `at`, facing `yaw`. Returns the body, or

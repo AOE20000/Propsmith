@@ -20,15 +20,35 @@ const WALK_SPEED: float = 1.4
 const ARRIVAL_DISTANCE: float = 0.9
 ## Turn rate is instant: at 1.4 m/s nobody reads a snappy rotation on a capsule.
 const GRAVITY: float = 18.0
+## Wander mode picks targets inside this radius of the spawn point.
+const WANDER_RADIUS: float = 30.0
+## Seconds a fallen citizen stays before the world takes them back.
+const CORPSE_LINGER: float = 4.0
 
 var route: AgentRoute = null
+## True when no annotated places were available: the citizen still walks, just
+## without a day plan — random nearby targets instead of a commute.
+var wandering: bool = false
 
 var _waypoints: PackedVector3Array = PackedVector3Array()
 var _waypoint_index: int = 0
+var _wander_rng := RandomNumberGenerator.new()
+var _health: HealthComponent = null
+var _dead: bool = false
 
 
 func _ready() -> void:
 	_build_body()
+	_build_health()
+
+
+func _build_health() -> void:
+	_health = HealthComponent.new()
+	_health.name = "Health"
+	_health.max_health = 60.0
+	_health.current_health = 60.0
+	add_child(_health)
+	_health.defeated.connect(_on_defeated)
 
 
 ## Resolve a day and start walking. Same parameters as `AgentRoute.configure`
@@ -43,6 +63,7 @@ func configure(
 	home_key: StringName,
 	path_finder: Callable,
 ) -> void:
+	wandering = false
 	route = AgentRoute.new()
 	route.set_path_finder(path_finder)
 	route.configure(activity_pattern, candidates, cache, map_version, origin, seed, home_key)
@@ -50,11 +71,23 @@ func configure(
 	_refresh_waypoints()
 
 
+## Walk free-form: no annotated places needed, so this is the degradation a
+## menu-spawned citizen uses on any map. Same body, same movement code.
+func configure_wander(origin: Vector3, seed: int) -> void:
+	wandering = true
+	route = null
+	global_position = origin
+	_wander_rng.seed = hash("wander|%s|%d" % [origin, seed])
+	_refresh_waypoints()
+
+
 func _physics_process(delta: float) -> void:
+	if _dead:
+		return
 	if route == null or route.is_finished():
-		# The day is over; stand still. People who finished their day are still
-		# city content — they just stop being a moving target.
-		if not is_on_floor():
+		if wandering:
+			_pick_wander_target()
+		elif not is_on_floor():
 			velocity.y -= GRAVITY * delta
 			move_and_slide()
 		return
@@ -84,15 +117,19 @@ func has_day() -> bool:
 
 func progress_fraction() -> float:
 	if route == null:
-		return 1.0
+		return 0.0
 	return route.progress_fraction()
 
 
 ## One line for the boot report.
 func describe() -> String:
+	if _dead:
+		return "citizen(dead)"
+	if wandering:
+		return "citizen(wandering)"
 	if route == null:
-		return "pedestrian(no route)"
-	return "pedestrian(%s)" % route.describe()
+		return "citizen(no route)"
+	return "citizen(%s)" % route.describe()
 
 
 ## The current leg's polyline, refreshed whenever the route advances a leg.
@@ -106,17 +143,28 @@ func _advance_waypoint() -> void:
 	_waypoint_index += 1
 	if _waypoint_index >= _waypoints.size():
 		# The leg is walked; ask the route for the next one (which lazily resolves
-		# that leg's path through the shared cache).
-		if route.advance():
-			_refresh_waypoints()
+		# that leg's path through the shared cache). A wanderer has no route and
+		# simply picks a new nearby target.
+		if route != null:
+			if route.advance():
+				_refresh_waypoints()
+		elif wandering:
+			_pick_wander_target()
 
 
 func _refresh_waypoints() -> void:
-	_waypoints = route.current_path()
+	_waypoints = route.current_path() if route != null else PackedVector3Array()
 	# An empty path means the finder could not connect the places (or none was
 	# supplied): fall back to walking the straight line to the stop itself.
 	if _waypoints.is_empty():
-		_waypoints = PackedVector3Array([route.current_target()])
+		_waypoints = PackedVector3Array([route.current_target() if route != null else global_position])
+	_waypoint_index = 0
+
+
+func _pick_wander_target() -> void:
+	var angle: float = _wander_rng.randf() * TAU
+	var distance: float = 4.0 + _wander_rng.randf() * WANDER_RADIUS
+	_waypoints = PackedVector3Array([global_position + Vector3(cos(angle) * distance, 0.0, sin(angle) * distance)])
 	_waypoint_index = 0
 
 
@@ -147,3 +195,24 @@ func _build_body() -> void:
 	mesh.material_override = material
 	mesh.position = Vector3(0.0, 0.75, 0.0)
 	add_child(mesh)
+
+
+## Death: fall over, stop being physics-active, and let the world take the
+## body back. No gore, no ragdoll — a capsule tipped on its side reads clearly.
+func _on_defeated(_killer: Node) -> void:
+	if _dead:
+		return
+	_dead = true
+	collision_layer = 0
+	collision_mask = 0
+	velocity = Vector3.ZERO
+	var visual := get_node_or_null("Visual") as MeshInstance3D
+	if visual != null:
+		visual.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+		visual.position = Vector3(0.0, 0.3, 0.0)
+	Events.notify("一位市民倒下了", Events.NotifyLevel.WARNING)
+	var timer := get_tree().create_timer(CORPSE_LINGER)
+	timer.timeout.connect(func() -> void:
+		if is_instance_valid(self):
+			queue_free()
+	)
