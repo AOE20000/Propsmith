@@ -35,6 +35,13 @@ Two things have to be supplied by hand:
     ships no albedo). Akane's own body material has the albedo painted for this
     exact UV, so it is carried over.
 
+Akane's hair comes along with her head (`Hair_ahoge/back/front/side`, the same
+1.10 frame and the same `EX3_Hair` atlas). Its pieces are skinned to their own
+decorative chains — three roots under `Head` plus 22 chain bones — which are
+copied from her rig, scaled by 1/1.10 like everything of hers, in parent-first
+order. The dog ears stay out: they are an accessory, not hair, and a natural
+first `MeshSwapOption`.
+
 Run with the project toolchain (the VRM addon lives there):
   D:/workbuddy/blender-4.2.23/blender-4.2.23-windows-x64/blender.exe \
       --background --python tools/models/export_akane_vrm.py
@@ -51,6 +58,10 @@ OUT = r"D:/untitled/FPGames/vendor/models/build/base_female.vrm"
 
 BODY_OBJECT = "SiroinoSotai_PC"
 HEAD_OBJECT = "Body"
+# Hair rides along with the head: same 1.10 frame, same EX3_Hair atlas, skinned
+# mostly to its own decorative chains. The dog ears stay out — they are an
+# accessory (a natural first MeshSwapOption), not hair.
+HAIR_OBJECTS = ("Hair_ahoge", "Hair_back", "Hair_front", "Hair_side")
 
 # Akane's whole rig and mesh are the reference at 1.10x. Dividing the head by
 # that factor puts body and head in one frame; dividing both by the same factor
@@ -135,17 +146,47 @@ for slot_material in akane_body.data.materials:
 log("body material taken from Akane:", body_material.name if body_material else "NONE")
 
 eye_rest = {}
-for name in EYE_BONES:
-    bone = akane_armature.data.bones.get(name)
-    if bone is None:
+# Hair pieces ride along (see HAIR_OBJECTS). Collect every bone they reference,
+# then capture them all — plus the eye bones — in edit mode, because `roll`
+# only exists on EditBone: rebuilding a chain with the wrong roll would twist
+# every strand around its own axis the first time the bone rotates. Uniform
+# scaling preserves bone direction, so scaled head/tail + same roll reproduces
+# Akane's local frames exactly and the weights carry over untouched.
+hair_objects = [bpy.data.objects[name] for name in HAIR_OBJECTS]
+# The vertex groups name the chain bones, but not the roots above them: a root
+# (hair_back_root etc.) carries no weights yet parents the first link. Walk
+# every referenced bone up to `Head` so the whole chain — roots included — gets
+# captured.
+wanted = set()
+for obj in hair_objects:
+    for group in obj.vertex_groups:
+        walker = akane_armature.data.bones.get(group.name)
+        while walker is not None and walker.name != "Head":
+            wanted.add(walker.name)
+            walker = walker.parent
+wanted.discard("Head")
+
+bpy.ops.object.select_all(action="DESELECT")
+bpy.context.view_layer.objects.active = akane_armature
+akane_armature.select_set(True)
+bpy.ops.object.mode_set(mode="EDIT")
+captured = {}
+for name in sorted(wanted | set(EYE_BONES)):
+    edit_bone = akane_armature.data.edit_bones.get(name)
+    if edit_bone is None:
         log("!! Akane's rig has no %s" % name)
         continue
-    eye_rest[name] = (
-        tuple(v / AKANE_SCALE for v in bone.head_local),
-        tuple(v / AKANE_SCALE for v in bone.tail_local),
-        bone.parent.name if bone.parent else "Head",
+    captured[name] = (
+        tuple(v / AKANE_SCALE for v in edit_bone.head),
+        tuple(v / AKANE_SCALE for v in edit_bone.tail),
+        edit_bone.parent.name if edit_bone.parent else "Head",
+        edit_bone.roll,
     )
-log("eye bones captured (reference frame): %s" % sorted(eye_rest))
+bpy.ops.object.mode_set(mode="OBJECT")
+eye_rest = {name: captured[name] for name in EYE_BONES if name in captured}
+hair_bone_rest = {name: data for name, data in captured.items() if name not in EYE_BONES}
+log("eye bones captured: %s" % sorted(eye_rest))
+log("hair bones captured (reference frame): %d" % len(hair_bone_rest))
 
 log("head object transform: loc=%s scale=%s"
     % (tuple(round(v, 5) for v in head.location), tuple(round(v, 5) for v in head.scale)))
@@ -154,7 +195,7 @@ if bake_transform(head):
 else:
     log("head object transform was already identity")
 
-kept_names = {head.name}
+kept_names = {head.name} | {obj.name for obj in hair_objects}
 for obj in list(bpy.data.objects):
     if obj.name not in kept_names:
         bpy.data.objects.remove(obj, do_unlink=True)
@@ -193,23 +234,57 @@ key_count = scale_shape_data(head, HEAD_SCALE)
 log("head scaled by %.6f (object transform untouched); %d shape keys follow"
     % (HEAD_SCALE, key_count))
 
-# --- 4. eye bones on the reference rig --------------------------------------
+for obj in hair_objects:
+    if bake_transform(obj):
+        log("%s: object transform baked" % obj.name)
+    keys = scale_shape_data(obj, HEAD_SCALE)
+    log("%s scaled by %.6f (%d shape keys)" % (obj.name, HEAD_SCALE, keys))
+
+# --- 4. eye bones and hair chains on the reference rig -----------------------
 bpy.ops.object.select_all(action="DESELECT")
 bpy.context.view_layer.objects.active = armature
 armature.select_set(True)
 bpy.ops.object.mode_set(mode="EDIT")
 edit_bones = armature.data.edit_bones
-for name, (head_pos, tail_pos, parent_name) in eye_rest.items():
+for name, (head_pos, tail_pos, parent_name, roll) in eye_rest.items():
     if name in edit_bones:
         edit_bones.remove(edit_bones[name])
     bone = edit_bones.new(name)
     bone.head = Vector(head_pos)
     bone.tail = Vector(tail_pos)
+    bone.roll = roll
     bone.parent = edit_bones[parent_name]
     bone.use_connect = False
     log("added %s to the reference rig (parent %s)" % (name, parent_name))
+
+# Hair chains, parents first: every wanted bone hangs off `Head` directly (the
+# three roots) or off another wanted bone (the chains), so a pass that skips
+# not-yet-addable bones terminates.
+pending = dict(hair_bone_rest)
+while pending:
+    progressed = False
+    for name in list(pending):
+        head_pos, tail_pos, parent_name, roll = pending[name]
+        if parent_name != "Head" and parent_name in pending:
+            continue
+        if parent_name != "Head" and edit_bones.get(parent_name) is None:
+            log("!! %s: parent %s unknown — attaching to Head instead"
+                % (name, parent_name))
+            parent_name = "Head"
+        bone = edit_bones.new(name)
+        bone.head = Vector(head_pos)
+        bone.tail = Vector(tail_pos)
+        bone.roll = roll
+        bone.parent = edit_bones[parent_name]
+        bone.use_connect = False
+        del pending[name]
+        progressed = True
+    if not progressed:
+        log("!! hair bone chains stuck: %s" % sorted(pending))
+        break
 bpy.ops.object.mode_set(mode="OBJECT")
-log("reference rig now has %d bones" % len(armature.data.bones))
+log("reference rig now has %d bones (60 body + 2 eyes + %d hair)"
+    % (len(armature.data.bones), len(hair_bone_rest)))
 
 # --- 5. bind the head to the reference rig ---------------------------------
 # The weights are already in the mesh's vertex groups and every group now exists
@@ -226,6 +301,19 @@ for modifier in list(head.modifiers):
 armature_modifier = head.modifiers.new(name="Armature", type="ARMATURE")
 armature_modifier.object = armature
 log("head bound to %s, modifiers=%s" % (armature.name, [m.type for m in head.modifiers]))
+
+for obj in hair_objects:
+    missing = [vg.name for vg in obj.vertex_groups if vg.name not in armature.data.bones]
+    if missing:
+        log("!! %s: groups missing from the rig: %s" % (obj.name, missing))
+    obj.parent = armature
+    obj.parent_type = "OBJECT"
+    obj.matrix_parent_inverse = armature.matrix_world.inverted()
+    for modifier in list(obj.modifiers):
+        if modifier.type == "ARMATURE":
+            obj.modifiers.remove(modifier)
+    obj.modifiers.new(name="Armature", type="ARMATURE").object = armature
+log("hair bound to %s" % armature.name)
 
 # --- 6. textures --------------------------------------------------------------
 # FBX image datablocks carry the authoring machine's absolute paths. Match them
@@ -267,7 +355,7 @@ def basis_positions(mesh):
     return [tuple(block.co) for block in keys.key_blocks[0].data]
 
 
-for part in (body, head):
+for part in (body, head, *hair_objects):
     keys = part.data.shape_keys
     if keys is None:
         continue
@@ -302,7 +390,7 @@ def world_bounds(objs):
     return low, high
 
 
-parts = [body, head]
+parts = [body, head, *hair_objects]
 low, high = world_bounds(parts)
 span = high.z - low.z
 factor = TARGET_HEIGHT / span
@@ -437,7 +525,18 @@ body.name = "SiroinoSotai_Body"
 body.data.name = "SiroinoSotai_Body"
 head.name = "Akane_Head"
 head.data.name = "Akane_Head"
-log("renamed meshes to %s / %s" % (body.name, head.name))
+HAIR_RENAME = {
+    "Hair_front": "Akane_Hair_Front",
+    "Hair_back": "Akane_Hair_Back",
+    "Hair_side": "Akane_Hair_Side",
+    "Hair_ahoge": "Akane_Hair_Ahoge",
+}
+for old, new in HAIR_RENAME.items():
+    obj = bpy.data.objects.get(old)
+    if obj is not None:
+        obj.name = new
+        obj.data.name = new
+log("renamed meshes: %s" % [o.name for o in parts])
 
 # --- 13. export ---------------------------------------------------------------
 bpy.ops.object.select_all(action="DESELECT")
