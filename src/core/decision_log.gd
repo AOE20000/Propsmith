@@ -43,6 +43,10 @@ var transport: Object = null
 var _appliers: Dictionary = {}
 var _seq: int = 0
 var _slot: String = "slot1"
+## Distributed mode (set by a transport module): clients neither journal nor
+## autosave — the host's journal and snapshot are the world's truth.
+var journal_enabled: bool = true
+var autosave_enabled: bool = true
 var _autosave_timer: Timer = null
 ## Records seen before their applier registered (boot order): replayed once
 ## the first applier arrives, or on the next game_loaded — whichever is first.
@@ -73,10 +77,12 @@ func record(kind: StringName, payload: Dictionary) -> void:
 		"payload": payload,
 	}
 	decision_applied.emit(kind, payload)
-	_journal_append(record)
+	if journal_enabled:
+		_journal_append(record)
 	if transport != null and transport.has_method("broadcast"):
 		transport.broadcast(record)
-	_schedule_autosave()
+	if autosave_enabled:
+		_schedule_autosave()
 
 
 ## Apply one record through its registered applier — the remote-decision
@@ -84,6 +90,59 @@ func record(kind: StringName, payload: Dictionary) -> void:
 ## primitive.
 func apply_record(record: Dictionary) -> void:
 	_apply(record)
+
+
+## Client mode: the host's journal and snapshot are the world's truth, so the
+## local copy neither journals nor autosaves — it only applies what arrives.
+func set_client_mode() -> void:
+	journal_enabled = false
+	autosave_enabled = false
+
+
+## Back to standalone/local authority (transport stopped).
+func restore_local_mode() -> void:
+	journal_enabled = true
+	autosave_enabled = true
+
+
+## Host-side entry for a peer's decision: sequence it, journal it, apply it.
+## Relaying to the other peers is the transport's job — it knows which peer
+## to exclude (the originator already applied the change locally).
+func ingest_remote(record: Dictionary) -> void:
+	_seq = maxi(_seq, int(record.get("seq", 0)))
+	_seq += 1
+	record["seq"] = _seq
+	_apply(record)
+	if journal_enabled:
+		_journal_append(record)
+	decision_applied.emit(StringName(String(record.get("kind", ""))), record.get("payload", {}))
+	if autosave_enabled:
+		_schedule_autosave()
+
+
+## Point the journal at a slot (probes use a dedicated slot so they never
+## touch a real save). Emits nothing; subsequent records land in that slot's
+## journal.
+func use_slot(slot: String) -> void:
+	_slot = slot
+
+
+## The current journal (catch-up payload for late joiners).
+func journal_records() -> Array:
+	return _journal_read()
+
+
+## The journal tail a late joiner needs: snapshot-COVERED kinds are already
+## reflected in the sandbox snapshot that accompanies the catch-up, so only
+## uncovered records are sent — replaying covered ones would double-apply.
+func uncovered_records() -> Array:
+	var retained: Array = []
+	for record: Dictionary in _journal_read():
+		var entry: Variant = _appliers.get(StringName(String(record.get("kind", ""))))
+		var covered: bool = (entry is Dictionary) and bool((entry as Dictionary).get("covered", true))
+		if not covered:
+			retained.append(record)
+	return retained
 
 
 ## Register the applier for a decision kind. The applier receives the record's

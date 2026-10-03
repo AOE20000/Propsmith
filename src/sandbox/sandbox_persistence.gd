@@ -30,6 +30,17 @@ func setup(spawner: PropSpawner, store: ConstraintStore) -> void:
 	SaveSystem.register_persistent(SECTION_ID, serialize, deserialize)
 
 
+## Sync payload for a joining peer: the same blueprint-shaped dictionary the
+## save section carries, so the joiner's own `deserialize` applies it verbatim.
+func snapshot_for_sync() -> Dictionary:
+	return serialize()
+
+
+## Apply a host's sync payload (the joiner's catch-up path).
+func apply_sync_snapshot(payload: Dictionary) -> void:
+	deserialize(payload)
+
+
 func serialize() -> Dictionary:
 	var props: Array = _spawner.serialize_props()
 	# Prop index = position in the saved list; constraints reference them by it.

@@ -9,6 +9,7 @@ var _spawner: PropSpawner = null
 
 func _ready() -> void:
 	GameState.map_id = "probe_city"
+	DecisionLog.use_slot("probe")
 	var container := Node3D.new()
 	container.name = "Props"
 	add_child(container)
@@ -21,7 +22,7 @@ func _ready() -> void:
 	add_child(persistence)
 	persistence.setup(_spawner, store)
 
-	var journal := "user://journal/slot1.jsonl"
+	var journal := "user://journal/probe.jsonl"
 	var lines_before := _journal_lines(journal)
 
 	# 1) spawn: journaled
@@ -40,7 +41,7 @@ func _ready() -> void:
 
 	# 3) save: the covered tail compacts away, the snapshot carries the prop
 	#    with its decision id + paint colour.
-	SaveSystem.save_game("slot1")
+	SaveSystem.save_game("probe")
 	var after_save := _journal_lines(journal)
 	var covered_left := 0
 	for record: Dictionary in _journal_records(journal):
@@ -48,7 +49,7 @@ func _ready() -> void:
 			covered_left += 1
 	print("[sdlog] save: lines %d -> %d covered_left=%d (expect 0)" % [
 		after_paint, after_save, covered_left])
-	var snapshot := _read_snapshot("slot1")
+	var snapshot := _read_snapshot("probe")
 	var saved_props: Array = snapshot.get("props", [])
 	var ids_ok := false
 	var paint_ok := false
@@ -70,7 +71,7 @@ func _ready() -> void:
 
 	# 5) load: explicit rollback — snapshot restored (first prop back with
 	#    paint), tail decisions dropped (second prop gone), journal emptied.
-	var loaded: bool = SaveSystem.load_game("slot1")
+	var loaded: bool = SaveSystem.load_game("probe")
 	var first_back := _spawner.get_by_decision_id(decision_id) != null
 	var second_gone := _spawner.get_by_decision_id(second_id) == null
 	var visual := _spawner.get_by_decision_id(decision_id)

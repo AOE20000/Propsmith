@@ -7,6 +7,7 @@ extends Node
 
 
 func _ready() -> void:
+	DecisionLog.use_slot("probe")
 	var seed_key := 424242
 
 	# Citizen A: spawn with the shared figure, then edit its look via a decision.
@@ -60,7 +61,7 @@ func _ready() -> void:
 
 
 func _journal_lines() -> int:
-	var journal := "user://journal/slot1.jsonl"
+	var journal := "user://journal/probe.jsonl"
 	if not FileAccess.file_exists(journal):
 		return 0
 	var file := FileAccess.open(journal, FileAccess.READ)
