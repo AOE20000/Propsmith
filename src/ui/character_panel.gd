@@ -17,6 +17,9 @@ var _open: bool = false
 var _swappers: Dictionary = {}
 var _pickers: Dictionary = {}
 var _sliders: Dictionary = {}
+var _rows: VBoxContainer = null
+var _blend_sliders: Dictionary = {}
+var _blend_rows_built: bool = false
 
 
 func _ready() -> void:
@@ -44,6 +47,7 @@ func _set_open(open: bool) -> void:
 	GameState.mode = GameState.Mode.CUSTOMIZING if open else GameState.Mode.EXPLORING
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
 	if open:
+		_ensure_blend_rows()
 		_sync_controls()
 
 
@@ -104,6 +108,7 @@ func _build() -> void:
 	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rows.add_theme_constant_override("separation", 6)
 	scroll.add_child(rows)
+	_rows = rows
 
 	for id: StringName in CharacterAppearance.SWAP_GROUPS:
 		rows.add_child(_build_swap_row(String(id), CharacterAppearance.SWAP_GROUPS[id]))
@@ -213,17 +218,77 @@ func _build_deform_row(option_id: String, group: Dictionary) -> HBoxContainer:
 	return row
 
 
+## Shape-key sliders are built lazily, on the first open, and only when the
+## player's actual model resolves the curated shapes — the section must not
+## exist for a Configura or capsule model, where every row would be dead. The
+## component on the model is the single source of that answer.
+func _ensure_blend_rows() -> void:
+	if _blend_rows_built:
+		return
+	var controller := _controller()
+	var model: Node3D = controller.model() if controller != null else null
+	if model == null or ModelBlendShapes.find_on(model) == null:
+		return
+	_blend_rows_built = true
+	var header := Label.new()
+	header.text = "形体（形状键，实时生效）"
+	header.modulate = Color(0.7, 0.78, 0.88)
+	_rows.add_child(header)
+	for group_id: StringName in ModelBlendShapes.SLIDER_GROUPS:
+		var group: Dictionary = ModelBlendShapes.SLIDER_GROUPS[group_id]
+		for slider: Dictionary in group["sliders"]:
+			_rows.add_child(_build_blend_row(group, slider))
+
+
+## A shape-key slider: [0, 1] drives one morph on one mesh, live. Group labels
+## are folded into the readout context (the group header above), so each row
+## just names the dial.
+func _build_blend_row(group: Dictionary, slider: Dictionary) -> HBoxContainer:
+	var option_id := String(slider["id"])
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	row.add_child(_row_label("%s·%s" % [group["label"], slider["label"]]))
+
+	var control := HSlider.new()
+	control.min_value = 0.0
+	control.max_value = 1.0
+	control.step = 0.02
+	control.custom_minimum_size = Vector2(0.0, 24.0)
+	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	control.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(control)
+
+	var readout := Label.new()
+	readout.custom_minimum_size = Vector2(46.0, 0.0)
+	readout.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	readout.modulate = Color(0.7, 0.85, 0.95)
+	row.add_child(readout)
+
+	control.value_changed.connect(func(value: float) -> void:
+		readout.text = "%d%%" % roundi(value * 100.0)
+		var controller := _controller()
+		if controller != null:
+			controller.set_option(option_id, value)
+	)
+	_blend_sliders[option_id] = {
+		"slider": control, "readout": readout, "default": float(slider["default"]),
+	}
+	return row
+
+
 func _build_footer() -> HBoxContainer:
 	var footer := HBoxContainer.new()
 	footer.add_theme_constant_override("separation", 8)
 
 	var random_button := Button.new()
 	random_button.text = "随机"
-	random_button.tooltip_text = "随机一套协调的穿搭（真实肤色与成套配色）"
+	random_button.tooltip_text = "随机一套协调的穿搭（真实肤色与成套配色）与形体"
 	random_button.pressed.connect(func() -> void:
 		var controller := _controller()
 		if controller != null:
-			controller.replace_state(CharacterAppearance.randomized_state())
+			var state := CharacterAppearance.randomized_state()
+			ModelBlendShapes.overlay_random(state)
+			controller.replace_state(state)
 		_sync_controls()
 	)
 	footer.add_child(random_button)
@@ -288,3 +353,10 @@ func _sync_controls() -> void:
 		var value := clampf(float(state.values.get(option_id, 0.0)), -1.0, 1.0)
 		slider.set_value_no_signal(value)
 		readout.text = "%+.0f%%" % (value * 100.0)
+	for option_id: String in _blend_sliders:
+		var row: Dictionary = _blend_sliders[option_id]
+		var slider: HSlider = row["slider"]
+		var readout: Label = row["readout"]
+		var value := clampf(float(state.values.get(option_id, row["default"])), 0.0, 1.0)
+		slider.set_value_no_signal(value)
+		readout.text = "%d%%" % roundi(value * 100.0)

@@ -75,6 +75,7 @@ static func _attach_appearance(player: Player) -> void:
 	model.rotation_degrees.y = 180.0
 	player.add_child(model)
 	_attach_stance_if_unanimated(model)
+	_attach_blend_shapes(model)
 	controller.attach(model)
 	var visual := player.get_node_or_null("Visual") as Node3D
 	if visual != null:
@@ -137,6 +138,22 @@ static func _attach_stance_if_unanimated(model: Node3D) -> void:
 	stance.name = "Stance"
 	model.add_child(stance)
 	stance.setup(model)
+
+
+## A morph-carrying model gets the shape-key look component: the panel's figure
+## sliders drive blend shapes, which no animation can stomp and no bone
+## convention can break (bone-rest editing was measured to do nothing to a
+## glTF-skinned model in Godot). Attached only when the model actually has the
+## curated shapes — the panel uses the component's presence to decide whether
+## to show the shape-key section at all, so a Configura or capsule model hides
+## it instead of showing dead controls.
+static func _attach_blend_shapes(model: Node3D) -> void:
+	if not ModelBlendShapes.has_curated_shapes(model):
+		return
+	var component := ModelBlendShapes.new()
+	component.name = "BlendShapes"
+	model.add_child(component)
+	component.setup(model)
 
 
 ## Mod override first, built-in Configura second, null means capsule. A mod

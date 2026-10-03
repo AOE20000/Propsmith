@@ -32,6 +32,12 @@ func current_state() -> CharacterState:
 	return _state
 
 
+## The model currently wearing the state. UIs ask rather than assume — the
+## panel builds its shape-key section only when the model can honour it.
+func model() -> Node3D:
+	return _model
+
+
 ## One panel edit: record, re-apply, done. Cheap by design — every apply is a
 ## handful of `visible` flips and material writes, so there is no debounce.
 func set_option(option_id: String, value: Variant) -> void:
@@ -50,8 +56,12 @@ func replace_state(state: CharacterState) -> void:
 
 ## Re-drive the whole state into the model. Missing model → state is kept and
 ## applied by the next attach; missing meshes inside the model are skipped.
+## Shape-key sliders ride the same state and the same call: the component on
+## the model (attached by `PlayerScene` when the model has the curated shapes)
+## picks up its ids and ignores everything else.
 func apply_current() -> void:
 	CharacterAppearance.apply(_state, _model)
+	ModelBlendShapes.apply_state(_model, _state.values)
 
 
 func serializable() -> Dictionary:
@@ -63,9 +73,12 @@ func serializable() -> Dictionary:
 
 ## Restore from a save. Unknown or missing keys fall back to the curated
 ## defaults rather than half a look — an old save predating an option must not
-## show all thirteen hairstyles at once.
+## show all thirteen hairstyles at once. Shape-key slider ids are merged into
+## the defaults first, so a save written before they existed loads with the
+## authored body instead of losing the ids.
 func restore(data: Dictionary) -> void:
 	var merged := CharacterAppearance.default_state()
+	ModelBlendShapes.merge_defaults(merged)
 	var raw: Variant = data.get("values", null)
 	if raw is Dictionary:
 		for id: Variant in (raw as Dictionary):

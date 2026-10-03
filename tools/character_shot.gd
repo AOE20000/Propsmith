@@ -57,22 +57,25 @@ func _ready() -> void:
 			get_tree().quit(1)
 			return
 		model = packed.instantiate() as Node3D
-		# An overridden asset never went through `PlayerScene`, so it missed the
-		# stance. Apply the *same* rule the game applies — a model with no
-		# transform clip gets the procedural stance — otherwise the shot shows a
-		# T-pose that the player will never actually see.
-		PlayerScene._attach_stance_if_unanimated(model)
 	if model == null:
 		printerr("[shot] no player model resolved (mod disabled and no Configura?)")
 		get_tree().quit(1)
 		return
 	add_child(model)
+	# Both model paths land here: the game-resolved one skipped the game's own
+	# `_attach_model` (which is what normally attaches the components), and the
+	# overridden one skipped `PlayerScene` entirely. Apply the same rules the
+	# game applies — a model with no transform clip gets the procedural stance,
+	# and a model with the curated shapes gets the shape-key component — or the
+	# shot would show a T-pose and dead sliders that the player never sees.
 	PlayerScene._attach_stance_if_unanimated(model)
+	PlayerScene._attach_blend_shapes(model)
 	# Wait for the import-time skeleton rest poses to settle into the tree, then
 	# frame and shoot. Framing before the first frame would measure a model that
 	# has not been placed yet.
 	await get_tree().process_frame
 	_collect_meshes(model)
+	_apply_debug_blends()
 	_build_shot_plan(model)
 	_place_shot(0)
 	_index = 1
@@ -90,6 +93,33 @@ func _collect_meshes(model: Node3D) -> void:
 		var mesh_instance := node as MeshInstance3D
 		if mesh_instance != null and mesh_instance.mesh != null:
 			_meshes.append(mesh_instance)
+
+
+## `-- --blend=All_L:0.9 --blend=Breasts_LL:1` — set morphs before the shots so
+## a slider change can be *photographed*, not just asserted. Shapes are matched
+## by name across every mesh; an unknown name is reported and ignored.
+func _apply_debug_blends() -> void:
+	for arg: String in OS.get_cmdline_user_args():
+		if not arg.begins_with("--blend="):
+			continue
+		var parts: PackedStringArray = arg.trim_prefix("--blend=").split(":")
+		if parts.size() != 2:
+			continue
+		var shape := parts[0]
+		var value := clampf(float(parts[1]), -1.0, 1.0)
+		var applied := 0
+		for mesh_instance: MeshInstance3D in _meshes:
+			var array_mesh := mesh_instance.mesh as ArrayMesh
+			if array_mesh == null:
+				continue
+			var index := ModelBlendShapes.shape_index(array_mesh, shape)
+			if index >= 0:
+				mesh_instance.set_blend_shape_value(index, value)
+				applied += 1
+		if applied == 0:
+			printerr("[shot] blend target not found: %s" % shape)
+		else:
+			print("[shot] blend %s=%.2f on %d mesh(es)" % [shape, value, applied])
 
 
 ## A neutral studio: one key light, a soft fill and a bright background, so the
