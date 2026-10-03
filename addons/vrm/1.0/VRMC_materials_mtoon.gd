@@ -1,3 +1,4 @@
+@tool
 extends GLTFDocumentExtension
 
 
@@ -122,6 +123,8 @@ func _export_preflight(state: GLTFState, root: Node) -> Error:
 	meshes = root.find_children("*", "MeshInstance3D")
 	for meshx in meshes:
 		var mesh: MeshInstance3D = meshx
+		if mesh.mesh == null:
+			continue
 		for m in range(mesh.mesh.get_surface_count()):
 			var mat: Material = mesh.get_surface_override_material(m)
 			if mat == null:
@@ -177,6 +180,9 @@ func _export_mtoon_texture(texture_index, vrm_mat_props, key):
 func _export_mtoon_properties(standard: StandardMaterial3D, mat_props: Dictionary, texture_to_index: Dictionary):
 	if "extensions" not in mat_props:
 		mat_props["extensions"] = {}
+	if not standard.has_meta("mtoon_material"):
+		# Not a toon material. Ignore
+		return
 	var new_mat: ShaderMaterial = standard.get_meta("mtoon_material")
 	var vrm_mat_props: Dictionary = {}
 	mat_props["extensions"]["VRMC_materials_mtoon"] = vrm_mat_props
@@ -232,7 +238,7 @@ func _export_mtoon_properties(standard: StandardMaterial3D, mat_props: Dictionar
 
 
 func _export_post(state: GLTFState) -> Error:
-	var texdic: Dictionary = state.get_meta("texture_dictionary")
+	var texdic = state.get_meta("texture_dictionary")
 	var texture_to_gltf_image_idx: Dictionary = {}
 	var gltf_image_idx_to_first_gltf_texture_idx: Dictionary = {}
 	var json = state.json
@@ -244,18 +250,19 @@ func _export_post(state: GLTFState) -> Error:
 		texture_to_gltf_image_idx[gltf_images[i]] = i
 
 	var texture_to_index: Dictionary = {}  # Texture to index in the textures array, not images array
-	for texture_idx in texdic:
-		texture_to_index[texdic[texture_idx]] = texture_idx
-		gltf_tex[texture_idx].src_image = texture_to_gltf_image_idx[texdic[texture_idx]]
-		json["textures"][texture_idx]["source"] = texture_to_gltf_image_idx[texdic[texture_idx]]
+	if typeof(texdic) == TYPE_DICTIONARY:
+		for texture_idx in texdic:
+			texture_to_index[texdic[texture_idx]] = texture_idx
+			gltf_tex[texture_idx].src_image = texture_to_gltf_image_idx[texdic[texture_idx]]
+			json["textures"][texture_idx]["source"] = texture_to_gltf_image_idx[texdic[texture_idx]]
 
-	# Use the first matched index instead of the extra one we created.
-	for texture_idx in range(len(gltf_tex)):
-		if not gltf_image_idx_to_first_gltf_texture_idx.has(gltf_tex[texture_idx].src_image):
-			gltf_image_idx_to_first_gltf_texture_idx[gltf_tex[texture_idx].src_image] = texture_idx
-			if texdic.has(texture_idx):
-				texture_to_index[texdic[texture_idx]] = texture_idx
-	state.textures = gltf_tex
+		# Use the first matched index instead of the extra one we created.
+		for texture_idx in range(len(gltf_tex)):
+			if not gltf_image_idx_to_first_gltf_texture_idx.has(gltf_tex[texture_idx].src_image):
+				gltf_image_idx_to_first_gltf_texture_idx[gltf_tex[texture_idx].src_image] = texture_idx
+				if texdic.has(texture_idx):
+					texture_to_index[texdic[texture_idx]] = texture_idx
+		state.textures = gltf_tex
 
 	var gltf_materials: Array[Material] = state.materials
 	for i in range(len(gltf_materials)):
@@ -459,7 +466,7 @@ func _process_vrm_material(orig_mat: Material, gltf_images: Array[Texture2D], gl
 
 
 # Called when the node enters the scene tree for the first time.
-func _import_post(gstate: GLTFState, root: Node) -> Error:
+func _import_post(gstate, root):
 	var images: Array[Texture2D] = gstate.get_images()
 	var gltf_textures: Array[GLTFTexture] = gstate.get_textures()
 	#print(images)
@@ -510,8 +517,7 @@ func _import_post(gstate: GLTFState, root: Node) -> Error:
 			if spatial_to_shader_mat.has(surfmat):
 				mesh.set_surface_material(surf_idx, spatial_to_shader_mat[surfmat])
 			else:
-				printerr("Mesh " + str(i) + " material " + str(surf_idx) + " name " + str(surfmat.resource_name) + " has no replacement material.")
+				push_error("Mesh " + str(i) + " material " + str(surf_idx) + " name " + str(surfmat.resource_name) + " has no replacement material.")
 
 	# FIXME: due to head duplication, do we now have some meshes which are not in gltf state?
-
 	return OK
