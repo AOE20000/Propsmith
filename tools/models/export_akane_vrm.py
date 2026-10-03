@@ -42,6 +42,15 @@ copied from her rig, scaled by 1/1.10 like everything of hers, in parent-first
 order. The dog ears stay out: they are an accessory, not hair, and a natural
 first `MeshSwapOption`.
 
+Her whole outfit comes too (`C_*`, nine garments on the same frame and the
+`EX3_clothes` / `EX3_undertights` atlases). The garment fit-morphs mirror the
+body's key names exactly (`All_Slim`, `Breasts_LL`, ...), so the runtime shape
+sliders can drive them by name with no mapping table. Garment hardware needs
+15 more decorative bones (Metal_fittings / Name_tag / cloth_string /
+zipper_fittings chains); the gloves' finger bones already exist on the
+reference rig — it ships a full finger chain. The adult-content switches stay
+by explicit user decision ("porn stickers that only work on the imagination").
+
 Run with the project toolchain (the VRM addon lives there):
   D:/workbuddy/blender-4.2.23/blender-4.2.23-windows-x64/blender.exe \
       --background --python tools/models/export_akane_vrm.py
@@ -62,6 +71,38 @@ HEAD_OBJECT = "Body"
 # mostly to its own decorative chains. The dog ears stay out — they are an
 # accessory (a natural first MeshSwapOption), not hair.
 HAIR_OBJECTS = ("Hair_ahoge", "Hair_back", "Hair_front", "Hair_side")
+# Her outfit, all nine pieces — same 1.10 frame, same garment atlas. The
+# adult-content switches (inner_All ages, under_lifting up the clothes, ...)
+# STAY: they are sticker-level texture morphs on a base figure the user
+# explicitly assessed as "porn stickers that only work on the imagination" —
+# nothing is exposed that the body mesh does not already show.
+CLOTHING_OBJECTS = ("C_armcover", "C_hairpin", "C_inner", "C_jacket",
+                    "C_legcover", "C_legring", "C_sandal", "C_seal",
+                    "C_underwear")
+
+# The 素体 rig's own 60 bones (probe-verified): the walk that collects a
+# garment's bone chain stops here instead of running up to Head and
+# re-declaring bones that already exist (edit_bones.new would silently create
+# `Hand_L.001` duplicates).
+REFERENCE_BONES = frozenset({
+    "Hips", "Spine", "Chest", "Neck", "Head",
+    "Shoulder_L", "Shoulder_R", "UpperArm_L", "UpperArm_R",
+    "UpperArm_Twist_L", "UpperArm_Twist_R", "LowerArm_L", "LowerArm_R",
+    "LowerArm_Twist_L", "LowerArm_Twist_R", "Hand_L", "Hand_R",
+    "IndexProximal_L", "IndexProximal_R", "IndexIntermediate_L",
+    "IndexIntermediate_R", "IndexDistal_L", "IndexDistal_R",
+    "MiddleProximal_L", "MiddleProximal_R", "MiddleIntermediate_L",
+    "MiddleIntermediate_R", "MiddleDistal_L", "MiddleDistal_R",
+    "RingProximal_L", "RingProximal_R", "RingIntermediate_L",
+    "RingIntermediate_R", "RingDistal_L", "RingDistal_R",
+    "LittleProximal_L", "LittleProximal_R", "LittleIntermediate_L",
+    "LittleIntermediate_R", "LittleDistal_L", "LittleDistal_R",
+    "ThumbProximal_L", "ThumbProximal_R", "ThumbIntermediate_L",
+    "ThumbIntermediate_R", "ThumbDistal_L", "ThumbDistal_R",
+    "UpperLeg_L", "UpperLeg_R", "LowerLeg_L", "LowerLeg_R",
+    "Foot_L", "Foot_R", "Toe_L", "Toe_R",
+    "Breast_Root", "Breast_L", "Breast_R",
+})
 
 # Akane's whole rig and mesh are the reference at 1.10x. Dividing the head by
 # that factor puts body and head in one frame; dividing both by the same factor
@@ -153,18 +194,21 @@ eye_rest = {}
 # scaling preserves bone direction, so scaled head/tail + same roll reproduces
 # Akane's local frames exactly and the weights carry over untouched.
 hair_objects = [bpy.data.objects[name] for name in HAIR_OBJECTS]
+cloth_objects = [bpy.data.objects[name] for name in CLOTHING_OBJECTS]
 # The vertex groups name the chain bones, but not the roots above them: a root
 # (hair_back_root etc.) carries no weights yet parents the first link. Walk
-# every referenced bone up to `Head` so the whole chain — roots included — gets
-# captured.
+# every referenced bone up to the first bone the reference rig already has —
+# Head for the hair, Hand_L / UpperLeg_L / Hips for the garment hardware — so
+# the whole chain, roots included, gets captured and nothing existing gets
+# re-declared.
 wanted = set()
-for obj in hair_objects:
+for obj in hair_objects + cloth_objects:
     for group in obj.vertex_groups:
         walker = akane_armature.data.bones.get(group.name)
-        while walker is not None and walker.name != "Head":
+        while walker is not None and walker.name not in REFERENCE_BONES:
             wanted.add(walker.name)
             walker = walker.parent
-wanted.discard("Head")
+wanted -= REFERENCE_BONES
 
 bpy.ops.object.select_all(action="DESELECT")
 bpy.context.view_layer.objects.active = akane_armature
@@ -184,9 +228,11 @@ for name in sorted(wanted | set(EYE_BONES)):
     )
 bpy.ops.object.mode_set(mode="OBJECT")
 eye_rest = {name: captured[name] for name in EYE_BONES if name in captured}
-hair_bone_rest = {name: data for name, data in captured.items() if name not in EYE_BONES}
+decor_bone_rest = {name: data for name, data in captured.items()
+                   if name not in EYE_BONES}
 log("eye bones captured: %s" % sorted(eye_rest))
-log("hair bones captured (reference frame): %d" % len(hair_bone_rest))
+log("decorative bones captured (hair chains + garment hardware, reference frame): %d"
+    % len(decor_bone_rest))
 
 log("head object transform: loc=%s scale=%s"
     % (tuple(round(v, 5) for v in head.location), tuple(round(v, 5) for v in head.scale)))
@@ -195,11 +241,13 @@ if bake_transform(head):
 else:
     log("head object transform was already identity")
 
-kept_names = {head.name} | {obj.name for obj in hair_objects}
+kept_names = {head.name} | {obj.name for obj in hair_objects} \
+    | {obj.name for obj in cloth_objects}
 for obj in list(bpy.data.objects):
     if obj.name not in kept_names:
         bpy.data.objects.remove(obj, do_unlink=True)
-log("kept from Akane: %s" % [o.name for o in bpy.data.objects])
+log("kept from Akane: %d objects (head + %d hair + %d garments)"
+    % (len(kept_names), len(hair_objects), len(cloth_objects)))
 
 # --- 2. the reference body ---------------------------------------------------
 bpy.ops.import_scene.fbx(filepath=BODY_SRC)
@@ -234,7 +282,7 @@ key_count = scale_shape_data(head, HEAD_SCALE)
 log("head scaled by %.6f (object transform untouched); %d shape keys follow"
     % (HEAD_SCALE, key_count))
 
-for obj in hair_objects:
+for obj in hair_objects + cloth_objects:
     if bake_transform(obj):
         log("%s: object transform baked" % obj.name)
     keys = scale_shape_data(obj, HEAD_SCALE)
@@ -257,17 +305,23 @@ for name, (head_pos, tail_pos, parent_name, roll) in eye_rest.items():
     bone.use_connect = False
     log("added %s to the reference rig (parent %s)" % (name, parent_name))
 
-# Hair chains, parents first: every wanted bone hangs off `Head` directly (the
-# three roots) or off another wanted bone (the chains), so a pass that skips
-# not-yet-addable bones terminates.
-pending = dict(hair_bone_rest)
+# Decorative chains (hair + garment hardware), parents first: every wanted
+# bone hangs off a reference bone (Head, Hand_L, UpperLeg_L, Hips — all
+# already on the rig) directly, or off another wanted bone, so a pass that
+# skips not-yet-addable bones terminates. An existence skip keeps a name that
+# is somehow already on the rig from being re-declared as `.001`.
+pending = dict(decor_bone_rest)
 while pending:
     progressed = False
     for name in list(pending):
-        head_pos, tail_pos, parent_name, roll = pending[name]
-        if parent_name != "Head" and parent_name in pending:
+        if edit_bones.get(name) is not None:
+            del pending[name]
+            progressed = True
             continue
-        if parent_name != "Head" and edit_bones.get(parent_name) is None:
+        head_pos, tail_pos, parent_name, roll = pending[name]
+        if parent_name not in REFERENCE_BONES and parent_name in pending:
+            continue
+        if parent_name not in REFERENCE_BONES and edit_bones.get(parent_name) is None:
             log("!! %s: parent %s unknown — attaching to Head instead"
                 % (name, parent_name))
             parent_name = "Head"
@@ -280,11 +334,11 @@ while pending:
         del pending[name]
         progressed = True
     if not progressed:
-        log("!! hair bone chains stuck: %s" % sorted(pending))
+        log("!! decorative bone chains stuck: %s" % sorted(pending))
         break
 bpy.ops.object.mode_set(mode="OBJECT")
-log("reference rig now has %d bones (60 body + 2 eyes + %d hair)"
-    % (len(armature.data.bones), len(hair_bone_rest)))
+log("reference rig now has %d bones (60 body + 2 eyes + %d decorative)"
+    % (len(armature.data.bones), len(decor_bone_rest)))
 
 # --- 5. bind the head to the reference rig ---------------------------------
 # The weights are already in the mesh's vertex groups and every group now exists
@@ -302,7 +356,7 @@ armature_modifier = head.modifiers.new(name="Armature", type="ARMATURE")
 armature_modifier.object = armature
 log("head bound to %s, modifiers=%s" % (armature.name, [m.type for m in head.modifiers]))
 
-for obj in hair_objects:
+for obj in hair_objects + cloth_objects:
     missing = [vg.name for vg in obj.vertex_groups if vg.name not in armature.data.bones]
     if missing:
         log("!! %s: groups missing from the rig: %s" % (obj.name, missing))
@@ -313,7 +367,7 @@ for obj in hair_objects:
         if modifier.type == "ARMATURE":
             obj.modifiers.remove(modifier)
     obj.modifiers.new(name="Armature", type="ARMATURE").object = armature
-log("hair bound to %s" % armature.name)
+log("hair and garments bound to %s" % armature.name)
 
 # --- 6. textures --------------------------------------------------------------
 # FBX image datablocks carry the authoring machine's absolute paths. Match them
@@ -355,7 +409,7 @@ def basis_positions(mesh):
     return [tuple(block.co) for block in keys.key_blocks[0].data]
 
 
-for part in (body, head, *hair_objects):
+for part in (body, head, *hair_objects, *cloth_objects):
     keys = part.data.shape_keys
     if keys is None:
         continue
@@ -390,7 +444,7 @@ def world_bounds(objs):
     return low, high
 
 
-parts = [body, head, *hair_objects]
+parts = [body, head, *hair_objects, *cloth_objects]
 low, high = world_bounds(parts)
 span = high.z - low.z
 factor = TARGET_HEIGHT / span
@@ -536,6 +590,12 @@ for old, new in HAIR_RENAME.items():
     if obj is not None:
         obj.name = new
         obj.data.name = new
+# The garments' *datablocks* are authored garbage ("立方体.003", "平面.015",
+# "SiroinoSotai_PC_Mesh.002") while their objects carry the real names; the
+# glTF mesh name comes from the datablock, so align them or the exported file
+# ships ten anonymous meshes.
+for obj in cloth_objects:
+    obj.data.name = obj.name
 log("renamed meshes: %s" % [o.name for o in parts])
 
 # --- 13. export ---------------------------------------------------------------

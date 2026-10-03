@@ -28,6 +28,7 @@ var _camera: Camera3D = null
 var _framed_height: float = 1.7
 var _shots: Array[Dictionary] = []
 var _meshes: Array[MeshInstance3D] = []
+var _model_root: Node3D = null
 var _index: int = 0
 var _frames: int = 0
 
@@ -62,6 +63,7 @@ func _ready() -> void:
 		get_tree().quit(1)
 		return
 	add_child(model)
+	_model_root = model
 	# Both model paths land here: the game-resolved one skipped the game's own
 	# `_attach_model` (which is what normally attaches the components), and the
 	# overridden one skipped `PlayerScene` entirely. Apply the same rules the
@@ -98,8 +100,18 @@ func _collect_meshes(model: Node3D) -> void:
 ## `-- --blend=All_L:0.9 --blend=Breasts_LL:1` — set morphs before the shots so
 ## a slider change can be *photographed*, not just asserted. Shapes are matched
 ## by name across every mesh; an unknown name is reported and ignored.
+## `-- --hide=C_jacket` — hide a node before the shots (garment-toggle proof).
 func _apply_debug_blends() -> void:
 	for arg: String in OS.get_cmdline_user_args():
+		if arg.begins_with("--hide="):
+			var node_name := arg.trim_prefix("--hide=")
+			var node := _model_root.find_child(node_name, true, false) as Node3D
+			if node == null:
+				printerr("[shot] hide target not found: %s" % node_name)
+			else:
+				node.visible = false
+				print("[shot] hidden %s" % node_name)
+			continue
 		if not arg.begins_with("--blend="):
 			continue
 		var parts: PackedStringArray = arg.trim_prefix("--blend=").split(":")

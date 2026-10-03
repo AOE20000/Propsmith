@@ -16,6 +16,11 @@ class_name ModelBlendShapes
 ## keys are deliberately absent — they are clothing helpers (hide-the-limb and
 ## UV swaps), not look controls, and belong to the clothing step.
 ##
+## Garments are here too, as visibility toggles plus *name sync*: Akane's
+## clothes carry fit morphs under the same names as the body's (`All_L`,
+## `Breasts_LL`, ...), so a body slider re-drives every garment that owns that
+## shape name — the clothes follow the figure with no mapping table.
+##
 ## The component is attached to a model root only when the model actually has
 ## these shapes (see `PlayerScene._attach_blend_shapes`); its presence is the
 ## UI's signal to show the shape-key section at all.
@@ -58,8 +63,38 @@ const SLIDER_GROUPS: Dictionary = {
 	},
 }
 
+## Garment visibility, one toggle per piece. The authored look is fully
+## dressed, so every default is on; the "off" state is plain visibility, which
+## needs no morph choreography (the garments' own `_OFF` keys stay available
+## for the future layering step, where one garment must collapse under
+## another).
+const TOGGLE_GROUPS: Dictionary = {
+	&"outfit": {
+		"label": "服装",
+		"toggles": [
+			{"id": &"wear_jacket", "label": "夹克", "node": "C_jacket", "default": true},
+			{"id": &"wear_inner", "label": "紧身袜", "node": "C_inner", "default": true},
+			{"id": &"wear_sandal", "label": "凉鞋", "node": "C_sandal", "default": true},
+			{"id": &"wear_armcover", "label": "袖套", "node": "C_armcover", "default": true},
+			{"id": &"wear_legcover", "label": "腿套", "node": "C_legcover", "default": true},
+			{"id": &"wear_legring", "label": "腿环", "node": "C_legring", "default": true},
+			{"id": &"wear_seal", "label": "封条", "node": "C_seal", "default": true},
+			{"id": &"wear_underwear", "label": "内衣", "node": "C_underwear", "default": true},
+			{"id": &"wear_hairpin", "label": "发夹", "node": "C_hairpin", "default": true},
+		],
+	},
+}
+
 ## id -> {"mesh": MeshInstance3D, "index": int}; only sliders that resolved.
 var _bindings: Dictionary = {}
+## id -> MeshInstance3D for the garment toggles.
+var _toggle_bindings: Dictionary = {}
+## shape name -> [{mesh, index}, ...] across every morphed mesh in the model.
+## The garments' fit morphs mirror the body's key names exactly (measured:
+## `All_L`, `Breasts_LL`, ... appear on C_inner / C_jacket / C_seal / ... under
+## the same names), so a body slider reaches its garments by *name* — no
+## per-garment mapping table to maintain.
+var _sync_index: Dictionary = {}
 
 
 ## ArrayMesh exposes count/name accessors but **no** name→index lookup (there
@@ -77,6 +112,8 @@ static func shape_index(array_mesh: ArrayMesh, shape_name: String) -> int:
 ## loses those sliders rather than erroring.
 func setup(model: Node3D) -> void:
 	_bindings.clear()
+	_toggle_bindings.clear()
+	_sync_index.clear()
 	if model == null:
 		return
 	for group_id: StringName in SLIDER_GROUPS:
@@ -93,6 +130,23 @@ func setup(model: Node3D) -> void:
 			if index < 0:
 				continue
 			_bindings[slider["id"]] = {"mesh": mesh_node, "index": index}
+	for group_id: StringName in TOGGLE_GROUPS:
+		for toggle: Dictionary in TOGGLE_GROUPS[group_id]["toggles"]:
+			var node := model.find_child(String(toggle["node"]), true, false) as MeshInstance3D
+			if node != null:
+				_toggle_bindings[toggle["id"]] = node
+	# The sync index spans every morphed mesh, body included — applying to it
+	# is idempotent for the slider's own target.
+	for node: Node in model.find_children("*", "MeshInstance3D", true, false):
+		var mesh_instance := node as MeshInstance3D
+		var array_mesh := mesh_instance.mesh as ArrayMesh if mesh_instance != null else null
+		if array_mesh == null or array_mesh.get_blend_shape_count() == 0:
+			continue
+		for i: int in range(array_mesh.get_blend_shape_count()):
+			var shape_name := String(array_mesh.get_blend_shape_name(i))
+			if not _sync_index.has(shape_name):
+				_sync_index[shape_name] = []
+			_sync_index[shape_name].append({"mesh": mesh_instance, "index": i})
 
 
 ## Whether the model carries at least one curated shape — the panel's signal
@@ -135,17 +189,31 @@ func apply_values(values: Dictionary) -> void:
 			var binding: Dictionary = _bindings.get(slider["id"], {})
 			if binding.is_empty():
 				continue
-			var value := float(values.get(String(slider["id"]), slider["default"]))
+			var value := clampf(float(values.get(String(slider["id"]), slider["default"])), 0.0, 1.0)
 			var mesh_instance: MeshInstance3D = binding["mesh"]
-			mesh_instance.set_blend_shape_value(binding["index"], clampf(value, 0.0, 1.0))
+			mesh_instance.set_blend_shape_value(binding["index"], value)
+			# Garments mirror the body's key names; wherever the same shape
+			# exists, the same weight keeps the clothes following the body.
+			for entry: Dictionary in _sync_index.get(String(slider["shape"]), []):
+				(entry["mesh"] as MeshInstance3D).set_blend_shape_value(entry["index"], value)
+	for group_id: StringName in TOGGLE_GROUPS:
+		for toggle: Dictionary in TOGGLE_GROUPS[group_id]["toggles"]:
+			var node: MeshInstance3D = _toggle_bindings.get(toggle["id"])
+			if node == null:
+				continue
+			var worn: bool = bool(values.get(String(toggle["id"]), toggle["default"]))
+			node.visible = worn
 
 
-## Defaults for every catalog slider, keyed the way the state stores them.
+## Defaults for every catalog entry, keyed the way the state stores them.
 static func default_values() -> Dictionary:
 	var values: Dictionary = {}
 	for group_id: StringName in SLIDER_GROUPS:
 		for slider: Dictionary in SLIDER_GROUPS[group_id]["sliders"]:
 			values[String(slider["id"])] = float(slider["default"])
+	for group_id: StringName in TOGGLE_GROUPS:
+		for toggle: Dictionary in TOGGLE_GROUPS[group_id]["toggles"]:
+			values[String(toggle["id"])] = bool(toggle["default"])
 	return values
 
 
@@ -188,6 +256,12 @@ static func randomized_values(rng: RandomNumberGenerator) -> Dictionary:
 		values["bust_xl"] = rng.randf_range(0.3, 1.0)
 	if rng.randf() < 0.4:
 		values["face_blush"] = rng.randf_range(0.2, 1.0)
+	# Accessories come and go; the core outfit stays on so a random look never
+	# reads as undressed.
+	for accessory: String in ["wear_legring", "wear_seal", "wear_hairpin",
+			"wear_armcover", "wear_legcover"]:
+		if rng.randf() < 0.25:
+			values[accessory] = false
 	return values
 
 

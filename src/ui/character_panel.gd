@@ -19,6 +19,7 @@ var _pickers: Dictionary = {}
 var _sliders: Dictionary = {}
 var _rows: VBoxContainer = null
 var _blend_sliders: Dictionary = {}
+var _blend_toggles: Dictionary = {}
 var _blend_rows_built: bool = false
 
 
@@ -238,6 +239,10 @@ func _ensure_blend_rows() -> void:
 		var group: Dictionary = ModelBlendShapes.SLIDER_GROUPS[group_id]
 		for slider: Dictionary in group["sliders"]:
 			_rows.add_child(_build_blend_row(group, slider))
+	for group_id: StringName in ModelBlendShapes.TOGGLE_GROUPS:
+		var group: Dictionary = ModelBlendShapes.TOGGLE_GROUPS[group_id]
+		for toggle: Dictionary in group["toggles"]:
+			_rows.add_child(_build_blend_toggle_row(group, toggle))
 
 
 ## A shape-key slider: [0, 1] drives one morph on one mesh, live. Group labels
@@ -273,6 +278,28 @@ func _build_blend_row(group: Dictionary, slider: Dictionary) -> HBoxContainer:
 	_blend_sliders[option_id] = {
 		"slider": control, "readout": readout, "default": float(slider["default"]),
 	}
+	return row
+
+
+## A garment toggle: plain visibility, on = worn. The authored look is fully
+## dressed, so the checkbox starts checked and the readout is the piece name.
+func _build_blend_toggle_row(group: Dictionary, toggle: Dictionary) -> HBoxContainer:
+	var option_id := String(toggle["id"])
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	row.add_child(_row_label("%s·%s" % [group["label"], toggle["label"]]))
+
+	var checkbox := CheckBox.new()
+	checkbox.button_pressed = bool(toggle["default"])
+	checkbox.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	row.add_child(checkbox)
+
+	checkbox.toggled.connect(func(on: bool) -> void:
+		var controller := _controller()
+		if controller != null:
+			controller.set_option(option_id, on)
+	)
+	_blend_toggles[option_id] = {"checkbox": checkbox, "default": bool(toggle["default"])}
 	return row
 
 
@@ -360,3 +387,7 @@ func _sync_controls() -> void:
 		var value := clampf(float(state.values.get(option_id, row["default"])), 0.0, 1.0)
 		slider.set_value_no_signal(value)
 		readout.text = "%d%%" % roundi(value * 100.0)
+	for option_id: String in _blend_toggles:
+		var row: Dictionary = _blend_toggles[option_id]
+		var checkbox: CheckBox = row["checkbox"]
+		checkbox.set_pressed_no_signal(bool(state.values.get(option_id, row["default"])))
