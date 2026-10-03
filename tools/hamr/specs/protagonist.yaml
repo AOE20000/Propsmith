@@ -23,7 +23,9 @@ hair:
   length: medium
   volume: 0.6
   curl_tightness: 0.2
-  shell_layers: 6
+  # 6 壳层的头发实测 83k 顶点（构建慢、模型臃肿、NPC 批量不可行）；
+  # 3 壳层视觉上仍蓬松，顶点数减半。
+  shell_layers: 3
   color:
     roots: "#3A2A1E"
     mid: "#4A3628"

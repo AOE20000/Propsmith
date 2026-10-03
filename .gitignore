@@ -26,4 +26,13 @@ docs/local/
 # zips) — hundreds of MB of third-party binaries kept out of the repository but
 # on the same drive, so the toolchain survives a disk cleanup while git stays
 # lean. Rebuilt by tools/hamr/run.ps1 and docs/local/hamr.md.
-vendor/
+vendor/*
+# The .gdignore marker itself is tracked: a rebuilt vendor/ tree (Blender
+# portable included) must stay invisible to Godot's resource scanner, or an
+# --import sweep tries to import Blender's own Python library as game assets.
+!vendor/.gdignore
+
+# Hamr build output (VRM files are tens/hundreds of MB; the spec + toolchain
+# in tools/hamr rebuilds them — see docs/local/hamr.md)
+tools/hamr/build/*
+!tools/hamr/build/.gdignore
