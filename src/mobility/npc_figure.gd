@@ -39,6 +39,7 @@ const DECISION_KIND: StringName = &"set_npc_figure"
 ## made last session re-applies to a citizen that has been regenerated since.
 static var _overrides: Dictionary = {}
 static var _applier_registered: bool = false
+static var _save_registered: bool = false
 
 
 ## Apply the on-demand configuration to a freshly instantiated figure.
@@ -61,7 +62,7 @@ static func configure(model: Node3D) -> void:
 ## multiplayer broadcast are the log's job, not the caller's.
 static func emit_figure_override(seed_key: int, values: Dictionary) -> void:
 	register_decision_applier()
-	DecisionLog.emit(DECISION_KIND, {"seed": seed_key, "values": values})
+	DecisionLog.record(DECISION_KIND, {"seed": seed_key, "values": values})
 
 
 ## The stored override for a seed, if any citizen ever had their look edited.
@@ -119,6 +120,11 @@ static func dress_agent(agent) -> bool:
 ## regenerated from seed after load), so the override lands in the static map
 ## and every citizen — existing or future — applies it at spawn; live citizens
 ## get it pushed immediately as well.
+## Idempotent one-stop registration: the decision applier + the save section.
+static func ensure_registered() -> void:
+	register_decision_applier()
+
+
 static func register_decision_applier() -> void:
 	if _applier_registered:
 		return
@@ -128,7 +134,37 @@ static func register_decision_applier() -> void:
 		var values: Dictionary = payload.get("values", {})
 		_overrides[seed_key] = values
 		_push_live(seed_key, values)
-	)
+	, true)
+	_register_save_section()
+
+
+## The override table rides the save snapshot under its own section (all
+## current decision kinds are snapshot-covered, so compaction may empty the
+## journal after every save). Registered on first figure — idempotent.
+static func _register_save_section() -> void:
+	if _save_registered:
+		return
+	_save_registered = true
+	SaveSystem.register_persistent(&"npc_figures",
+		NpcFigure.serialize_overrides, NpcFigure.restore_overrides)
+
+
+static func serialize_overrides() -> Dictionary:
+	var encoded: Dictionary = {}
+	for seed_key: int in _overrides:
+		encoded[str(seed_key)] = _overrides[seed_key]
+	return {"overrides": encoded}
+
+
+static func restore_overrides(data: Dictionary) -> void:
+	var overrides: Variant = data.get("overrides", {})
+	if not (overrides is Dictionary):
+		return
+	for key: String in (overrides as Dictionary):
+		var values: Variant = (overrides as Dictionary)[key]
+		if values is Dictionary:
+			_overrides[int(key)] = values
+			_push_live(int(key), values)
 
 
 static func _push_live(seed_key: int, values: Dictionary) -> void:

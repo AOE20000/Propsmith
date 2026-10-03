@@ -168,7 +168,7 @@ func _rebuild_list() -> void:
 	_list.add_child(spacer2)
 	_list.add_child(_action_button("清空全部道具", func() -> void:
 		if _spawner != null:
-			_spawner.clear_all()
+			_spawner.clear_all_recorded()
 	))
 
 

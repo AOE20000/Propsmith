@@ -54,13 +54,16 @@ func _ready() -> void:
 	_autosave_timer.one_shot = true
 	_autosave_timer.timeout.connect(_autosave)
 	add_child(_autosave_timer)
-	Events.game_saved.connect(_on_slot_changed)
-	Events.game_loaded.connect(_on_slot_changed)
+	Events.game_saved.connect(_on_game_saved)
+	Events.game_loaded.connect(_on_game_loaded)
 
 
-## The one entry point for world-changing decisions. Applies locally, journals
-## (crash-safe append), then hands the record to the transport module.
-func emit(kind: StringName, payload: Dictionary) -> void:
+## The one entry point for world-changing decisions. The caller has already
+## applied the change locally (live code keeps its direct path); this journals
+## the record (crash-safe append) and hands it to the transport module, if any.
+## Replay later re-applies it through the registered applier — the same
+## factories the live path used.
+func record(kind: StringName, payload: Dictionary) -> void:
 	_seq += 1
 	var record: Dictionary = {
 		"seq": _seq,
@@ -69,19 +72,26 @@ func emit(kind: StringName, payload: Dictionary) -> void:
 		"ts": Time.get_unix_time_from_system(),
 		"payload": payload,
 	}
-	_apply(record)
+	decision_applied.emit(kind, payload)
 	_journal_append(record)
 	if transport != null and transport.has_method("broadcast"):
 		transport.broadcast(record)
 	_schedule_autosave()
 
 
+## Apply one record through its registered applier — the remote-decision
+## entry point (a transport delivers a peer's decision here) and the replay
+## primitive.
+func apply_record(record: Dictionary) -> void:
+	_apply(record)
+
+
 ## Register the applier for a decision kind. The applier receives the record's
 ## payload and must apply it exactly as the live path does — replay calls it
 ## verbatim. First registration flushes any journal replay that was waiting
 ## for a listener (boot order: the journal may predate every applier).
-func register_applier(kind: StringName, applier: Callable) -> void:
-	_appliers[kind] = applier
+func register_applier(kind: StringName, applier: Callable, snapshot_covered: bool = true) -> void:
+	_appliers[kind] = {"applier": applier, "covered": snapshot_covered}
 	if _replay_pending:
 		_replay_pending = false
 		replay_journal()
@@ -95,7 +105,11 @@ func replay_journal() -> void:
 	var skipped := 0
 	for record: Dictionary in records:
 		_seq = maxi(_seq, int(record.get("seq", 0)))
-		var applier: Callable = _appliers.get(StringName(String(record.get("kind", ""))), Callable())
+		var entry: Variant = _appliers.get(StringName(String(record.get("kind", ""))))
+		if not (entry is Dictionary):
+			skipped += 1
+			continue
+		var applier: Callable = (entry as Dictionary)["applier"]
 		if not applier.is_valid():
 			skipped += 1
 			continue
@@ -116,12 +130,40 @@ func registered_kinds() -> PackedStringArray:
 
 func _apply(record: Dictionary) -> void:
 	var kind := StringName(String(record.get("kind", "")))
-	var applier: Callable = _appliers.get(kind, Callable())
-	if not applier.is_valid():
+	var entry: Variant = _appliers.get(kind)
+	if not (entry is Dictionary):
 		push_warning("DecisionLog: no applier for decision kind %s" % kind)
 		return
+	var applier: Callable = (entry as Dictionary)["applier"]
 	applier.call(record.get("payload", {}))
 	decision_applied.emit(kind, record.get("payload", {}))
+
+
+## Compaction: after a save, every snapshot-covered decision is folded into
+## the snapshot itself, so the journal keeps only the uncovered tail (state
+## the snapshot cannot represent — e.g. NPC appearance overrides). Rewriting
+## the file right after the snapshot was written is safe, and the retained
+## records are byte-identical copies.
+func _compact_journal() -> void:
+	var records := _journal_read()
+	if records.is_empty():
+		return
+	var retained: Array = []
+	for record: Dictionary in records:
+		var entry: Variant = _appliers.get(StringName(String(record.get("kind", ""))))
+		var covered: bool = (entry is Dictionary) and bool((entry as Dictionary).get("covered", true))
+		if not covered:
+			retained.append(record)
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(JOURNAL_DIR))
+	var file := FileAccess.open(_journal_path(), FileAccess.WRITE)
+	if file == null:
+		push_error("DecisionLog: cannot compact journal %s" % _journal_path())
+		return
+	for record: Dictionary in retained:
+		file.store_line(JSON.stringify(record))
+	file.close()
+	print("[decision_log] compacted: %d -> %d records (slot %s)"
+		% [records.size(), retained.size(), _slot])
 
 
 ## Autosave: a decision debounce timer rather than a per-decision write — the
@@ -135,14 +177,23 @@ func _autosave() -> void:
 	SaveSystem.save_game(_slot)
 
 
-func _on_slot_changed(slot: String) -> void:
+func _on_game_saved(slot: String) -> void:
 	_slot = slot
-	# A different slot's journal may hold decisions this session has not seen;
-	# replay it as soon as (or again once) appliers are registered.
-	if _appliers.size() > 0:
-		replay_journal()
-	else:
-		_replay_pending = true
+	_compact_journal()
+
+
+## Loading a slot is an explicit rollback: the snapshot becomes the whole
+## truth and the journal tail (decisions made after that save) is obsolete.
+## The journal is emptied so a later boot never replays decisions the user
+## deliberately rolled back. Crash recovery is the boot-time replay of the
+## tail of the last session's journal — before any explicit load.
+func _on_game_loaded(slot: String) -> void:
+	_slot = slot
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(JOURNAL_DIR))
+	var file := FileAccess.open(_journal_path(), FileAccess.WRITE)
+	if file != null:
+		file.close()
+	_replay_pending = false
 
 
 ## --- JSONL journal backend ---------------------------------------------------

@@ -8,12 +8,18 @@ class_name PropSpawner
 ## stack entries pointing at the removed node, so undo can never resurrect a
 ## deleted prop.
 ##
-## Props are deliberately NOT persisted: like vehicles and pedestrians they are
-## session content. (The duplicator's blueprint saves in P1 are the persistence
-## story for constructions.)
+## Persistence: every spawn/removal/paint is recorded as a DecisionLog entry
+## (kinds `spawn_prop` / `despawn_prop` / `paint_prop`, keyed by a stable
+## per-prop `decision_id`), and the save snapshot serialises the same records'
+## end state — so a load = snapshot + journal-tail replay, and saving compacts
+## the journal of snapshot-covered kinds. Citizens and mod NPCs are session
+## content and stay out of both.
 
 var _container: Node3D = null
 var _undo_stack: Array[Node] = []
+## decision_id -> prop node, for despawn/paint decisions and their replay.
+var _by_decision_id: Dictionary = {}
+var _decision_seq: int = 0
 
 ## Mobility context bound by the map source when a place table exists: citizens
 ## spawn with a seeded day plan. Without it they degrade to wandering.
@@ -28,6 +34,10 @@ var _mobility_patterns: Array[ActivityPattern] = []
 func setup(container: Node3D) -> void:
 	_container = container
 	_undo_stack.clear()
+	_by_decision_id.clear()
+	DecisionLog.register_applier(&"spawn_prop", _apply_spawn_decision, true)
+	DecisionLog.register_applier(&"despawn_prop", _apply_despawn_decision, true)
+	DecisionLog.register_applier(&"paint_prop", _apply_paint_decision, true)
 
 
 ## Give spawned citizens a day plan. The map source calls this after loading its
@@ -139,6 +149,23 @@ func npc_entries() -> Array[Dictionary]:
 ## null when the id is unknown or a factory misbehaves — both are reported, not
 ## silent, because a menu button that does nothing is a bug report waiting.
 func spawn(prop_id: StringName, at: Vector3, yaw: float = 0.0) -> RigidBody3D:
+	var decision_id := _next_decision_id()
+	var prop := _spawn_raw(prop_id, at, yaw, decision_id)
+	if prop == null:
+		return null
+	DecisionLog.record(&"spawn_prop", {
+		"decision_id": decision_id,
+		"id": String(prop_id),
+		"position": [at.x, at.y, at.z],
+		"yaw": yaw,
+	})
+	return prop
+
+
+## The factory half shared by the interactive spawn, the journal applier and
+## the snapshot restore: builds the prop, tags it with both ids and registers
+## it. No decision is recorded here — that is the caller's choice.
+func _spawn_raw(prop_id: StringName, at: Vector3, yaw: float, decision_id: String) -> RigidBody3D:
 	if _container == null:
 		push_warning("PropSpawner: no world container bound; call setup() after the map builds")
 		return null
@@ -161,13 +188,79 @@ func spawn(prop_id: StringName, at: Vector3, yaw: float = 0.0) -> RigidBody3D:
 	# renames same-named siblings, so a name-derived id would corrupt the
 	# duplicator the moment two crates exist.
 	prop.set_meta(&"prop_id", prop_id)
+	prop.set_meta(&"decision_id", decision_id)
 	prop.name = "Prop_%s" % prop_id
 	_container.add_child(prop)
 	prop.global_position = at
 	prop.rotation.y = yaw
 	_undo_stack.append(prop)
+	_by_decision_id[decision_id] = prop
 	Events.prop_spawned.emit(prop, prop_id)
 	return prop
+
+
+## Journal applier for `spawn_prop`: the payload is shaped like a snapshot
+## record, so replay goes through exactly the restore path a load uses.
+func _apply_spawn_decision(payload: Dictionary) -> void:
+	restore_prop(payload)
+
+
+## Journal applier for `despawn_prop`.
+func _apply_despawn_decision(payload: Dictionary) -> void:
+	remove_by_decision_id(String(payload.get("decision_id", "")))
+
+
+## Journal applier for `paint_prop`.
+func _apply_paint_decision(payload: Dictionary) -> void:
+	var color_values: Array = payload.get("color", [1.0, 1.0, 1.0])
+	var color := Color(float(color_values[0]), float(color_values[1]),
+		float(color_values[2]), float(color_values[3]) if color_values.size() > 3 else 1.0)
+	paint_by_decision_id(String(payload.get("decision_id", "")), color)
+
+
+## Recolour a prop by decision id (the paint applier). Mirrors the painter's
+## material-duplicate discipline so the recolour stays local to the instance.
+func paint_by_decision_id(decision_id: String, color: Color) -> bool:
+	var prop := get_by_decision_id(decision_id)
+	if prop == null:
+		return false
+	var visual := prop.get_node_or_null("Visual") as MeshInstance3D
+	if visual == null:
+		return false
+	visual.material_override = (visual.material_override as Material).duplicate() \
+		if visual.material_override != null else StandardMaterial3D.new()
+	var material := visual.material_override as StandardMaterial3D
+	if material == null:
+		return false
+	material.albedo_color = color
+	return true
+
+
+## Despawn by decision id — the raw removal (no journal write); used by the
+## despawn applier and by `remove`/`undo` after they record their decisions.
+func remove_by_decision_id(decision_id: String) -> bool:
+	var prop: Node = _by_decision_id.get(decision_id)
+	if prop == null or not is_instance_valid(prop):
+		return false
+	remove(prop)
+	return true
+
+
+func get_by_decision_id(decision_id: String) -> RigidBody3D:
+	var prop: Node = _by_decision_id.get(decision_id)
+	if prop == null or not is_instance_valid(prop):
+		return null
+	return prop as RigidBody3D
+
+
+func _next_decision_id() -> String:
+	while true:
+		var candidate := "p%06d" % (_decision_seq + 1)
+		_decision_seq += 1
+		if not _by_decision_id.has(candidate):
+			return candidate
+	_decision_seq += 1
+	return "px_%d" % _decision_seq
 
 
 ## Pop the last spawn and delete it.
@@ -176,6 +269,10 @@ func undo() -> bool:
 		var node: Node = _undo_stack.pop_back()
 		if is_instance_valid(node):
 			var prop_id: StringName = node.get_meta(&"prop_id", &"")
+			var decision_id := String(node.get_meta(&"decision_id", ""))
+			if decision_id != "":
+				_by_decision_id.erase(decision_id)
+				DecisionLog.record(&"despawn_prop", {"decision_id": decision_id})
 			node.queue_free()
 			Events.prop_removed.emit(prop_id)
 			return true
@@ -191,6 +288,10 @@ func remove(prop: Node) -> void:
 		return
 	_undo_stack.erase(prop)
 	var prop_id: StringName = prop.get_meta(&"prop_id", &"")
+	var decision_id := String(prop.get_meta(&"decision_id", ""))
+	if decision_id != "":
+		_by_decision_id.erase(decision_id)
+		DecisionLog.record(&"despawn_prop", {"decision_id": decision_id})
 	prop.free()
 	Events.prop_removed.emit(prop_id)
 
@@ -203,6 +304,14 @@ func clear_all() -> void:
 		if is_instance_valid(node):
 			node.free()
 	_undo_stack.clear()
+	_by_decision_id.clear()
+
+
+## The spawn menu's "clear" button: one decision that empties the sandbox, so
+## the journal (and any peer) sees the same wipe the local world just did.
+func clear_all_recorded() -> void:
+	DecisionLog.record(&"clear_props", {})
+	clear_all()
 
 
 ## The serialized form of every spawned **prop** (id, transform, frozen state).
@@ -218,8 +327,15 @@ func serialize_props() -> Array:
 		if prop_id == &"":
 			continue
 		var euler: Vector3 = prop.rotation
+		var albedo: Array = []
+		var mesh := node.get_node_or_null("Visual") as MeshInstance3D
+		if mesh != null and mesh.material_override is StandardMaterial3D:
+			var c: Color = (mesh.material_override as StandardMaterial3D).albedo_color
+			albedo = [c.r, c.g, c.b, c.a]
 		out.append({
 			"id": String(prop_id),
+			"decision_id": String(node.get_meta(&"decision_id", "")),
+			"albedo": albedo,
 			"instance": prop.get_instance_id(),
 			"position": [prop.global_position.x, prop.global_position.y, prop.global_position.z],
 			"rotation": [euler.x, euler.y, euler.z],
@@ -234,14 +350,30 @@ func restore_prop(record: Dictionary) -> RigidBody3D:
 	var prop_id := StringName(String(record.get("id", "")))
 	var position_values: Array = record.get("position", [0.0, 1.0, 0.0])
 	var rotation_values: Array = record.get("rotation", [0.0, 0.0, 0.0])
-	var prop := spawn(prop_id, Vector3(
+	var decision_id := String(record.get("decision_id", ""))
+	if decision_id == "":
+		decision_id = _next_decision_id()
+	# The raw core, not spawn(): a snapshot restore is a compaction replay,
+	# not a new decision.
+	var prop := _spawn_raw(prop_id, Vector3(
 		float(position_values[0]), float(position_values[1]), float(position_values[2])
-	))
+	), float(rotation_values[1]), decision_id)
 	if prop == null:
 		return null
 	prop.rotation = Vector3(
 		float(rotation_values[0]), float(rotation_values[1]), float(rotation_values[2])
 	)
+	var albedo_values: Array = record.get("albedo", [])
+	if albedo_values.size() >= 3:
+		var visual := prop.get_node_or_null("Visual") as MeshInstance3D
+		if visual != null:
+			visual.material_override = (visual.material_override as Material).duplicate() 				if visual.material_override != null else StandardMaterial3D.new()
+			var material := visual.material_override as StandardMaterial3D
+			if material != null:
+				material.albedo_color = Color(
+					float(albedo_values[0]), float(albedo_values[1]),
+					float(albedo_values[2]),
+					float(albedo_values[3]) if albedo_values.size() > 3 else 1.0)
 	if bool(record.get("frozen", false)):
 		prop.freeze = true
 		PropFactory.set_frozen_look(prop, true)

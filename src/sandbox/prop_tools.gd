@@ -61,8 +61,17 @@ func _paint(prop: RigidBody3D) -> void:
 	var material := visual.material_override as StandardMaterial3D
 	if material == null:
 		return
-	material.albedo_color = PAINT_COLORS[_paint_index % PAINT_COLORS.size()]
+	var color: Color = PAINT_COLORS[_paint_index % PAINT_COLORS.size()]
+	material.albedo_color = color
 	_paint_index += 1
+	# The recolour is a decision: journaled against the prop's decision id so
+	# a load replays it, and a multiplayer peer sees it.
+	var decision_id := String(prop.get_meta(&"decision_id", ""))
+	if decision_id != "":
+		DecisionLog.record(&"paint_prop", {
+			"decision_id": decision_id,
+			"color": [color.r, color.g, color.b, color.a],
+		})
 	Events.notify("已上色", Events.NotifyLevel.INFO)
 
 

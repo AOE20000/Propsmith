@@ -52,6 +52,7 @@ var figure_editor: NpcFigureEditor = null
 
 func _ready() -> void:
 	add_to_group(&"citizens")
+	NpcFigure.ensure_registered()
 	_build_body()
 	_build_health()
 
@@ -102,6 +103,12 @@ func configure_wander(origin: Vector3, seed: int) -> void:
 ## rendering, the edit handle — lives in `NpcFigure.dress_agent`; the agent
 ## keeps only movement, simulation and health. Returns false when the figure
 ## asset is unavailable — the caller keeps the capsule and nothing else changes.
+## Idempotent registration of the figure decision kind + its save section.
+## Lives here so the first citizen anywhere registers the module.
+static func ensure_registered() -> void:
+	NpcFigure.ensure_registered()
+
+
 func apply_base_figure() -> bool:
 	return NpcFigure.dress_agent(self)
 
