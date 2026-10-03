@@ -1,37 +1,39 @@
-"""茜犬-Akane- (CC0, BOOTH 8861598) -> VRM 1.0 base figure.
+"""The reference body (SiroinoSotai PC) wearing Akane's head — VRM 1.0.
 
-Akane is a complete VRChat avatar built on **SiroinoSotai v1.0 PC** — the same
-素体 this project already uses — so her head is already fitted, rigged to the
-same armature and scaled to the same neck. That makes "port the head" a
-non-problem: the head is a separate mesh (`Body`), the bare body is a separate
-mesh (`SiroinoSotai_PC`), and every garment and hair piece is separate too. The
-job is therefore subtraction, not mesh surgery:
+Both halves are CC0 1.0. This replaces the earlier "use Akane's body too"
+version, because measuring the two bodies settled what Akane actually changed:
 
-    keep   SiroinoSotai_PC  8,435 v / 16,732 tri / 102 morphs   the bare body
-    keep   Body             4,077 v /  6,754 tri / 268 morphs   the head
-    drop   C_* × 9          arm cover, jacket, inner, leg cover, leg ring,
-                            sandal, seal, underwear, hairpin
-    drop   Hair_* × 4 + dog_ear
+    her body mesh   = the original, uniformly scaled 1.10 — |delta|/|p| is a
+                      constant 0.0962..0.1025 and the angle between delta and p
+                      is 0.01 deg on average (99.8% under 1 deg), so there are
+                      no local edits at all (1.1426 x 1.1 = 1.2569, her top, to
+                      the millimetre)
+    weights/groups  = identical (57 groups, same names; 12 vertices differ by
+                      <0.07 in the hip/thigh blend)
+    bone rest axes  = identical, 0.00 deg of roll on all 60 shared bones
+    bone rest scale = 1.0 everywhere in both rigs
 
-The kept pair carries everything the pipeline needs: the 素体's whole shape-key
-set (44 `*_OFF` hide-under-clothes keys, 27 body-shape keys, heels, nails — plus
-two extras, `nipple` and `tendons`), the head's expression set, and — unlike the
-bare 素体 package, which ships only a normal map — **real albedo textures**
-(`EX3_Body2(SiroinoSotai).png` for the body, `EX3_Body1.png` for the head).
+The one real difference is **four bones whose tails were lengthened while their
+joints stayed put**: `Head` +5.2 cm, `UpperLeg_L` +10.1 cm, `UpperLeg_R` +8.0 cm,
+`Hips` +2.3 cm. Joints that no longer sit where their parent's tail is are
+exactly what makes bone-length-based scaling behave inconsistently, which is the
+"bone scaling bug" the reference rig does without. So: take the reference rig and
+mesh, and take only her head.
 
-Three things the FBX needs help with:
+Taking only the head is cheap because the head mesh has just four vertex groups
+(`Head` 3259 / `Eye.L` 395 / `Eye.R` 395 / `Neck` 91), and because
+`akane / 1.10 == original` the head scaled by 1/1.10 mates with the reference
+neck exactly as designed — no neck extension, no reweighting. Measured in the
+reference frame: the head spans z 1.0779..1.2475 and the body's neck top is
+1.1426, so they already overlap by 6.5 cm.
 
-1. **Textures.** The FBX stores the author's absolute paths
-   (`D:\\モデリング\\完成\\...`), so every image loads as a 0×0 placeholder. They are
-   remapped here by file name against `vendor/models/akane/TEX/` (plus the 素体's
-   own TEX folder for its normal map).
-2. **Scale.** Authored bare height is 1.333 m (feet at z=0.039, head top 1.372).
-   The game's conventions are a 1.8 m player capsule and 1.5 m citizen capsules,
-   so the base is normalised to TARGET_HEIGHT once, here, on the finished
-   body+head — the moment the earlier "defer normalisation until a head exists"
-   note was waiting for.
-3. **Separator keys.** `_____*` and `_more_` are list markers with no delta; they
-   would each cost a morph slot in every exported surface.
+Two things have to be supplied by hand:
+
+  * the reference rig has **no eye bones** — `Eye.L`/`Eye.R` are copied from
+    Akane's rig (divided by 1.10), parented to `Head`;
+  * the reference body's material carries **only a normal map** (the 素体 package
+    ships no albedo). Akane's own body material has the albedo painted for this
+    exact UV, so it is carried over.
 
 Run with the project toolchain (the VRM addon lives there):
   D:/workbuddy/blender-4.2.23/blender-4.2.23-windows-x64/blender.exe \
@@ -41,15 +43,23 @@ import os
 
 import addon_utils
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
-SRC = r"D:/untitled/FPGames/vendor/models/akane/FBX/PC_akane.fbx"
+BODY_SRC = r"D:/untitled/FPGames/vendor/models/SiroinoSotai_1.0/SiroinoSotai_PC.fbx"
+HEAD_SRC = r"D:/untitled/FPGames/vendor/models/akane/FBX/PC_akane.fbx"
 OUT = r"D:/untitled/FPGames/vendor/models/build/base_female.vrm"
 
-KEEP = ("SiroinoSotai_PC", "Body")
+BODY_OBJECT = "SiroinoSotai_PC"
+HEAD_OBJECT = "Body"
 
-# Texture search roots, in order. The first covers Akane's own maps; the second
-# supplies the 素体 normal map that her body material still references.
+# Akane's whole rig and mesh are the reference at 1.10x. Dividing the head by
+# that factor puts body and head in one frame; dividing both by the same factor
+# keeps her head-to-body ratio, which is the whole point of taking her head.
+AKANE_SCALE = 1.10
+HEAD_SCALE = 1.0 / AKANE_SCALE
+
+# Texture search roots, in order: Akane's own maps first, then the 素体 package
+# for the normal map her body material still references.
 TEX_DIRS = (
     r"D:/untitled/FPGames/vendor/models/akane/TEX",
     r"D:/untitled/FPGames/vendor/models/akane/TEX/mask",
@@ -57,19 +67,40 @@ TEX_DIRS = (
     r"D:/untitled/FPGames/vendor/models/SiroinoSotai_1.0/TEX/Mobail",
 )
 
-# Finished height of body+head, in metres. The game's player capsule is 1.8 m and
-# its citizen capsules 1.5 m; 1.6 m sits between them and is what the CC0 素体's
-# proportions suit. Configura's `body_height` DeformOption moves it from here
-# (see docs/local/customization_mechanisms.md), so this is a base, not a ceiling.
+# Finished height of body+head. The game's player capsule is 1.8 m and its
+# citizen capsules 1.5 m; 1.6 m sits between them. THIS is the normalisation the
+# earlier note deferred until a head existed — body+head measure 1.2122 m in the
+# reference frame, so the factor here is 1.3200.
 TARGET_HEIGHT = 1.60
 
-# Drop these: zero-delta list markers, not deformations.
-SEPARATOR_PREFIX = "_____"
-SEPARATOR_EXACT = ("_more_",)
+EYE_BONES = ("Eye.L", "Eye.R")
+
+
+def bake_transform(obj):
+    """Fold an object's local transform into its mesh data, shape keys included.
+
+    `bpy.ops.object.transform_apply` does **not** touch shape keys, so a mesh
+    that carries morphs keeps every key at the old scale and offset — silently
+    desynchronising 268 morphs from their basis. Doing it by hand keeps basis and
+    keys together. The head arrives with a -2 cm Y offset, which would otherwise
+    land as a 1.8 mm mismatch at the neck once the data is scaled.
+    """
+    matrix = obj.matrix_basis
+    if matrix == Matrix.Identity(4):
+        return False
+    for vertex in obj.data.vertices:
+        vertex.co = matrix @ vertex.co
+    keys = obj.data.shape_keys
+    if keys is not None:
+        for block in keys.key_blocks:
+            for vertex in block.data:
+                vertex.co = matrix @ vertex.co
+    obj.matrix_basis = Matrix.Identity(4)
+    return True
 
 
 def log(*args):
-    print("[akane]", *args)
+    print("[base]", *args)
 
 
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
@@ -85,17 +116,121 @@ try:
     addon_utils.enable("io_scene_vrm", default_set=True, persistent=True)
 except Exception as exc:  # noqa: BLE001
     log("VRM addon enable failed:", exc)
-log("vrm addon registered:", hasattr(bpy.types.Armature, "vrm_addon_extension"))
 if not hasattr(bpy.types.Armature, "vrm_addon_extension"):
     raise SystemExit("io_scene_vrm is not available — export cannot proceed")
 
-bpy.ops.import_scene.fbx(filepath=SRC)
+# --- 1. Akane first: take the head, the eye bones and the body material ------
+bpy.ops.import_scene.fbx(filepath=HEAD_SRC)
+akane_armature = next(o for o in bpy.data.objects if o.type == "ARMATURE")
+head = bpy.data.objects[HEAD_OBJECT]
+akane_body = bpy.data.objects[BODY_OBJECT]
 
-# --- 1. textures --------------------------------------------------------------
+# The albedo for this body's UV only exists in this package; the 素体 ships a
+# normal map and nothing else.
+body_material = None
+for slot_material in akane_body.data.materials:
+    if slot_material is not None:
+        body_material = slot_material
+        break
+log("body material taken from Akane:", body_material.name if body_material else "NONE")
+
+eye_rest = {}
+for name in EYE_BONES:
+    bone = akane_armature.data.bones.get(name)
+    if bone is None:
+        log("!! Akane's rig has no %s" % name)
+        continue
+    eye_rest[name] = (
+        tuple(v / AKANE_SCALE for v in bone.head_local),
+        tuple(v / AKANE_SCALE for v in bone.tail_local),
+        bone.parent.name if bone.parent else "Head",
+    )
+log("eye bones captured (reference frame): %s" % sorted(eye_rest))
+
+log("head object transform: loc=%s scale=%s"
+    % (tuple(round(v, 5) for v in head.location), tuple(round(v, 5) for v in head.scale)))
+if bake_transform(head):
+    log("head object transform baked into the mesh (it was not identity)")
+else:
+    log("head object transform was already identity")
+
+kept_names = {head.name}
+for obj in list(bpy.data.objects):
+    if obj.name not in kept_names:
+        bpy.data.objects.remove(obj, do_unlink=True)
+log("kept from Akane: %s" % [o.name for o in bpy.data.objects])
+
+# --- 2. the reference body ---------------------------------------------------
+bpy.ops.import_scene.fbx(filepath=BODY_SRC)
+armature = next(o for o in bpy.data.objects if o.type == "ARMATURE")
+body = bpy.data.objects[BODY_OBJECT]
+log("reference body: %s  armature: %s (%d bones)"
+    % (body.name, armature.name, len(armature.data.bones)))
+
+if body_material is not None:
+    body.data.materials.clear()
+    body.data.materials.append(body_material)
+    log("body material replaced with %s" % body_material.name)
+
+# --- 3. put the head in the reference frame ---------------------------------
+# Scaling the mesh *data* (basis and every shape key) rather than the object:
+# `transform_apply` does not touch shape keys, so scaling the object would leave
+# all 268 morphs at the old scale.
+def scale_shape_data(obj, factor):
+    mesh = obj.data
+    for vertex in mesh.vertices:
+        vertex.co *= factor
+    keys = mesh.shape_keys
+    if keys is None:
+        return 0
+    for block in keys.key_blocks:
+        for vertex in block.data:
+            vertex.co *= factor
+    return len(keys.key_blocks)
+
+
+key_count = scale_shape_data(head, HEAD_SCALE)
+log("head scaled by %.6f (object transform untouched); %d shape keys follow"
+    % (HEAD_SCALE, key_count))
+
+# --- 4. eye bones on the reference rig --------------------------------------
+bpy.ops.object.select_all(action="DESELECT")
+bpy.context.view_layer.objects.active = armature
+armature.select_set(True)
+bpy.ops.object.mode_set(mode="EDIT")
+edit_bones = armature.data.edit_bones
+for name, (head_pos, tail_pos, parent_name) in eye_rest.items():
+    if name in edit_bones:
+        edit_bones.remove(edit_bones[name])
+    bone = edit_bones.new(name)
+    bone.head = Vector(head_pos)
+    bone.tail = Vector(tail_pos)
+    bone.parent = edit_bones[parent_name]
+    bone.use_connect = False
+    log("added %s to the reference rig (parent %s)" % (name, parent_name))
+bpy.ops.object.mode_set(mode="OBJECT")
+log("reference rig now has %d bones" % len(armature.data.bones))
+
+# --- 5. bind the head to the reference rig ---------------------------------
+# The weights are already in the mesh's vertex groups and every group now exists
+# on the rig, so no automatic weighting is involved — a missing group would show
+# up as vertices pinned to the origin instead.
+missing = [vg.name for vg in head.vertex_groups if vg.name not in armature.data.bones]
+log("head vertex groups missing from the rig: %s" % (missing or "none"))
+head.parent = armature
+head.parent_type = "OBJECT"
+head.matrix_parent_inverse = armature.matrix_world.inverted()
+for modifier in list(head.modifiers):
+    if modifier.type == "ARMATURE":
+        head.modifiers.remove(modifier)
+armature_modifier = head.modifiers.new(name="Armature", type="ARMATURE")
+armature_modifier.object = armature
+log("head bound to %s, modifiers=%s" % (armature.name, [m.type for m in head.modifiers]))
+
+# --- 6. textures --------------------------------------------------------------
 # FBX image datablocks carry the authoring machine's absolute paths. Match them
 # to our copies by file name; try the stored name, then the datablock name with
-# a .png suffix (the hair map's datablock is "EX3_Hair" but the file is
-# "EX3_hair.png").
+# a .png suffix (the hair map's datablock is "EX3_Hair", the file "EX3_hair.png").
 available = {}
 for root in TEX_DIRS:
     if not os.path.isdir(root):
@@ -104,7 +239,6 @@ for root in TEX_DIRS:
         available.setdefault(name.lower(), os.path.join(root, name))
 
 log("texture pool: %d files across %d roots" % (len(available), len(TEX_DIRS)))
-fixed, missing = 0, []
 for image in bpy.data.images:
     if image.size[0] != 0 and image.size[1] != 0:
         continue
@@ -115,48 +249,48 @@ for image in bpy.data.images:
     candidates.append(image.name.lower())
     hit = next((available[c] for c in candidates if c in available), None)
     if hit is None:
-        missing.append(image.name)
+        log("  unresolved texture: %s" % image.name)
         continue
     image.filepath = hit
     image.reload()
-    ok = image.size[0] > 0
-    log("  %-34s <- %s  %sx%s" % (image.name, os.path.basename(hit),
-                                  image.size[0], image.size[1]))
-    fixed += 1 if ok else 0
-log("textures resolved: %d, unresolved: %s" % (fixed, missing or "none"))
+    log("  %-34s <- %s  %sx%s" % (image.name, os.path.basename(hit), image.size[0], image.size[1]))
 
-# --- 2. strip garments and hair ----------------------------------------------
-arm = next(o for o in bpy.data.objects if o.type == "ARMATURE")
-kept, dropped = [], []
-for obj in sorted(bpy.data.objects, key=lambda o: o.name):
-    if obj.type != "MESH":
-        continue
-    if obj.name in KEEP:
-        kept.append(obj)
-    else:
-        dropped.append(obj.name)
-for name in dropped:
-    bpy.data.objects.remove(bpy.data.objects[name], do_unlink=True)
-log("kept meshes: %s" % [o.name for o in kept])
-log("dropped meshes: %s" % dropped)
+# --- 7. shape keys ------------------------------------------------------------
+# Drop empty keys by *measurement* rather than by name pattern: the body marks
+# its sections with `_____foo_____` and the head with `-foo-`, and one head key is
+# a bare `-267`. A key whose every vertex coincides with the basis deforms
+# nothing, so it only costs a morph slot in every exported surface.
+def basis_positions(mesh):
+    keys = mesh.data.shape_keys
+    if keys is None or len(keys.key_blocks) == 0:
+        return None
+    return [tuple(block.co) for block in keys.key_blocks[0].data]
 
-# --- 3. separator shape keys --------------------------------------------------
-for obj in kept:
-    keys = obj.data.shape_keys
+
+for part in (body, head):
+    keys = part.data.shape_keys
     if keys is None:
         continue
-    # Index through `key_blocks` — indexing the Key datablock itself with a
-    # string raises KeyError.
-    blocks = keys.key_blocks
-    doomed = [k.name for k in blocks
-              if k.name.startswith(SEPARATOR_PREFIX) or k.name in SEPARATOR_EXACT]
-    for name in doomed:
-        obj.shape_key_remove(blocks[name])
-    log("%s: dropped %d separators -> %d shape keys"
-        % (obj.name, len(doomed), len(obj.data.shape_keys.key_blocks)))
+    basis = basis_positions(part)
+    dropped = []
+    for block in list(keys.key_blocks[1:]):
+        worst = 0.0
+        for i, vertex in enumerate(block.data):
+            dx = vertex.co.x - basis[i][0]
+            dy = vertex.co.y - basis[i][1]
+            dz = vertex.co.z - basis[i][2]
+            distance = dx * dx + dy * dy + dz * dz
+            if distance > worst:
+                worst = distance
+        if worst < 1e-12:
+            dropped.append(block.name)
+    for name in dropped:
+        part.shape_key_remove(keys.key_blocks[name])
+    log("%s: dropped %d empty shape keys -> %d remain"
+        % (part.name, len(dropped), len(part.data.shape_keys.key_blocks)))
+    log("   %s" % dropped)
 
-
-# --- 4. normalise scale, then ground -----------------------------------------
+# --- 8. normalise and ground -------------------------------------------------
 def world_bounds(objs):
     low = Vector((1e9, 1e9, 1e9))
     high = Vector((-1e9, -1e9, -1e9))
@@ -168,49 +302,40 @@ def world_bounds(objs):
     return low, high
 
 
-# The meshes are children of the armature, so scaling both would scale twice:
-# only roots get the transform, and it is applied so the rig stays at unit scale.
-roots = [o for o in bpy.data.objects if o.parent is None and o.type in ("ARMATURE", "MESH")]
-
-low, high = world_bounds(kept)
+parts = [body, head]
+low, high = world_bounds(parts)
 span = high.z - low.z
 factor = TARGET_HEIGHT / span
-log("authored body+head height = %.4f m (feet z=%.4f)  -> scale x%.4f"
-    % (span, low.z, factor))
-for obj in roots:
-    obj.scale = obj.scale * factor
-bpy.context.view_layer.update()
+log("body+head height = %.4f m (feet z=%.4f) -> scale x%.4f" % (span, low.z, factor))
 
+# Only the armature is scaled: both meshes are its children, so scaling both
+# would scale them twice.
+armature.scale = armature.scale * factor
+bpy.context.view_layer.update()
 bpy.ops.object.select_all(action="DESELECT")
-for obj in roots:
-    obj.select_set(True)
-bpy.context.view_layer.objects.active = arm
+armature.select_set(True)
+bpy.context.view_layer.objects.active = armature
 bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
 
-low, high = world_bounds(kept)
+low, high = world_bounds(parts)
 shift = Vector((0.0, 0.0, -low.z))
 log("grounding: feet at z=%.4f -> shifting by %.4f" % (low.z, shift.z))
-for obj in roots:
-    obj.location = obj.location + shift
+armature.location = armature.location + shift
 bpy.context.view_layer.update()
 bpy.ops.object.select_all(action="DESELECT")
-for obj in roots:
-    obj.select_set(True)
-bpy.context.view_layer.objects.active = arm
+armature.select_set(True)
+bpy.context.view_layer.objects.active = armature
 bpy.ops.object.transform_apply(location=True, rotation=False, scale=False)
 
-low, high = world_bounds(kept)
+low, high = world_bounds(parts)
 log("after: height=%.4f m  feet z=%.4f  top z=%.4f" % (high.z - low.z, low.z, high.z))
-_, head_top = world_bounds([bpy.data.objects["Body"]])
-log("head top z=%.4f (hair adds more once equipped)" % head_top.z)
 
-# --- 5. VRM 1.0 humanoid mapping ---------------------------------------------
-# Names come from the rig's own convention (Unity Humanoid style, _L/_R). Two
-# bones are deliberately absent: the *_Twist_* roll bones (VRM has no slot) and
-# the breast bones (VRM 1.0 has no slot either — they are expression targets in
-# VRM 0.x only). Fingers are skipped for now: nothing in the game animates them
-# individually, and half-mapping VRM 1.0's thumbMetacarpal/Proximal/Distal onto
-# this rig's Proximal/Intermediate/Distal would silently drop a joint.
+# --- 9. VRM 1.0 humanoid mapping ---------------------------------------------
+# Names come from the rig's own convention (Unity Humanoid style, _L/_R). The
+# *_Twist_* roll bones and the breast bones have no VRM slot. Fingers are skipped:
+# nothing animates them individually, and half-mapping VRM 1.0's
+# thumbMetacarpal/Proximal/Distal onto this rig's Proximal/Intermediate/Distal
+# would silently drop a joint.
 BONES = {
     "hips": "Hips", "spine": "Spine", "chest": "Chest", "neck": "Neck", "head": "Head",
     "leftEye": "Eye.L", "rightEye": "Eye.R",
@@ -223,7 +348,7 @@ BONES = {
     "rightFoot": "Foot_R", "rightToes": "Toe_R",
 }
 
-ext = arm.data.vrm_addon_extension
+ext = armature.data.vrm_addon_extension
 human_bones = ext.vrm1.humanoid.human_bones
 human_bones.initial_automatic_bone_assignment = False
 human_bones.filter_by_human_bone_hierarchy = False
@@ -231,7 +356,7 @@ lookup = {}
 for name, prop in human_bones.human_bone_name_to_human_bone().items():
     lookup[getattr(name, "value", str(name))] = prop
 
-present = {b.name for b in arm.data.bones}
+present = {b.name for b in armature.data.bones}
 assigned, absent_bone, absent_slot = 0, [], []
 for slot, bone in BONES.items():
     prop = lookup.get(slot)
@@ -246,67 +371,51 @@ for slot, bone in BONES.items():
 log("humanoid mapped %d/%d  slots-missing=%s  bones-missing=%s"
     % (assigned, len(BONES), absent_slot or "none", absent_bone or "none"))
 
-# --- 6. expressions ----------------------------------------------------------
-# The head carries 268 morphs, mostly VRChat visemes and face-editing helpers.
-# Six of them map onto VRM presets one-to-one, and a VRM whose blink/visemes are
-# declared is usable by any VRM-aware reader (and by Godot tooling that looks for
-# the standard names). Everything else stays reachable by shape-key name through
-# Configura's BlendshapeOption, which does not need a VRM declaration.
-#
-# Note the spelling: the head's keys are `vrc.v.e` / `vrc.v.ih` / `vrc.v.oh` /
-# `vrc.v.ou` (VRChat's single-letter visemes), while VRM calls the same sounds
-# `ee` / `ih` / `oh` / `ou`.
+# --- 10. expressions ----------------------------------------------------------
+# Six of the head's morphs map onto VRM presets one-to-one. Note the spelling:
+# the head's keys are `vrc.v.e` / `vrc.v.ih` / `vrc.v.oh` / `vrc.v.ou` (VRChat's
+# single-letter visemes) while VRM calls the same sounds ee/ih/oh/ou. Everything
+# else stays reachable by shape-key name through the appearance sliders.
 EXPRESSION_MAP = {
-    "blink": "blink",
-    "aa": "vrc.v.aa",
-    "ih": "vrc.v.ih",
-    "ou": "vrc.v.ou",
-    "ee": "vrc.v.e",
-    "oh": "vrc.v.oh",
+    "blink": "blink", "aa": "vrc.v.aa", "ih": "vrc.v.ih",
+    "ou": "vrc.v.ou", "ee": "vrc.v.e", "oh": "vrc.v.oh",
 }
-head_obj = bpy.data.objects.get("Body")
-if head_obj is not None and head_obj.data.shape_keys is not None:
-    key_names = {k.name for k in head_obj.data.shape_keys.key_blocks}
-    preset = ext.vrm1.expressions.preset
-    bound, skipped = [], []
-    for slot, key_name in EXPRESSION_MAP.items():
-        expression = getattr(preset, slot, None)
-        if expression is None:
-            skipped.append("%s(no slot)" % slot)
-            continue
-        if key_name not in key_names:
-            skipped.append("%s(no key %s)" % (slot, key_name))
-            continue
-        # Rebuild from scratch so re-runs do not stack duplicate binds.
-        while len(expression.morph_target_binds) > 0:
-            expression.morph_target_binds.remove(expression.morph_target_binds[0])
-        bind = expression.morph_target_binds.add()
-        # `bind.node` is a read-only pointer to a MeshObjectPropertyGroup; the
-        # writable field is the mesh reference inside it. `index` is the *shape
-        # key name*, not a number — the exporter looks it up in the target's
-        # morph-target name list and silently drops the bind if it is absent.
-        bind.node.bpy_object = head_obj
-        bind.index = key_name
-        bind.weight = 1.0
-        bound.append("%s<-%s" % (slot, key_name))
-    log("expressions bound: %s" % (bound or "none"))
-    if skipped:
-        log("expressions skipped: %s" % skipped)
-else:
-    log("expressions skipped: no head mesh / no shape keys")
+key_names = {k.name for k in head.data.shape_keys.key_blocks}
+preset = ext.vrm1.expressions.preset
+bound, skipped = [], []
+for slot, key_name in EXPRESSION_MAP.items():
+    expression = getattr(preset, slot, None)
+    if expression is None:
+        skipped.append("%s(no slot)" % slot)
+        continue
+    if key_name not in key_names:
+        skipped.append("%s(no key %s)" % (slot, key_name))
+        continue
+    while len(expression.morph_target_binds) > 0:
+        expression.morph_target_binds.remove(expression.morph_target_binds[0])
+    bind = expression.morph_target_binds.add()
+    # `bind.node` is a read-only pointer to a MeshObjectPropertyGroup; the
+    # writable field is the mesh reference inside it. `index` is the *shape key
+    # name*, and the exporter silently drops the bind if it is not found.
+    bind.node.bpy_object = head
+    bind.index = key_name
+    bind.weight = 1.0
+    bound.append("%s<-%s" % (slot, key_name))
+log("expressions bound: %s" % (bound or "none"))
+if skipped:
+    log("expressions skipped: %s" % skipped)
 
-# --- 7. meta: the asset is CC0, and the licence travels with the file --------
-# This addon version has no `license_url` field: VRM 1.0 derives the standard
-# licence from the four fields below, so a self-consistent set is what makes the
-# file declare CC0 downstream.
+# --- 11. meta -----------------------------------------------------------------
+# This addon version has no `license_url` field and hard-codes one, so the four
+# permission fields below are what actually carry the terms.
 meta = ext.vrm1.meta
 try:
     meta.vrm_name = "Propsmith base figure (Akane head / SiroinoSotai body)"
-    meta.version = "1.0"
+    meta.version = "1.1"
     meta.authors.clear()
     meta.authors.add().value = "山野重工赤山派閥独立支部 (body: しろいの)"
     meta.copyright_information = "CC0 1.0 Universal (public domain dedication)"
-    meta.third_party_licenses = ("Akane: 山野重工赤山派閥独立支部, CC0. "
+    meta.third_party_licenses = ("Akane head: 山野重工赤山派閥独立支部, CC0. "
                                  "SiroinoSotai body: しろいの, CC0. "
                                  "VRChat SDK / lilToon referenced by the source unitypackage "
                                  "are NOT included and NOT covered by CC0.")
@@ -321,30 +430,25 @@ try:
 except Exception as exc:  # noqa: BLE001
     log("META_PARTIAL:", exc)
 
-# --- 8. name the two meshes --------------------------------------------------
-# The FBX calls the head's mesh datablock "平面" (plane) and the body's
-# "<name>_Mesh"; those strings are what a glTF reader sees, and "Body" as the
-# node name for a head is actively misleading. Renamed last, so the code above
-# can keep using the asset's own object names.
-RENAMES = {"Body": "Akane_Head", "SiroinoSotai_PC": "SiroinoSotai_Body"}
-for old, new in RENAMES.items():
-    obj = bpy.data.objects.get(old)
-    if obj is None:
-        continue
-    obj.name = new
-    obj.data.name = new
-    log("renamed %s -> %s" % (old, new))
+# --- 12. name the meshes ------------------------------------------------------
+# The FBX calls the head's datablock "平面" (plane); that string is what a glTF
+# reader sees, and "Body" as the node name for a head is actively misleading.
+body.name = "SiroinoSotai_Body"
+body.data.name = "SiroinoSotai_Body"
+head.name = "Akane_Head"
+head.data.name = "Akane_Head"
+log("renamed meshes to %s / %s" % (body.name, head.name))
 
-# --- 9. export ----------------------------------------------------------------
+# --- 13. export ---------------------------------------------------------------
 bpy.ops.object.select_all(action="DESELECT")
-for obj in kept:
+for obj in parts:
     obj.select_set(True)
-arm.select_set(True)
-bpy.context.view_layer.objects.active = arm
+armature.select_set(True)
+bpy.context.view_layer.objects.active = armature
 
 kwargs = {
     "filepath": OUT,
-    "armature_object_name": arm.name,
+    "armature_object_name": armature.name,
     "ignore_warning": False,
     # Plain (non-sparse) morph data: Godot's glTF importer is the consumer, and
     # sparse accessors are the riskier of the two encodings.
