@@ -76,6 +76,7 @@ static func _attach_appearance(player: Player) -> void:
 	player.add_child(model)
 	_attach_stance_if_unanimated(model)
 	_attach_blend_shapes(model)
+	_attach_locomotion(model)
 	controller.attach(model)
 	var visual := player.get_node_or_null("Visual") as Node3D
 	if visual != null:
@@ -152,6 +153,19 @@ static func _attach_blend_shapes(model: Node3D) -> void:
 		return
 	var component := ModelBlendShapes.new()
 	component.name = "BlendShapes"
+	model.add_child(component)
+	component.setup(model)
+
+
+## Locomotion clips (walk/idle from the open animation library): the component
+## measures the figure's actual velocity and plays the walk cycle while it
+## moves, restoring the procedural stance when it stops. Attached only when
+## the library and a player exist — everything else keeps the stance-only look.
+static func _attach_locomotion(model: Node3D) -> void:
+	if not ResourceLoader.exists(ModelClips.LIBRARY_PATH):
+		return
+	var component := ModelClips.new()
+	component.name = "Clips"
 	model.add_child(component)
 	component.setup(model)
 

@@ -68,16 +68,19 @@ func _ready() -> void:
 	# `_attach_model` (which is what normally attaches the components), and the
 	# overridden one skipped `PlayerScene` entirely. Apply the same rules the
 	# game applies — a model with no transform clip gets the procedural stance,
-	# and a model with the curated shapes gets the shape-key component — or the
-	# shot would show a T-pose and dead sliders that the player never sees.
+	# curated shapes get the shape-key component, and the locomotion library
+	# gets the walk-clip driver — or the shot would show a T-pose and dead
+	# sliders that the player never sees.
 	PlayerScene._attach_stance_if_unanimated(model)
 	PlayerScene._attach_blend_shapes(model)
+	PlayerScene._attach_locomotion(model)
 	# Wait for the import-time skeleton rest poses to settle into the tree, then
 	# frame and shoot. Framing before the first frame would measure a model that
 	# has not been placed yet.
 	await get_tree().process_frame
 	_collect_meshes(model)
 	_apply_debug_blends()
+	_apply_debug_clip()
 	_build_shot_plan(model)
 	_place_shot(0)
 	_index = 1
@@ -132,6 +135,21 @@ func _apply_debug_blends() -> void:
 			printerr("[shot] blend target not found: %s" % shape)
 		else:
 			print("[shot] blend %s=%.2f on %d mesh(es)" % [shape, value, applied])
+
+
+## `-- --clip=walk` — pin the locomotion driver to one clip so a stride can be
+## photographed (the driver would otherwise need real movement to trigger).
+func _apply_debug_clip() -> void:
+	for arg: String in OS.get_cmdline_user_args():
+		if not arg.begins_with("--clip="):
+			continue
+		var clip_name := StringName(arg.trim_prefix("--clip="))
+		var clips := _model_root.get_node_or_null("Clips") as ModelClips
+		if clips == null:
+			printerr("[shot] no locomotion driver on this model")
+			continue
+		clips.debug_play(clip_name)
+		print("[shot] clip pinned: %s" % clip_name)
 
 
 ## A neutral studio: one key light, a soft fill and a bright background, so the

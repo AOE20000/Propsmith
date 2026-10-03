@@ -116,9 +116,11 @@ func apply_base_figure() -> bool:
 	add_child(model)
 	_figure = model
 	# The same attachment rules the player model goes through: no body clip →
-	# procedural stance; curated shapes → the parameter component.
+	# procedural stance; curated shapes → the parameter component; locomotion
+	# clips → a real stride instead of sliding.
 	PlayerScene._attach_stance_if_unanimated(model)
 	PlayerScene._attach_blend_shapes(model)
+	PlayerScene._attach_locomotion(model)
 	var parameters := ModelBlendShapes.find_on(model)
 	if parameters != null:
 		var rng := RandomNumberGenerator.new()

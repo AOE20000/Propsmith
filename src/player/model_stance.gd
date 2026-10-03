@@ -79,6 +79,15 @@ func _apply_arm_pose() -> void:
 	_aim_pair(&"LeftLowerArm", &"RightLowerArm", forearm_aim)
 
 
+## Re-aim the arms from scratch. Called by `ModelClips` when a locomotion clip
+## stops: the clip owned the arm poses while it played, and the aims captured
+## at setup are stale after that — re-solving restores the relaxed hang.
+func reapply() -> void:
+	if _skeleton == null:
+		return
+	_apply_arm_pose()
+
+
 ## `aim` is written for the left side; the right side mirrors X.
 func _aim_pair(left: StringName, right: StringName, aim: Vector3) -> void:
 	_aim_bone(left, aim)
@@ -148,6 +157,8 @@ func _process(delta: float) -> void:
 ## Camera distance decides whether this figure animates. No camera (headless
 ## probes, the smoke test) means nothing to cull against — stay active.
 func _update_active() -> void:
+	if not _skeleton.is_inside_tree():
+		return
 	var viewport := _skeleton.get_viewport()
 	if viewport == null:
 		return

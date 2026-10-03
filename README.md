@@ -212,6 +212,7 @@ res://mods/my_mod/
 | [Godette VRM 示例模型](https://github.com/SirRichard94/low-poly-godette) | CC-BY 3.0 | `vrm_samples/Godette_vrm_v4.vrm` 与 `vrm_samples/LICENSE_SAMPLES.txt`（模型版权归 SirRichard94，VRM 适配归 Lyuma） |
 | [SiroinoSotai（しろいの素体）](https://booth.pm/ja/items/8268676) 基准模型的**躯干**（16.7k 三角 · Mobile 版 3.5k · 99 个形态键） | **CC0 1.0 全世界**（商用/修改/再分发皆可，**无需署名**） | 原始包与 PSD 不入库（在 `vendor/models/`，gitignore） |
 | [茜犬-Akane-](https://booth.pm/ja/items/8861598)（山野重工赤山派閥独立支部）基准模型的**头部**，并为身体提供基色贴图 | **CC0 1.0 全世界**，且作者把**角色设计的著作权**也一并声明适用 CC0 | 与上者合成为 `assets/characters/base_female.vrm`（原始包与 PSD 不入库） |
+| [Godot4-OpenAnimationLibraries](https://github.com/catprisbrey/Godot4-OpenAnimationLibraries)（catprisbrey）**行走动画**的来源：其 `ShooterLib` 中的 `walk` / `idle` / `run_067` 经骨骼重定向进入 `assets/animations/locomotion.res`（构建脚本 `tools/models/build_locomotion_library.gd`） | **CC-BY 4.0**（须署名——本行即署名） | 仅保留三个剪辑的重定向副本（81 KB）；原库 2.9 MB 不入库 |
 
 `assets/characters/base_female.vrm` 是上两行作者的成果**合成**：SiroinoSotai 的躯干 +
 Akane 的头部，由 `tools/models/export_akane_vrm.py` 从 FBX 导出为 VRM 1.0。
