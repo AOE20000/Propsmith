@@ -48,6 +48,7 @@ var _figure: Node3D = null
 
 
 func _ready() -> void:
+	add_to_group(&"citizens")
 	_build_body()
 	_build_health()
 
@@ -126,6 +127,11 @@ func apply_base_figure() -> bool:
 		var rng := RandomNumberGenerator.new()
 		rng.seed = hash("figure|%d" % figure_seed)
 		parameters.apply_values(ModelBlendShapes.randomized_values(rng))
+		# A saved decision beats the seeded roll: if this citizen's look was
+		# edited (and journaled) in any earlier session, that override wins.
+		var override := NpcFigure.get_override(figure_seed)
+		if not override.is_empty():
+			parameters.apply_values(override)
 	NpcFigure.configure(model)
 	var visual := get_node_or_null("Visual") as MeshInstance3D
 	if visual != null:

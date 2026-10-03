@@ -27,12 +27,25 @@ const VISIBILITY_RANGE: float = 55.0
 ## The meshes whose shadows survive the discipline: one skinned draw call per
 ## citizen in the shadow pass instead of fifteen.
 const SHADOW_CASTERS: PackedStringArray = ["SiroinoSotai_Body", "Akane_Head"]
+## The decision kind this module owns: an appearance override for one citizen,
+## keyed by that citizen's figure seed. Emitted through `DecisionLog`, so the
+## override is journaled (crash-safe) and broadcast (multiplayer) without this
+## file knowing either transport or storage.
+const DECISION_KIND: StringName = &"set_npc_figure"
+
+## figure seed -> the parameter dictionary overriding that citizen's seeded
+## look. Fed by the decision applier (live edits and journal replay alike) and
+## read by `PedestrianAgent.apply_base_figure` at spawn time — so an override
+## made last session re-applies to a citizen that has been regenerated since.
+static var _overrides: Dictionary = {}
+static var _applier_registered: bool = false
 
 
 ## Apply the on-demand configuration to a freshly instantiated figure.
 static func configure(model: Node3D) -> void:
 	if model == null:
 		return
+	register_decision_applier()
 	for node: Node in model.find_children("*", "MeshInstance3D", true, false):
 		var mesh_instance := node as MeshInstance3D
 		if mesh_instance == null or mesh_instance.mesh == null:
@@ -42,3 +55,44 @@ static func configure(model: Node3D) -> void:
 			mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		else:
 			mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+
+## Re-edit one citizen's look: emit the decision — journaling and (later)
+## multiplayer broadcast are the log's job, not the caller's.
+static func emit_figure_override(seed_key: int, values: Dictionary) -> void:
+	register_decision_applier()
+	DecisionLog.emit(DECISION_KIND, {"seed": seed_key, "values": values})
+
+
+## The stored override for a seed, if any citizen ever had their look edited.
+static func get_override(seed_key: int) -> Dictionary:
+	return _overrides.get(seed_key, {})
+
+
+## Register this module's decision applier once. The applier is deliberately
+## store-first: replay may run before any citizen exists (the crowd is
+## regenerated from seed after load), so the override lands in the static map
+## and every citizen — existing or future — applies it at spawn; live citizens
+## get it pushed immediately as well.
+static func register_decision_applier() -> void:
+	if _applier_registered:
+		return
+	_applier_registered = true
+	DecisionLog.register_applier(DECISION_KIND, func(payload: Dictionary) -> void:
+		var seed_key := int(payload.get("seed", 0))
+		var values: Dictionary = payload.get("values", {})
+		_overrides[seed_key] = values
+		_push_live(seed_key, values)
+	)
+
+
+static func _push_live(seed_key: int, values: Dictionary) -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return
+	for node: Node in tree.get_nodes_in_group(&"citizens"):
+		var agent := node as PedestrianAgent
+		if agent != null and agent.figure_seed == seed_key:
+			var parameters := ModelBlendShapes.find_on(agent.get_node_or_null("Figure"))
+			if parameters != null:
+				parameters.apply_values(values)

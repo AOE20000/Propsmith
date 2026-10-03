@@ -12,7 +12,7 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
-$autoloads = @("Services", "Events", "GameState", "ModHost", "SaveSystem", "ModLoader", "ModLoaderStore")
+$autoloads = @("Services", "Events", "GameState", "ModHost", "SaveSystem", "ModLoader", "ModLoaderStore", "DecisionLog")
 $pattern = ($autoloads -join "|")
 
 $scripts = Get-ChildItem -Path (Join-Path $ProjectDir "src"), (Join-Path $ProjectDir "mods") -Recurse -Filter *.gd -ErrorAction SilentlyContinue |
