@@ -1,0 +1,9 @@
+{
+  "id": "player_base",
+  "name": "基础玩家模型（VRM）",
+  "version": "1.0.0",
+  "author": "propsmith",
+  "enabled": true,
+  "dependencies": [],
+  "description": "游戏自带的基础人形：SiroinoSotai 素体 + 茜犬 Akane 头部（两者均为 CC0 1.0），经 tools/models/export_akane_vrm.py 导出为 VRM 1.0。充当 player_model 注册点的默认提供者——其它 mod 用同一个注册点即可替换（id 序先者胜）。模型不带动画，PlayerScene 会自动挂程序化站姿（ModelStance：按方向瞄准放下手臂 + 呼吸）。"
+}

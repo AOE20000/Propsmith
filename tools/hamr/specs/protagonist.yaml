@@ -1,49 +1,52 @@
-# Propsmith 主角基准模型 —— Hamr spec
+# Propsmith 主角基准模型 —— Hamr spec（少女形象，2026-10-03 修订）
 # 参数仅使用 Hamr 0.8.0 实际生效字段（见 docs/local/hamr.md 参数清单）。
-# 视觉与游戏内 Configura 默认形象呼应：米白 T + 藏青裤 + 棕靴 + 深棕发。
+# ⚠️ hair.style 必须用实现表里的下划线名：long_straight / long_wavy /
+#    short_bob / twin_tails / spiky —— 写别的会静默回退成 long_straight。
 name: "Propsmith Protagonist"
 version: "1.0"
 
 body:
-  height_cm: 165
-  build: average
+  # 少女体型：身高小 + 娇小骨架 + 相对偏长的腿（动漫比例）
+  height_cm: 150
+  build: petite
   skin:
-    base_hex: "#C9916A"
+    base_hex: "#F2D6C2"
     undertone: warm
-    tan_level: 0.4
+    tan_level: 0.25
   proportions:
-    shoulder_width: 0.42
-    bust: 0.50
-    waist: 0.34
-    hip_width: 0.58
-    leg_length: 0.55
+    shoulder_width: 0.36
+    bust: 0.42
+    waist: 0.30
+    hip_width: 0.48
+    leg_length: 0.58
 
 hair:
-  style: ponytail
+  # 双马尾：实现表里的 twin_tails（少女辨识度最高的一档）
+  style: twin_tails
   length: medium
-  volume: 0.6
-  curl_tightness: 0.2
-  # 6 壳层的头发实测 83k 顶点（构建慢、模型臃肿、NPC 批量不可行）；
-  # 3 壳层视觉上仍蓬松，顶点数减半。
+  volume: 0.55
+  curl_tightness: 0.15
   shell_layers: 3
   color:
-    roots: "#3A2A1E"
-    mid: "#4A3628"
-    tips: "#5A4432"
+    roots: "#5A3E28"
+    mid: "#7A5638"
+    tips: "#9A7248"
 
 face:
+  # 童颜：V 脸 + 柔和颧骨 + 小鼻 + 大眼 + 薄唇 + 微笑
   jaw: V-shape
   cheekbones: medium
   eyes:
-    shape: cat-tilt
-    iris_hex: "#4169E1"
-    size: 1.1
+    shape: round
+    iris_hex: "#5B8FD4"
+    size: 1.5
   nose_size: small
   nose_bridge: narrow
-  lip_fullness: 0.55
+  lip_fullness: 0.45
   default_expression: slight-smile
 
 clothing:
+  # 与游戏内配色统一（米白 T + 藏青裤 + 棕靴）
   - name: white_tee
     type: top
     primary_hex: "#E6E1D5"
@@ -62,8 +65,8 @@ clothing:
 
 physics:
   hair:
-    stiffness: 0.35
-    gravity: 0.3
+    stiffness: 0.30
+    gravity: 0.35
     drag: 0.4
 
 export:

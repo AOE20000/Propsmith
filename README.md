@@ -210,6 +210,41 @@ res://mods/my_mod/
 | [godot-vrm](https://github.com/V-Sekai/godot-vrm) VRM 导入/导出 | MIT | `addons/vrm/LICENSE`（版权归 V-Sekai Contributors 及 VRM Consortium） |
 | [Godot-MToon-Shader](https://github.com/V-Sekai/godot-vrm)（上者的 VRM 动漫画着色器，同一仓库内） | MIT | `addons/Godot-MToon-Shader/LICENSE` |
 | [Godette VRM 示例模型](https://github.com/SirRichard94/low-poly-godette) | CC-BY 3.0 | `vrm_samples/Godette_vrm_v4.vrm` 与 `vrm_samples/LICENSE_SAMPLES.txt`（模型版权归 SirRichard94，VRM 适配归 Lyuma） |
+| [SiroinoSotai（しろいの素体）](https://booth.pm/ja/items/8268676) 基准模型的**躯干**（16.7k 三角 · Mobile 版 3.5k · 99 个形态键） | **CC0 1.0 全世界**（商用/修改/再分发皆可，**无需署名**） | 原始包与 PSD 不入库（在 `vendor/models/`，gitignore） |
+| [茜犬-Akane-](https://booth.pm/ja/items/8861598)（山野重工赤山派閥独立支部）基准模型的**头部**，并为身体提供基色贴图 | **CC0 1.0 全世界**，且作者把**角色设计的著作权**也一并声明适用 CC0 | 与上者合成为 `assets/characters/base_female.vrm`（原始包与 PSD 不入库） |
+
+`assets/characters/base_female.vrm` 是上两行作者的成果**合成**：SiroinoSotai 的躯干 +
+Akane 的头部，由 `tools/models/export_akane_vrm.py` 从 FBX 导出为 VRM 1.0。
+
+### SiroinoSotai 的例外与禁忌（随它一起记录，别只记 CC0）
+
+来自商品页，与 CC0 并列且必须遵守：
+
+- **Logo 数据不在 CC0 范围内**：仅可用于标示"符合 SiroinoSotai 対応 标准"的作品，且不得改动
+  文字、标记、配色与纵横比。
+- **UnityPackage 所引用的第三方数据**（VRChat SDK、lilToon 等）**不包含在该商品内，也不适用
+  CC0**——本项目不经过 Unity，故不涉及。
+- **表记禁忌**：不得使用「公式」「公認」「認定」「監修」「共同開発」等可能让人误认为
+  SiroinoSotai 运营方参与制作/品质确认/销售的表述。
+- 署名非义务，出于礼貌记录：企画・制作 しろいの ／ 協力 ちゃかぽ 様 ／ ウェイト制作 せらすずな 様。
+
+### 茜犬-Akane- 的例外与禁忌
+
+它的许可是**基于素体的 CC0**声明（页面对本商品收录的全部数据——三个版本的 FBX、.blend、
+PNG/PSD、UnityPackage、.VRM，以及**角色设计本身的著作权**——统一适用 CC0 1.0），
+并写明「**利用規約はありません**」。因此上一条 SiroinoSotai 的 **Logo 例外、第三方
+（VRChat SDK、lilToon）例外与表记禁忌同样适用**；此外作者声明本项目**不提供说明书与支持**。
+
+### 曾经考虑、但**未随工程分发**的角色管线（负面结论也要留痕）
+
+- **Hamr + MB-Lab**：可用参数生成 VRM，但 MB-Lab 的 `license.txt` 声明
+  「**生成的模型默认沿用 AGPL-3**，作为 AGPL 数据库的衍生品必须同样以 AGPL-3 分发」——
+  与本项目的 MIT 不兼容。**该管线已放弃，产出未入库**（工具链留在 gitignore 的 `vendor/`）。
+- **VRoid Studio**：模型本身可商用、可用于游戏，但其 Guidelines 限制
+  「制作能**生成或输出**由 VRoid 网格变形/组合而成的形象的应用」需 pixiv 单独授权（仅自用豁免），
+  与"公开产品内置捏人"冲突。**未采用**。
+- **SMPL**：许可明确禁止商用（"non-commercial…any other use, in particular any use for
+  commercial purposes, is prohibited…video games"），**不可用于本项目**。
 
 游戏内容所用的 **PLATEAU 城市数据不入库**（下载到 `data/`，已 gitignore），其许可为
 政府標準利用規約（第 2.0 版）/ CC BY 4.0 / ODC BY / ODbL；对外发布使用了数据的作品时需要
