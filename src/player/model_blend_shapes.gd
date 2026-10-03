@@ -217,6 +217,26 @@ static func default_values() -> Dictionary:
 	return values
 
 
+## The *live* values of this instance — seeded roll and any prior override are
+## already baked into the mesh, so reading back gives an edit session its
+## starting point without knowing how the current look came to be.
+func current_values() -> Dictionary:
+	var values: Dictionary = {}
+	for group_id: StringName in SLIDER_GROUPS:
+		for slider: Dictionary in SLIDER_GROUPS[group_id]["sliders"]:
+			var value := float(slider["default"])
+			var binding: Dictionary = _bindings.get(slider["id"], {})
+			if not binding.is_empty():
+				var mesh_instance: MeshInstance3D = binding["mesh"]
+				value = mesh_instance.get_blend_shape_value(binding["index"])
+			values[String(slider["id"])] = value
+	for group_id: StringName in TOGGLE_GROUPS:
+		for toggle: Dictionary in TOGGLE_GROUPS[group_id]["toggles"]:
+			var node: MeshInstance3D = _toggle_bindings.get(toggle["id"])
+			values[String(toggle["id"])] = node.visible if node != null else bool(toggle["default"])
+	return values
+
+
 ## Add every catalog default to a state that lacks it — the restore path needs
 ## this so a save written before the sliders existed still loads (its missing
 ## ids fall back to the authored body instead of being dropped).

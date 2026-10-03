@@ -45,6 +45,7 @@ var _wander_rng := RandomNumberGenerator.new()
 var _health: HealthComponent = null
 var _dead: bool = false
 var _figure: Node3D = null
+var _figure_editor: NpcFigureEditor = null
 
 
 func _ready() -> void:
@@ -133,10 +134,23 @@ func apply_base_figure() -> bool:
 		if not override.is_empty():
 			parameters.apply_values(override)
 	NpcFigure.configure(model)
+	_attach_figure_editor()
 	var visual := get_node_or_null("Visual") as MeshInstance3D
 	if visual != null:
 		visual.visible = false
 	return true
+
+
+## The E-handle: looking at this citizen and pressing interact opens the
+## wardrobe panel aimed at this figure. Attached with the figure (a capsule
+## citizen has nothing to edit).
+func _attach_figure_editor() -> void:
+	if _figure_editor != null:
+		return
+	_figure_editor = NpcFigureEditor.new()
+	_figure_editor.agent = self
+	_figure_editor.position = Vector3(0.0, 1.2, 0.0)
+	add_child(_figure_editor)
 
 
 func _physics_process(delta: float) -> void:
@@ -265,6 +279,8 @@ func _on_defeated(_killer: Node) -> void:
 	collision_layer = 0
 	collision_mask = 0
 	velocity = Vector3.ZERO
+	if _figure_editor != null:
+		_figure_editor.enabled = false
 	if _figure != null:
 		_figure.rotation_degrees = Vector3(90.0, _figure.rotation_degrees.y, 0.0)
 		_figure.position = Vector3(0.0, 0.3, 0.0)
