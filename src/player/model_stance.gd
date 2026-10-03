@@ -40,6 +40,11 @@ class_name ModelStance
 ## Head sway amplitude (degrees) and speed — a slow idle drift.
 @export var sway_degrees: float = 1.1
 @export var sway_speed: float = 0.55
+## 按需更新：skeletons farther than this from the camera stop their per-frame
+## breathing/sway writes. The writes are idempotent re-applications over a
+## recorded baseline, so skipping frames is invisible — a citizen at 80 m keeps
+## walking (the agent moves the body) but costs zero bone writes.
+@export var active_range: float = 45.0
 
 var _skeleton: Skeleton3D = null
 var _base_poses: Dictionary = {}
@@ -48,6 +53,8 @@ var _base_poses: Dictionary = {}
 ## and the answers remembered.
 var _applied_global: Dictionary = {}
 var _phase: float = 0.0
+var _frame: int = 0
+var _active: bool = true
 
 
 ## Bind to a model root and apply the stance. Safe to call with a model that has
@@ -123,12 +130,32 @@ func _safe_direction(from: Vector3, to: Vector3) -> Vector3:
 func _process(delta: float) -> void:
 	if _skeleton == null:
 		return
+	# Distance gate, re-evaluated twice a second: the common case (still far,
+	# still near) is one early return, not a walk of the bone list.
+	_frame += 1
+	if _frame % 30 == 1:
+		_update_active()
+	if not _active:
+		return
 	_phase += delta
 	var breath := sin(_phase * breath_speed) * breath_amount
 	_scale_bone(&"Chest", breath)
 	var sway := sin(_phase * sway_speed) * deg_to_rad(sway_degrees)
 	_drift_bone(&"Spine", Vector3(0.0, 0.0, sway))
 	_drift_bone(&"Neck", Vector3(0.0, 0.0, -sway * 0.4))
+
+
+## Camera distance decides whether this figure animates. No camera (headless
+## probes, the smoke test) means nothing to cull against — stay active.
+func _update_active() -> void:
+	var viewport := _skeleton.get_viewport()
+	if viewport == null:
+		return
+	var camera := viewport.get_camera_3d()
+	if camera == null:
+		_active = true
+		return
+	_active = _skeleton.global_position.distance_to(camera.global_position) <= active_range
 
 
 ## Breathing lives on the chest bone's scale — invisible in the silhouette but

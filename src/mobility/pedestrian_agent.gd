@@ -24,22 +24,27 @@ const GRAVITY: float = 18.0
 const WANDER_RADIUS: float = 30.0
 ## Seconds a fallen citizen stays before the world takes them back.
 const CORPSE_LINGER: float = 4.0
-## The sample VRM avatar used as a humanoid appearance when its imported scene
-## exists. The `.vrm` source lives in `vrm_samples/` (CC-BY, see
-## LICENSE_SAMPLES.txt); the VRM importer turns it into a PackedScene on import.
-## Absent or not yet imported → the capsule stays, silently.
-const VRM_APPEARANCE_SCENE: String = "res://vrm_samples/Godette_vrm_v4.vrm"
+## The shared base figure every citizen wears (the same `.vrm` the player
+## wears). One PackedScene on disk, N instances in the world: shape-key
+## weights and garment visibility are per-instance state, so a citizen is a
+## *parameter set*, not a model. Absent or not yet imported → the capsule
+## stays, silently.
+const BASE_FIGURE_SCENE: String = "res://assets/characters/base_female.vrm"
 
 var route: AgentRoute = null
 ## True when no annotated places were available: the citizen still walks, just
 ## without a day plan — random nearby targets instead of a commute.
 var wandering: bool = false
+## The seed this citizen's look was drawn from. Deterministic per citizen: the
+## crowd reads as "forty pre-tuned people" and rebuilds identically from seed.
+var figure_seed: int = 0
 
 var _waypoints: PackedVector3Array = PackedVector3Array()
 var _waypoint_index: int = 0
 var _wander_rng := RandomNumberGenerator.new()
 var _health: HealthComponent = null
 var _dead: bool = false
+var _figure: Node3D = null
 
 
 func _ready() -> void:
@@ -72,6 +77,7 @@ func configure(
 	route = AgentRoute.new()
 	route.set_path_finder(path_finder)
 	route.configure(activity_pattern, candidates, cache, map_version, origin, seed, home_key)
+	figure_seed = seed
 	global_position = origin
 	_refresh_waypoints()
 
@@ -81,28 +87,44 @@ func configure(
 func configure_wander(origin: Vector3, seed: int) -> void:
 	wandering = true
 	route = null
+	figure_seed = seed
 	global_position = origin
 	_wander_rng.seed = hash("wander|%s|%d" % [origin, seed])
 	_refresh_waypoints()
 
 
-## Swap the capsule for the sample VRM humanoid. Returns false when the model's
-## imported scene is unavailable (importer disabled, .vrm not yet imported) —
-## the caller keeps the capsule and nothing else changes.
-func apply_vrm_appearance() -> bool:
-	if not ResourceLoader.exists(VRM_APPEARANCE_SCENE, "PackedScene"):
+## Swap the capsule for the shared base figure: same `.vrm` the player wears,
+## with this citizen's look drawn deterministically from its seed (shape-key
+## weights, bust, blush, which accessories stayed on — see
+## `ModelBlendShapes.randomized_values`). On-demand rendering (distance cull,
+## shadow discipline) comes from `NpcFigure`. Returns false when the model's
+## imported scene is unavailable — the caller keeps the capsule and nothing
+## else changes.
+func apply_base_figure() -> bool:
+	if not ResourceLoader.exists(BASE_FIGURE_SCENE, "PackedScene"):
 		return false
-	var packed := load(VRM_APPEARANCE_SCENE) as PackedScene
+	var packed := load(BASE_FIGURE_SCENE) as PackedScene
 	if packed == null:
 		return false
 	var model := packed.instantiate() as Node3D
 	if model == null:
 		return false
-	model.name = "VRMModel"
-	# The avatar faces +Z; the citizen walks toward its -Z target, so turn the
+	model.name = "Figure"
+	# The figure faces +Z; the citizen walks toward its -Z target, so turn the
 	# model to match the movement code's facing assumption.
 	model.rotation_degrees.y = 180.0
 	add_child(model)
+	_figure = model
+	# The same attachment rules the player model goes through: no body clip →
+	# procedural stance; curated shapes → the parameter component.
+	PlayerScene._attach_stance_if_unanimated(model)
+	PlayerScene._attach_blend_shapes(model)
+	var parameters := ModelBlendShapes.find_on(model)
+	if parameters != null:
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash("figure|%d" % figure_seed)
+		parameters.apply_values(ModelBlendShapes.randomized_values(rng))
+	NpcFigure.configure(model)
 	var visual := get_node_or_null("Visual") as MeshInstance3D
 	if visual != null:
 		visual.visible = false
@@ -226,7 +248,8 @@ func _build_body() -> void:
 
 
 ## Death: fall over, stop being physics-active, and let the world take the
-## body back. No gore, no ragdoll — a capsule tipped on its side reads clearly.
+## body back. No gore, no ragdoll — a figure (or capsule) tipped on its side
+## reads clearly.
 func _on_defeated(_killer: Node) -> void:
 	if _dead:
 		return
@@ -234,10 +257,14 @@ func _on_defeated(_killer: Node) -> void:
 	collision_layer = 0
 	collision_mask = 0
 	velocity = Vector3.ZERO
-	var visual := get_node_or_null("Visual") as MeshInstance3D
-	if visual != null:
-		visual.rotation_degrees = Vector3(90.0, 0.0, 0.0)
-		visual.position = Vector3(0.0, 0.3, 0.0)
+	if _figure != null:
+		_figure.rotation_degrees = Vector3(90.0, _figure.rotation_degrees.y, 0.0)
+		_figure.position = Vector3(0.0, 0.3, 0.0)
+	else:
+		var visual := get_node_or_null("Visual") as MeshInstance3D
+		if visual != null:
+			visual.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+			visual.position = Vector3(0.0, 0.3, 0.0)
 	Events.notify("一位市民倒下了", Events.NotifyLevel.WARNING)
 	var timer := get_tree().create_timer(CORPSE_LINGER)
 	timer.timeout.connect(func() -> void:

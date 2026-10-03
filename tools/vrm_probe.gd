@@ -18,11 +18,20 @@ func _ready() -> void:
 		print("[probe] configura instantiated=", config_model != null)
 		if config_model != null:
 			config_model.free()
-	# 市民 VRM 外观端到端
+	# 市民共用基准模型端到端（种子参数集 + 按需渲染）
 	var citizen := PedestrianAgent.new()
 	add_child(citizen)
-	var swapped: bool = citizen.apply_vrm_appearance()
-	print("[probe] citizen vrm appearance=", swapped, " visual_hidden=", not (citizen.get_node("Visual") as MeshInstance3D).visible)
+	var swapped: bool = citizen.apply_base_figure()
+	var figure := citizen.get_node_or_null("Figure") as Node3D
+	var meshes: int = 0
+	var ranged: int = 0
+	if figure != null:
+		for n: Node in figure.find_children("*", "MeshInstance3D", true, false):
+			meshes += 1
+			if (n as MeshInstance3D).visibility_range_end > 0.0:
+				ranged += 1
+	print("[probe] citizen base figure=", swapped, " visual_hidden=", not (citizen.get_node("Visual") as MeshInstance3D).visible,
+		" meshes=", meshes, " distance_culled=", ranged)
 	citizen.free()
 	print("[probe] done")
 	get_tree().quit(0)
