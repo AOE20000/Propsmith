@@ -67,114 +67,25 @@ static func _attach_appearance(player: Player) -> void:
 	controller.name = "Appearance"
 	player.add_child(controller)
 
-	var model := _instantiate_player_model()
+	var model := resolve_player_model()
 	if model == null:
 		return
 	model.name = "PlayerModel"
 	# The model faces the camera convention (+Z); the player walks toward -Z.
 	model.rotation_degrees.y = 180.0
 	player.add_child(model)
-	_attach_stance_if_unanimated(model)
-	_attach_blend_shapes(model)
-	_attach_locomotion(model)
+	FigureAttachments.attach_all(model)
 	controller.attach(model)
 	var visual := player.get_node_or_null("Visual") as Node3D
 	if visual != null:
 		visual.visible = false
 
 
-## A body with no clip holds its authored T-pose forever. The Hamr-forged VRM
-## ships without animation; the built-in Configura body plays its own `Idle`.
-## So: if the chosen model carries no usable clip, hand it a procedural stance
-## (arms down, shallow breathing) — that is the whole difference between "a
-## character standing" and "an unposed rig" from the player's own camera.
-##
-## Clip-carrying models are left untouched, which makes this self-retiring: once
-## a real idle is retargeted onto the VRM, the branch simply stops applying.
-##
-## Only *transform* tracks count as animation — a VRM arrives with about two
-## dozen clips (`RESET` plus one per expression: `blink`, `aa`, `happy`,
-## `lookUp`) and they animate blend shapes, not limbs. Testing for "any clip at
-## all" would read a T-posed mannequin as fully animated, which is how the first
-## VRM body shipped.
-##
-## Eye bones are the second exception. The VRM importer mirrors every expression
-## into a clip that *also* rotates `LeftEye`/`RightEye` (its look-at rig), so even
-## a transform-track test passes on a rig whose arms never move. Eyes cannot put
-## the arms down, so they do not count as animation here.
-const STANCE_IGNORED_BONES: PackedStringArray = ["eye"]
-
-
-static func _clip_animates_body(animation: Animation) -> bool:
-	for track: int in animation.get_track_count():
-		match animation.track_get_type(track):
-			Animation.TYPE_POSITION_3D, Animation.TYPE_ROTATION_3D, \
-			Animation.TYPE_SCALE_3D:
-				# Bone tracks read "Skeleton3D:BoneName"; a blend-shape track
-				# reads "Skeleton/Mesh:keyName" and is a different track type.
-				var bone := String(animation.track_get_path(track)).get_slice(":", 1)
-				var ignored := false
-				for needle: String in STANCE_IGNORED_BONES:
-					if bone.to_lower().contains(needle):
-						ignored = true
-						break
-				if not ignored:
-					return true
-			_:
-				pass
-	return false
-
-
-static func _attach_stance_if_unanimated(model: Node3D) -> void:
-	for node: Node in model.find_children("*", "AnimationPlayer", true, false):
-		var player := node as AnimationPlayer
-		if player == null:
-			continue
-		for clip: StringName in player.get_animation_list():
-			if clip == &"RESET":
-				continue
-			if _clip_animates_body(player.get_animation(clip)):
-				return
-	var stance := ModelStance.new()
-	stance.name = "Stance"
-	model.add_child(stance)
-	stance.setup(model)
-
-
-## A morph-carrying model gets the shape-key look component: the panel's figure
-## sliders drive blend shapes, which no animation can stomp and no bone
-## convention can break (bone-rest editing was measured to do nothing to a
-## glTF-skinned model in Godot). Attached only when the model actually has the
-## curated shapes — the panel uses the component's presence to decide whether
-## to show the shape-key section at all, so a Configura or capsule model hides
-## it instead of showing dead controls.
-static func _attach_blend_shapes(model: Node3D) -> void:
-	if not ModelBlendShapes.has_curated_shapes(model):
-		return
-	var component := ModelBlendShapes.new()
-	component.name = "BlendShapes"
-	model.add_child(component)
-	component.setup(model)
-
-
-## Locomotion clips (walk/idle from the open animation library): the component
-## measures the figure's actual velocity and plays the walk cycle while it
-## moves, restoring the procedural stance when it stops. Attached only when
-## the library and a player exist — everything else keeps the stance-only look.
-static func _attach_locomotion(model: Node3D) -> void:
-	if not ResourceLoader.exists(ModelClips.LIBRARY_PATH):
-		return
-	var component := ModelClips.new()
-	component.name = "Clips"
-	model.add_child(component)
-	component.setup(model)
-
-
 ## Mod override first, built-in Configura second, null means capsule. A mod
 ## factory failing is a warning, not a boot failure: the fallback body exists
 ## precisely so a broken contribution costs the player their custom look, not
 ## the game.
-static func _instantiate_player_model() -> Node3D:
+static func resolve_player_model() -> Node3D:
 	var entries := ModHost.content_ordered(&"player_model")
 	if not entries.is_empty():
 		var factory: Callable = entries[0].get("factory")

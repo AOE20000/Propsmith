@@ -18,19 +18,11 @@ var _swappers: Dictionary = {}
 var _pickers: Dictionary = {}
 var _sliders: Dictionary = {}
 var _rows: VBoxContainer = null
-var _blend_sliders: Dictionary = {}
-var _blend_toggles: Dictionary = {}
-var _blend_rows_built: bool = false
-## NPC edit mode: when set, the shape-key section drives *this* figure instead
-## of the player's, and every change is emitted as a `set_npc_figure` decision
-## (journaled → saved → broadcast). Null = the player's own look.
-var _npc_target: ModelBlendShapes = null
+## The shape-key editor section (sliders, toggles, working set, journal flush)
+## as a self-contained component — see `BlendSection`.
+var _blend_section: BlendSection = null
+## Display mirror of the NPC seed (the section owns the edit state).
 var _npc_seed: int = 0
-## The working parameter set for the NPC edit session: starts from the live
-## values (seeded roll + prior overrides are baked into the mesh) and every
-## edit updates it. Emitted wholesale — decision payloads are self-contained.
-var _npc_working: Dictionary = {}
-var _npc_dirty: bool = false
 var _title: Label = null
 
 
@@ -39,6 +31,10 @@ func _ready() -> void:
 	visible = false
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	add_to_group(&"character_panel")
+	_blend_section = BlendSection.new(
+		null,
+		func(option_id: String, value: Variant) -> void: _set_player_value(option_id, value),
+		func() -> Dictionary: return _player_values())
 	_build()
 
 
@@ -55,7 +51,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 ## Open onto the player's own look (the V key path).
 func open_for_player() -> void:
-	_npc_target = null
+	_blend_section.clear_npc_target()
 	_set_open(true)
 
 
@@ -70,10 +66,7 @@ func open_for_npc(agent: PedestrianAgent) -> void:
 	if target == null:
 		open_for_player()
 		return
-	_npc_target = target
-	_npc_seed = agent.figure_seed
-	_npc_working = target.current_values()
-	_npc_dirty = false
+	_blend_section.set_npc_target(target, agent.figure_seed)
 	_set_open(true)
 
 
@@ -84,21 +77,13 @@ func _set_open(open: bool) -> void:
 	GameState.mode = GameState.Mode.CUSTOMIZING if open else GameState.Mode.EXPLORING
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
 	if not open:
-		_flush_npc_edit()
-		_npc_target = null
+		_blend_section.flush()
+		_blend_section.clear_npc_target()
 	if open:
-		_ensure_blend_rows()
+		_blend_section.ensure_built()
 		_sync_controls()
 		if _title != null:
-			_title.text = "市民外观（seed %d）— 改动立即生效并入账" % _npc_seed \
-				if _npc_target != null else "角色外观"
-
-
-## 拖动预览：本地即时应用（不入账），松手或关闭时整份决定入账。
-func _flush_npc_edit() -> void:
-	if _npc_target != null and _npc_dirty:
-		NpcFigure.emit_figure_override(_npc_seed, _npc_working)
-		_npc_dirty = false
+			_title.text = "市民外观（seed %d）— 改动立即生效并入账" % _npc_seed if _blend_section.has_target() else "角色外观"
 
 
 ## The controller rides on the player; group lookup keeps this panel decoupled
@@ -160,6 +145,7 @@ func _build() -> void:
 	rows.add_theme_constant_override("separation", 6)
 	scroll.add_child(rows)
 	_rows = rows
+	_blend_section.attach_rows(_rows)
 
 	for id: StringName in CharacterAppearance.SWAP_GROUPS:
 		rows.add_child(_build_swap_row(String(id), CharacterAppearance.SWAP_GROUPS[id]))
@@ -269,134 +255,6 @@ func _build_deform_row(option_id: String, group: Dictionary) -> HBoxContainer:
 	return row
 
 
-## Whose look the shape-key section drives: the NPC under edit, or the player.
-func _blend_target() -> ModelBlendShapes:
-	if _npc_target != null:
-		return _npc_target
-	var controller := _controller()
-	var model: Node3D = controller.model() if controller != null else null
-	return ModelBlendShapes.find_on(model)
-
-
-## The parameter dictionary the blend section reads on sync.
-func _blend_state() -> Dictionary:
-	if _npc_target != null:
-		return _npc_working
-	var controller := _controller()
-	if controller != null:
-		return controller.current_state().values
-	return {}
-
-
-## Shape-key section is built once, on first open, and only when *something*
-## can drive it: the player's model (its own curated shapes) or the NPC under
-## edit. Rows are mode-agnostic — routing happens in the write handlers.
-func _ensure_blend_rows() -> void:
-	if _blend_rows_built:
-		return
-	if _blend_target() == null:
-		return
-	_blend_rows_built = true
-	var header := Label.new()
-	header.text = "形体（形状键，实时生效）"
-	header.modulate = Color(0.7, 0.78, 0.88)
-	_rows.add_child(header)
-	for group_id: StringName in ModelBlendShapes.SLIDER_GROUPS:
-		var group: Dictionary = ModelBlendShapes.SLIDER_GROUPS[group_id]
-		for slider: Dictionary in group["sliders"]:
-			_rows.add_child(_build_blend_row(group, slider))
-	for group_id: StringName in ModelBlendShapes.TOGGLE_GROUPS:
-		var group: Dictionary = ModelBlendShapes.TOGGLE_GROUPS[group_id]
-		for toggle: Dictionary in group["toggles"]:
-			_rows.add_child(_build_blend_toggle_row(group, toggle))
-
-
-## A shape-key slider: [0, 1] drives one morph on one mesh, live. Group labels
-## are folded into the readout context (the group header above), so each row
-## just names the dial.
-func _build_blend_row(group: Dictionary, slider: Dictionary) -> HBoxContainer:
-	var option_id := String(slider["id"])
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
-	row.add_child(_row_label("%s·%s" % [group["label"], slider["label"]]))
-
-	var control := HSlider.new()
-	control.min_value = 0.0
-	control.max_value = 1.0
-	control.step = 0.02
-	control.custom_minimum_size = Vector2(0.0, 24.0)
-	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	control.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(control)
-
-	var readout := Label.new()
-	readout.custom_minimum_size = Vector2(46.0, 0.0)
-	readout.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	readout.modulate = Color(0.7, 0.85, 0.95)
-	row.add_child(readout)
-
-	control.value_changed.connect(func(value: float) -> void:
-		readout.text = "%d%%" % roundi(value * 100.0)
-		_set_blend_value(option_id, value)
-	)
-	control.drag_ended.connect(func(_changed: bool) -> void:
-		_flush_npc_edit()
-	)
-	_blend_sliders[option_id] = {
-		"slider": control, "readout": readout, "default": float(slider["default"]),
-	}
-	return row
-
-
-## A shape-key slider write, routed by mode: the NPC under edit gets a live
-## preview from its own component (no journaling while dragging — the whole
-## working set is journaled once on release), the player goes through the
-## controller/state as before.
-func _set_blend_value(option_id: String, value: float) -> void:
-	if _npc_target != null:
-		_npc_working[option_id] = value
-		_npc_dirty = true
-		_npc_target.apply_values(_npc_working)
-		return
-	var controller := _controller()
-	if controller != null:
-		controller.set_option(option_id, value)
-
-
-## A garment toggle write. Toggles are single actions, so the NPC path
-## journals immediately (no drag to wait for).
-func _set_blend_toggle(option_id: String, on: bool) -> void:
-	if _npc_target != null:
-		_npc_working[option_id] = on
-		_npc_target.apply_values(_npc_working)
-		NpcFigure.emit_figure_override(_npc_seed, _npc_working)
-		_npc_dirty = false
-		return
-	var controller := _controller()
-	if controller != null:
-		controller.set_option(option_id, on)
-
-
-## A garment toggle: plain visibility, on = worn. The authored look is fully
-## dressed, so the checkbox starts checked and the readout is the piece name.
-func _build_blend_toggle_row(group: Dictionary, toggle: Dictionary) -> HBoxContainer:
-	var option_id := String(toggle["id"])
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
-	row.add_child(_row_label("%s·%s" % [group["label"], toggle["label"]]))
-
-	var checkbox := CheckBox.new()
-	checkbox.button_pressed = bool(toggle["default"])
-	checkbox.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	row.add_child(checkbox)
-
-	checkbox.toggled.connect(func(on: bool) -> void:
-		_set_blend_toggle(option_id, on)
-	)
-	_blend_toggles[option_id] = {"checkbox": checkbox, "default": bool(toggle["default"])}
-	return row
-
-
 func _build_footer() -> HBoxContainer:
 	var footer := HBoxContainer.new()
 	footer.add_theme_constant_override("separation", 8)
@@ -405,13 +263,8 @@ func _build_footer() -> HBoxContainer:
 	random_button.text = "随机"
 	random_button.tooltip_text = "随机一套协调的穿搭（真实肤色与成套配色）与形体"
 	random_button.pressed.connect(func() -> void:
-		if _npc_target != null:
-			var rng := RandomNumberGenerator.new()
-			rng.randomize()
-			_npc_working = ModelBlendShapes.randomized_values(rng)
-			_npc_target.apply_values(_npc_working)
-			NpcFigure.emit_figure_override(_npc_seed, _npc_working)
-			_npc_dirty = false
+		if _blend_section.has_target():
+			_blend_section.randomize_npc_look()
 			_sync_controls()
 			return
 		var controller := _controller()
@@ -426,11 +279,8 @@ func _build_footer() -> HBoxContainer:
 	var default_button := Button.new()
 	default_button.text = "恢复默认"
 	default_button.pressed.connect(func() -> void:
-		if _npc_target != null:
-			_npc_working = ModelBlendShapes.default_values()
-			_npc_target.apply_values(_npc_working)
-			NpcFigure.emit_figure_override(_npc_seed, _npc_working)
-			_npc_dirty = false
+		if _blend_section.has_target():
+			_blend_section.reset_npc_look()
 			_sync_controls()
 			return
 		var controller := _controller()
@@ -457,6 +307,19 @@ func _row_label(text: String) -> Label:
 	label.custom_minimum_size = Vector2(LABEL_WIDTH, 0.0)
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	return label
+
+
+## Player-mode routes the blend section binds to at construction: writes go
+## through the controller (state + apply), sync reads the same state.
+func _set_player_value(option_id: String, value: Variant) -> void:
+	var controller := _controller()
+	if controller != null:
+		controller.set_option(option_id, value)
+
+
+func _player_values() -> Dictionary:
+	var controller := _controller()
+	return controller.current_state().values if controller != null else {}
 
 
 func _set_color(option_id: String, color: Color) -> void:
@@ -488,15 +351,4 @@ func _sync_controls() -> void:
 		var value := clampf(float(state.get(option_id, 0.0)), -1.0, 1.0)
 		slider.set_value_no_signal(value)
 		readout.text = "%+.0f%%" % (value * 100.0)
-	var blend_state := _blend_state()
-	for option_id: String in _blend_sliders:
-		var row: Dictionary = _blend_sliders[option_id]
-		var slider: HSlider = row["slider"]
-		var readout: Label = row["readout"]
-		var value := clampf(float(blend_state.get(option_id, row["default"])), 0.0, 1.0)
-		slider.set_value_no_signal(value)
-		readout.text = "%d%%" % roundi(value * 100.0)
-	for option_id: String in _blend_toggles:
-		var row: Dictionary = _blend_toggles[option_id]
-		var checkbox: CheckBox = row["checkbox"]
-		checkbox.set_pressed_no_signal(bool(blend_state.get(option_id, row["default"])))
+	_blend_section.sync()

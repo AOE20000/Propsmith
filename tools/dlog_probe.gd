@@ -40,9 +40,9 @@ func _ready() -> void:
 	var panel := CharacterPanel.new()
 	add_child(panel)
 	panel.open_for_npc(agent_a)
-	panel._set_blend_value("figure_medium", 0.5)
+	panel._blend_section.set_value("figure_medium", 0.5)
 	var lines_before := _journal_lines()
-	panel._flush_npc_edit()
+	panel._blend_section.flush()
 	print("[dlog] panel.flush: lines %d -> %d (expect +1)" % [
 		lines_before, _journal_lines()])
 	var all_m := ModelBlendShapes.shape_index(body_a.mesh as ArrayMesh, "All_M")

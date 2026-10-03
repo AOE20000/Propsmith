@@ -50,7 +50,7 @@ func _ready() -> void:
 		# built-in fallback body and call it the player model, which is exactly the
 		# mistake it exists to catch.
 		ModHost.load_all()
-		model = PlayerScene._instantiate_player_model()
+		model = FigureAttachments.resolve_player_model()
 	else:
 		var packed: PackedScene = load(override) as PackedScene
 		if packed == null:
@@ -71,9 +71,9 @@ func _ready() -> void:
 	# curated shapes get the shape-key component, and the locomotion library
 	# gets the walk-clip driver — or the shot would show a T-pose and dead
 	# sliders that the player never sees.
-	PlayerScene._attach_stance_if_unanimated(model)
-	PlayerScene._attach_blend_shapes(model)
-	PlayerScene._attach_locomotion(model)
+	FigureAttachments.attach_stance_if_unanimated(model)
+	FigureAttachments.attach_blend_shapes(model)
+	FigureAttachments.attach_locomotion(model)
 	# Wait for the import-time skeleton rest poses to settle into the tree, then
 	# frame and shoot. Framing before the first frame would measure a model that
 	# has not been placed yet.

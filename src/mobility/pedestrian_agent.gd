@@ -44,8 +44,10 @@ var _waypoint_index: int = 0
 var _wander_rng := RandomNumberGenerator.new()
 var _health: HealthComponent = null
 var _dead: bool = false
-var _figure: Node3D = null
-var _figure_editor: NpcFigureEditor = null
+## The dressed figure (null while on the capsule fallback).
+var figure: Node3D = null
+## The E-handle on this citizen; disabled on death.
+var figure_editor: NpcFigureEditor = null
 
 
 func _ready() -> void:
@@ -95,62 +97,13 @@ func configure_wander(origin: Vector3, seed: int) -> void:
 	_refresh_waypoints()
 
 
-## Swap the capsule for the shared base figure: same `.vrm` the player wears,
-## with this citizen's look drawn deterministically from its seed (shape-key
-## weights, bust, blush, which accessories stayed on — see
-## `ModelBlendShapes.randomized_values`). On-demand rendering (distance cull,
-## shadow discipline) comes from `NpcFigure`. Returns false when the model's
-## imported scene is unavailable — the caller keeps the capsule and nothing
-## else changes.
+## Swap the capsule for the shared base figure. The whole appearance half —
+## instantiation, component stack, seeded look, journaled overrides, on-demand
+## rendering, the edit handle — lives in `NpcFigure.dress_agent`; the agent
+## keeps only movement, simulation and health. Returns false when the figure
+## asset is unavailable — the caller keeps the capsule and nothing else changes.
 func apply_base_figure() -> bool:
-	if not ResourceLoader.exists(BASE_FIGURE_SCENE, "PackedScene"):
-		return false
-	var packed := load(BASE_FIGURE_SCENE) as PackedScene
-	if packed == null:
-		return false
-	var model := packed.instantiate() as Node3D
-	if model == null:
-		return false
-	model.name = "Figure"
-	# The figure faces +Z; the citizen walks toward its -Z target, so turn the
-	# model to match the movement code's facing assumption.
-	model.rotation_degrees.y = 180.0
-	add_child(model)
-	_figure = model
-	# The same attachment rules the player model goes through: no body clip →
-	# procedural stance; curated shapes → the parameter component; locomotion
-	# clips → a real stride instead of sliding.
-	PlayerScene._attach_stance_if_unanimated(model)
-	PlayerScene._attach_blend_shapes(model)
-	PlayerScene._attach_locomotion(model)
-	var parameters := ModelBlendShapes.find_on(model)
-	if parameters != null:
-		var rng := RandomNumberGenerator.new()
-		rng.seed = hash("figure|%d" % figure_seed)
-		parameters.apply_values(ModelBlendShapes.randomized_values(rng))
-		# A saved decision beats the seeded roll: if this citizen's look was
-		# edited (and journaled) in any earlier session, that override wins.
-		var override := NpcFigure.get_override(figure_seed)
-		if not override.is_empty():
-			parameters.apply_values(override)
-	NpcFigure.configure(model)
-	_attach_figure_editor()
-	var visual := get_node_or_null("Visual") as MeshInstance3D
-	if visual != null:
-		visual.visible = false
-	return true
-
-
-## The E-handle: looking at this citizen and pressing interact opens the
-## wardrobe panel aimed at this figure. Attached with the figure (a capsule
-## citizen has nothing to edit).
-func _attach_figure_editor() -> void:
-	if _figure_editor != null:
-		return
-	_figure_editor = NpcFigureEditor.new()
-	_figure_editor.agent = self
-	_figure_editor.position = Vector3(0.0, 1.2, 0.0)
-	add_child(_figure_editor)
+	return NpcFigure.dress_agent(self)
 
 
 func _physics_process(delta: float) -> void:
@@ -279,11 +232,11 @@ func _on_defeated(_killer: Node) -> void:
 	collision_layer = 0
 	collision_mask = 0
 	velocity = Vector3.ZERO
-	if _figure_editor != null:
-		_figure_editor.enabled = false
-	if _figure != null:
-		_figure.rotation_degrees = Vector3(90.0, _figure.rotation_degrees.y, 0.0)
-		_figure.position = Vector3(0.0, 0.3, 0.0)
+	if figure_editor != null:
+		figure_editor.enabled = false
+	if figure != null:
+		figure.rotation_degrees = Vector3(90.0, figure.rotation_degrees.y, 0.0)
+		figure.position = Vector3(0.0, 0.3, 0.0)
 	else:
 		var visual := get_node_or_null("Visual") as MeshInstance3D
 		if visual != null:

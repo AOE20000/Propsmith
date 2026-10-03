@@ -69,6 +69,51 @@ static func get_override(seed_key: int) -> Dictionary:
 	return _overrides.get(seed_key, {})
 
 
+## Dress a citizen with the shared base figure: instantiate, attach the
+## standard component stack, draw the seeded look, honour any journaled
+## override, configure on-demand rendering, and add the edit handle. This is
+## the whole appearance half of a citizen — `PedestrianAgent.apply_base_figure`
+## is a one-line shell around it. Returns false when the figure asset is
+## unavailable (the agent keeps its capsule and nothing else changes).
+static func dress_agent(agent) -> bool:
+	var scene_path: String = agent.BASE_FIGURE_SCENE
+	if not ResourceLoader.exists(scene_path, "PackedScene"):
+		return false
+	var packed := load(scene_path) as PackedScene
+	if packed == null:
+		return false
+	var model := packed.instantiate() as Node3D
+	if model == null:
+		return false
+	model.name = "Figure"
+	# The figure faces +Z; the citizen walks toward its -Z target, so turn the
+	# model to match the movement code's facing assumption.
+	model.rotation_degrees.y = 180.0
+	agent.add_child(model)
+	agent.figure = model
+	FigureAttachments.attach_all(model)
+	var parameters := ModelBlendShapes.find_on(model)
+	if parameters != null:
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash("figure|%d" % agent.figure_seed)
+		parameters.apply_values(ModelBlendShapes.randomized_values(rng))
+		# A saved decision beats the seeded roll: if this citizen's look was
+		# edited (and journaled) in any earlier session, that override wins.
+		var override := get_override(agent.figure_seed)
+		if not override.is_empty():
+			parameters.apply_values(override)
+	configure(model)
+	var editor := NpcFigureEditor.new()
+	editor.agent = agent
+	editor.position = Vector3(0.0, 1.2, 0.0)
+	agent.add_child(editor)
+	agent.figure_editor = editor
+	var visual := agent.get_node_or_null("Visual") as MeshInstance3D
+	if visual != null:
+		visual.visible = false
+	return true
+
+
 ## Register this module's decision applier once. The applier is deliberately
 ## store-first: replay may run before any citizen exists (the crowd is
 ## regenerated from seed after load), so the override lands in the static map

@@ -22,7 +22,7 @@ class_name ModelBlendShapes
 ## shape name — the clothes follow the figure with no mapping table.
 ##
 ## The component is attached to a model root only when the model actually has
-## these shapes (see `PlayerScene._attach_blend_shapes`); its presence is the
+## these shapes (see `FigureAttachments.attach_blend_shapes`); its presence is the
 ## UI's signal to show the shape-key section at all.
 
 ## Slider catalog, grouped for the panel. Every entry names its mesh and shape

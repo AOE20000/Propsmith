@@ -57,7 +57,7 @@ func replace_state(state: CharacterState) -> void:
 ## Re-drive the whole state into the model. Missing model → state is kept and
 ## applied by the next attach; missing meshes inside the model are skipped.
 ## Shape-key sliders ride the same state and the same call: the component on
-## the model (attached by `PlayerScene` when the model has the curated shapes)
+## the model (attached by `FigureAttachments.attach_all` when the model has the curated shapes)
 ## picks up its ids and ignores everything else.
 func apply_current() -> void:
 	CharacterAppearance.apply(_state, _model)
