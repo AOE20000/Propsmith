@@ -50,7 +50,7 @@ func _ready() -> void:
 	_run_section("scripted mod bridges", 7, _check_scripted_bridges)
 	_run_section("map sources and blueprints", 14, _check_map_sources_and_blueprints)
 	_run_section("map catalogue", 23, _check_map_catalog)
-	_run_section("camera and wardrobe wiring", 30, _check_camera_and_wardrobe)
+	_run_section("camera and wardrobe wiring", 31, _check_camera_and_wardrobe)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -1810,6 +1810,9 @@ func _check_camera_and_wardrobe() -> void:
 	add_child(target2)
 
 	_expect(rig2.invert_y, "vertical look must start inverted (a toggle, not a trap)")
+	var free_cam := Freecam.new()
+	_expect(free_cam.invert_y, "the free camera must share the inverted-look default")
+	free_cam.free()
 	rig2.set_first_person(true)
 	_expect(model.visible, "first person must keep the figure visible so you can see yourself")
 	_expect(

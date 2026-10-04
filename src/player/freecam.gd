@@ -28,7 +28,9 @@ class_name Freecam
 
 @export_group("Look")
 @export var mouse_sensitivity: float = 0.0026
-@export var invert_y: bool = false
+## Same default as the player rig: vertical look starts inverted (flight-style),
+## because two cameras that disagree on an axis is one surprise too many.
+@export var invert_y: bool = true
 ## Asymmetric on purpose: the original clamped to ±70°, which lets you look far
 ## enough down to place a camera but not far enough up to lose the horizon.
 @export var min_pitch_degrees: float = -85.0
@@ -38,6 +40,11 @@ var _active: bool = false
 var _velocity: Vector3 = Vector3.ZERO
 var _yaw: float = 0.0
 var _pitch: float = 0.0
+
+## Activation spawns this far behind the character along the view axis, lifted a
+## little — enough to see the figure you just left, never inside its hair.
+const SPAWN_BACKOFF: float = 3.0
+const SPAWN_RISE: float = 0.5
 
 
 func _ready() -> void:
@@ -124,9 +131,17 @@ func set_active(active: bool) -> void:
 		if player == null:
 			push_warning("Freecam: no player to borrow — spawn order problem?")
 			return
-		global_position = player.eye_position()
+		# Born behind the character, not inside the head: the figure stays visible
+		# in third person, so an eye-position start reads as a clipped first-person
+		# view full of hair — the model is right there around the lens. Backing off
+		# along the view axis starts as a normal over-the-shoulder frame instead.
+		# The freecam is noclip by design, so this retreat does not test collision.
+		var eye: Vector3 = player.eye_position()
 		_yaw = player.camera_rig.global_rotation.y if player.camera_rig != null else 0.0
 		_pitch = 0.0
+		global_position = eye \
+			+ Vector3(sin(_yaw), 0.0, cos(_yaw)) * SPAWN_BACKOFF \
+			+ Vector3.UP * SPAWN_RISE
 		_apply_look()
 		_velocity = Vector3.ZERO
 		_active = true
