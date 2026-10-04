@@ -74,6 +74,7 @@ pwsh -File tools\check_runtimes.ps1
 | `game:add_tool(id, 显示名, 回调表)` | 回调表：`on_primary` / `on_secondary` 等 | 新工具（回调式，进工具轮盘） |
 | `game:add_npc(id, 显示名, 工厂)` | 工厂返回 `CharacterBody3D` | 新 NPC（进生成菜单 NPC 区） |
 | `game:add_player_model(id, 显示名, 工厂)` | 工厂返回 `Node3D` | 替换默认玩家形象（按 id 序取第一个） |
+| `game:add_render_style(id, 显示名, 覆盖表)` | 覆盖表用 `DemoLook` 的预设键 | 新画风（进 `F2` 画风循环） |
 | `game:record_decision(kind, payload)` | 决定名与数据 | 把本 mod 的一个世界变更记入决策日志（持久化 + 联机广播） |
 | `game:register_decision_applier(kind, 处理函数)` | 处理函数收到 `payload` | 声明重放/远端同步时如何重建该变更 |
 
@@ -81,6 +82,11 @@ pwsh -File tools\check_runtimes.ps1
 
 关于决策日志的完整约定（payload 自足、applier 与实时路径同一代码）见
 [MODDING.md](MODDING.md) 的「决策日志」一章。
+
+**`add_render_style` 是一张表，不是一个工厂** —— 这是刻意的能力边界：脚本 mod 不带代码，
+给不了着色器，硬塞一个它用不了的缝只会让它写出必然失败的东西。要自带着色器的画风得用
+GDScript（`RenderStyle` 子类）；纯数据的画风（黄金时刻、阴天、黑白）脚本 mod 完全够用。
+两种形状的样板见 `mods/render_style_demo/`。
 
 ### 订阅
 

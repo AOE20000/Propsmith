@@ -51,6 +51,15 @@ $benignPatterns = @(
     # in captured output, and the prefix is enough: this self test performs no
     # other save-file operation.)
     "ERROR: SaveSystem: "
+    # The render-style section provokes three registration guards (a style with no
+    # overrides, a style with no display name, and a factory that returns the wrong
+    # type) and one switch refusal. Each is a `push_error`/`push_warning` fired by
+    # an assertion that *expects* it, so each is evidence the check ran. Matched on
+    # the ASCII prefix only, for the same mojibake reason as above.
+    "[mod:selftest_render] render style 'selftest_empty' has no overrides"
+    "[mod:selftest_render] render style 'selftest_nameless' needs a display name"
+    "[render] style 'selftest_broken' factory did not return a RenderStyle"
+    "[render] no render style 'no_such_style'"
 )
 
 

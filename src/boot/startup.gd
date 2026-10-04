@@ -149,6 +149,15 @@ func _register_core_services(failures: Array[String]) -> void:
 		var gun := ToolGun.new()
 		Services.register(&"tool_gun", gun)
 		add_child(gun)
+	# The render director is a session-level node because it must outlive a map
+	# reload: it re-applies the active style when the new world replaces the
+	# environment the old one carried. Registered before the world builds so a mod
+	# that picked a style during registration lands on the very first frame.
+	if not Services.has(&"render_style"):
+		var director := RenderDirector.new()
+		director.name = "RenderDirector"
+		Services.register(&"render_style", director)
+		add_child(director)
 	# The persistence node registers the sandbox section with the save system;
 	# bound explicitly so it talks to exactly the services registered above.
 	var persistence := SandboxPersistence.new()
@@ -341,7 +350,7 @@ func _finish(failures: Array[String], validate_only: bool) -> void:
 		return
 
 	print("[boot] world ready: map=%s mods=%d" % [GameState.map_id, ModHost.mods.size()])
-	Events.notify("城市已加载 — F1 调试 · F3 自由视角 · V 换装 · F5 保存 · F9 读取 · Esc 菜单", Events.NotifyLevel.SUCCESS)
+	Events.notify("城市已加载 — F1 调试 · F2 画风 · F3 自由视角 · V 换装 · F5 保存 · F9 读取 · Esc 菜单", Events.NotifyLevel.SUCCESS)
 
 
 func _count_nodes(node: Node) -> int:
@@ -388,3 +397,9 @@ func _report_world() -> void:
 	# Reported unconditionally, including the absent case: an integration that is
 	# only visible when it works is an integration nobody can debug.
 	print("[boot] scripting runtimes: %s" % ScriptingRuntimes.summary())
+
+	var director: RenderDirector = Services.get_as(&"render_style", &"RenderDirector") as RenderDirector
+	if director == null:
+		printerr("[boot] render_style service is not available")
+	else:
+		print("[boot] render style: %s" % director.describe())

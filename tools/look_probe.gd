@@ -6,10 +6,12 @@ extends Node
 ## the real game, hides every CanvasLayer, parks its own camera at a handful of
 ## vantage points, and saves each frame to `data/screenshots/look_*`.
 ##
-## It can also re-light the running world: a shot that names a `DemoLook` preset
-## drives `DemoLook.apply_to` before framing itself, which is exactly the call a
-## day/dusk switch will make — so the probe doubles as the proof that the switch
-## works without reloading the map.
+## It can also re-light the running world, and hand the frame to any registered
+## render style: a shot that names a `DemoLook` preset drives `DemoLook.apply_to`,
+## and one that names a style drives `RenderDirector.set_style` — the same call the
+## F2 key makes. So the probe doubles as the proof that the style switch works
+## without reloading the map, and as the only way to see what a screen-space pass
+## actually did: a headless test cannot look at a shader.
 ##
 ## Run with:
 ##   godot --path . res://tools/look_probe.tscn --resolution 1600x900 --quit-after 6000
@@ -63,6 +65,34 @@ var shots: Array[Dictionary] = [
 			"volumetric_fog_density": 0.02,
 			"volumetric_fog_anisotropy": 0.4,
 		},
+	},
+	{
+		# The render-style seam, photographed. The lawn vantage point is reused for
+		# the day shots so the difference is the style and nothing else.
+		"name": "look_style_toon_pond",
+		"eye": Vector3(0.0, 6.5, 42.0),
+		"target": Vector3(0.0, -0.5, 70.0),
+		"style": &"toon",
+	},
+	{
+		"name": "look_style_toon_lawn",
+		"eye": Vector3(-2.0, 3.4, 10.0),
+		"target": Vector3(-24.0, 1.2, -18.0),
+		"style": &"toon",
+	},
+	{
+		# Mod-registered, data-only: eight lines in `mods/render_style_demo`.
+		"name": "look_style_golden",
+		"eye": Vector3(0.0, 6.5, 42.0),
+		"target": Vector3(0.0, -0.5, 70.0),
+		"style": &"golden_hour",
+	},
+	{
+		# Mod-registered, with the mod's own shader.
+		"name": "look_style_noir",
+		"eye": Vector3(-58.0, 2.2, 66.0),
+		"target": Vector3(22.0, -0.6, 74.0),
+		"style": &"noir",
 	},
 ]
 
@@ -118,8 +148,12 @@ func _process(_delta: float) -> void:
 
 func _apply_shot() -> void:
 	var shot: Dictionary = shots[_index]
+	# Preset first, style second: a style retunes *over* the active preset, so the
+	# order here is the same order the game uses.
 	if shot.has("preset"):
 		_relight(StringName(shot["preset"]), shot.get("overrides", {}))
+	if shot.has("style"):
+		_switch_style(StringName(shot["style"]))
 	_camera.global_position = shot["eye"]
 	var target: Vector3 = shot["target"]
 	var up: Vector3 = Vector3.UP
@@ -147,6 +181,19 @@ func _relight(preset_name: StringName, overrides: Dictionary = {}) -> void:
 		print("[look] relit the world to '%s'%s" % [
 			preset_name, " with overrides" if not overrides.is_empty() else "",
 		])
+
+
+## Hand the frame to a registered render style — literally the call the switch key
+## makes, so a style that works here works in play.
+func _switch_style(style_id: StringName) -> void:
+	var director: RenderDirector = Services.get_as(&"render_style", &"RenderDirector") as RenderDirector
+	if director == null:
+		print("[look] no render style service to switch")
+		return
+	if director.set_style(style_id):
+		print("[look] render style -> %s" % director.current_id())
+	else:
+		print("[look] render style '%s' was refused" % style_id)
 
 
 ## Hide every CanvasLayer: a look frame with a crosshair and a hint banner in it

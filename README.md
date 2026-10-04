@@ -57,11 +57,14 @@ python tools\plateau\scan_cities.py --areas 渋谷区 --max-mb 800 --keep --work
 | `~` | 建造面板 |
 | `V` | 角色外观面板（玩家） |
 | `F3` / `F1` | 自由视角 / 调试信息 |
+| `F2` | 切换画风（写实 / 3渲2 / Mod 注册的风格） |
 | `F5` / `F9` | 快速保存 / 快速读取 |
 | `Esc` | 菜单 |
 
 载具：走近载具按 `E` 上车，`WASD` 驾驶，再按 `E` 下车。
 市民外观编辑：面对市民按 `E`，面板将切换为该市民的外观编辑模式。
+画风：`F2` 在注册的画风间循环；Mod 可用 `add_render_style` /
+`add_render_style_preset` 注册自己的画风（见 `docs/MODDING.md`）。
 
 ---
 
@@ -104,6 +107,12 @@ src/
     interactable.gd / interaction_probe.gd   可交互物契约与朝向探测
   net/
     enet_transport.gd      ENet 联机传输模块（决定广播/追赶/位置中继）
+  render/                  画风（渲染风格）注册点与切换
+    render_style.gd        画风契约：apply/release、环境重调、屏幕空间通道
+    render_style_catalog.gd  画风目录（内置 + Mod 注册）
+    render_director.gd     当前画风与切换（服务 render_style）
+    screen_pass.gd         跟随当前相机的全屏 pass 四边形
+    styles/                内置画风：realistic（写实）/ toon（3渲2）/ preset（纯数据）
   mobility/                标签驱动人流（NPC 的"一天"）——地图无关
     pedestrian_agent.gd    行人 agent：沿日程行走；外观经由共享基准模型
     npc_figure.gd          市民外观全套（穿衣/参数覆盖/编辑入口/按需渲染）
@@ -122,6 +131,7 @@ addons/mod_loader/         GodotModding/godot-mod-loader（zip 式 Mod 加载器
 addons/Configura/          Configura 角色创建框架
 addons/vrm/ + addons/Godot-MToon-Shader/   V-Sekai godot-vrm（VRM 1.0 导入）
 assets/shaders/water.gdshader   水面着色器（波纹位移 + 菲涅尔天空反射 + 按水深着色）
+assets/shaders/toon_post.gdshader / painted_sky.gdshader   3渲2 分色阶墨线与手绘天空
 tools/                     测试四件套、地图工具、模型导出与探针
 ```
 
@@ -139,6 +149,8 @@ tools/                     测试四件套、地图工具、模型导出与探�
 | **玩家与市民共用同一基准模型** | 一只市民 = 一张种子确定性参数表；形态键权重与服装可见性是每实例状态，不复制模型资源。 |
 | **按需渲染三道闸** | 渲染器侧距离剔除（55 m）、阴影纪律（仅躯干与头部投影）、站姿骨骼写入距离门（45 m）——远处市民近乎零成本。 |
 | **观感基线是模块而非基类** | 地图源保留各自主导气氛（自选 `DemoLook` 预设），但曝光、色调映射、雾与辉光只调一处——两张地图的截图才像同一个游戏，而不是两个工程。 |
+| **画风是「对地图气氛的可逆覆盖」** | 画风不自己拥有一份环境，而是把 `DemoLook` 的预设重调一遍再叠加屏幕空间通道。于是切换画风 = 重新推导，没有状态需要保存、也没有东西会忘记还原——包括「切回写实」这条路径。 |
+| **屏幕空间后处理走 3D 四边形而非 CanvasLayer** | `canvas_item` 着色器读不到深度缓冲（`hint_depth_texture` 不支持），墨线就没有依据；四边形由 `ScreenPass` 每帧跟在当前相机前面，所以换相机（自由视角/载具）也不会掉。 |
 | **座位就是一个 `Interactable`** | 上下车复用既有探测/提示/按键链路。 |
 | **两套 Mod 加载器按清单文件名分工** | `ModHost` 认 `mod.json`，godot-mod-loader 认 `manifest.json`，互不扫描对方目录。 |
 

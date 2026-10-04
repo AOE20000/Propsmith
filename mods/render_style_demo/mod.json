@@ -1,0 +1,9 @@
+{
+  "id": "render_style_demo",
+  "name": "画风演示",
+  "version": "1.0.0",
+  "author": "example",
+  "enabled": true,
+  "dependencies": [],
+  "description": "渲染风格注册点的示例：黄金时刻（纯数据覆盖，八行）与黑白电影（自带屏幕空间 shader 的 RenderStyle 子类）。说明「渲染也可被 mod 改」这条缝的两种形状，以及它们各自的能力边界。"
+}

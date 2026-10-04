@@ -19,6 +19,9 @@ class_name DemoLook
 
 const DEFAULT_PRESET: StringName = &"day"
 
+## Node metadata key holding the active preset on the `WorldEnvironment`.
+const PRESET_META: StringName = &"demo_look_preset"
+
 ## How many glow mip levels `Environment` exposes. `set_glow_level` is 0-based
 ## while the inspector labels the same seven levels 1..7, so the loop bound and
 ## the preset table have to agree on which way round that is — getting it wrong
@@ -53,8 +56,22 @@ static func apply(world_root: Node3D, preset_name: StringName = DEFAULT_PRESET, 
 	world_root.add_child(sun)
 
 	var resolved: StringName = preset_name if has_preset(preset_name) else DEFAULT_PRESET
+	# The active preset is recorded on the node, not just used and forgotten: a
+	# render style retunes the environment later, and "later" is a different
+	# module that must be able to ask which look it is deviating from. Carrying it
+	# in the world means the answer travels with the world across a map reload.
+	world_environment.set_meta(PRESET_META, String(resolved))
 	apply_to(environment, sun, resolved, overrides)
 	return {"environment": world_environment, "sun": sun, "preset": resolved}
+
+
+## The preset a `WorldEnvironment` was built with, or `DEFAULT_PRESET` when it was
+## built by something other than `apply()` — a mod map source, a hand-made scene.
+## Degrading to the default beats refusing to restyle.
+static func preset_of(world_environment: WorldEnvironment) -> StringName:
+	if world_environment == null:
+		return DEFAULT_PRESET
+	return StringName(String(world_environment.get_meta(PRESET_META, String(DEFAULT_PRESET))))
 
 
 ## Retune an existing environment/sun pair. This is the whole implementation of
@@ -137,10 +154,12 @@ static func table() -> Dictionary:
 			"ground_energy": 0.9,
 			"ambient_sky_contribution": 1.0,
 			"ambient_energy": 0.5,
+			"reflected_light_source": &"bg",
 			"sun_angle": Vector3(-42.0, -38.0, 0.0),
 			"sun_color": Color(1.0, 0.95, 0.86),
 			"sun_energy": 1.4,
 			"sun_angular_distance": 0.5,
+			"sun_in_sky": true,
 			"shadow_enabled": true,
 			"shadow_bias": 0.06,
 			"shadow_normal_bias": 1.5,
@@ -195,10 +214,12 @@ static func table() -> Dictionary:
 			"ground_energy": 0.7,
 			"ambient_sky_contribution": 1.0,
 			"ambient_energy": 0.45,
+			"reflected_light_source": &"bg",
 			"sun_angle": Vector3(-9.0, -56.0, 0.0),
 			"sun_color": Color(1.0, 0.70, 0.45),
 			"sun_energy": 1.55,
 			"sun_angular_distance": 0.9,
+			"sun_in_sky": true,
 			"shadow_enabled": true,
 			"shadow_bias": 0.06,
 			"shadow_normal_bias": 1.5,
@@ -253,10 +274,12 @@ static func table() -> Dictionary:
 			"ground_energy": 1.0,
 			"ambient_sky_contribution": 1.0,
 			"ambient_energy": 0.7,
+			"reflected_light_source": &"bg",
 			"sun_angle": Vector3(-52.0, -28.0, 0.0),
 			"sun_color": Color(1.0, 0.97, 0.92),
 			"sun_energy": 1.15,
 			"sun_angular_distance": 0.4,
+			"sun_in_sky": true,
 			"shadow_enabled": true,
 			"shadow_bias": 0.08,
 			"shadow_normal_bias": 2.0,
@@ -339,6 +362,11 @@ static func _apply_environment(environment: Environment, data: Dictionary) -> vo
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	environment.ambient_light_sky_contribution = data["ambient_sky_contribution"]
 	environment.ambient_light_energy = data["ambient_energy"]
+	# Where specular light comes from. `bg` is the engine default; `disabled` is
+	# what a flat, cel-shaded look wants — ambient specular off a gradient sky is a
+	# broad soft highlight that varies across a flat surface, which reads as a
+	# smudge on a wall rather than as light.
+	environment.reflected_light_source = _reflection_source_for(StringName(data["reflected_light_source"]))
 
 	# One exposure curve for the whole game: the presets differ in colour and
 	# light, never in how the frame is developed, which is what keeps a day shot
@@ -403,13 +431,19 @@ static func _apply_sun(sun: DirectionalLight3D, data: Dictionary) -> void:
 	# as sharp up close without shadows crawling under the player's feet.
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
 	# The sun also lights the sky, so the procedural sky's sun disc ends up where
-	# the shadows say the sun is.
-	sun.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_AND_SKY
-	# A sun with an apparent size is a softer sun. Left at zero when a preset asks
-	# for it, because a non-zero angular distance costs a shadow filter tap.
-	var angular: float = data.get("sun_angular_distance", 0.0)
-	if angular > 0.0:
-		sun.light_angular_distance = angular
+	# the shadows say the sun is. A style that wants a flat gradient sky turns the
+	# disc off instead — under a linear tone curve the disc is a blown-out blob,
+	# and a painted sky has no business containing a photograph of a sun.
+	sun.sky_mode = (
+		DirectionalLight3D.SKY_MODE_LIGHT_AND_SKY
+		if bool(data.get("sun_in_sky", true))
+		else DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+	)
+	# Written unconditionally, including the zero a stylised preset asks for. An
+	# angular distance is a shadow-filter cost, and a style that wants crisp cel
+	# shadows has to be able to switch it *off* — which a "only when positive"
+	# guard would silently refuse to do.
+	sun.light_angular_distance = data.get("sun_angular_distance", 0.0)
 
 
 static func _tonemap_for(key: StringName) -> Environment.ToneMapper:
@@ -424,3 +458,15 @@ static func _tonemap_for(key: StringName) -> Environment.ToneMapper:
 			return Environment.TONE_MAPPER_ACES
 		_:
 			return Environment.TONE_MAPPER_ACES
+
+
+## Resolved from a string so the preset table stays readable, `&"bg"` being the
+## engine default and therefore what the presets that predate this key ask for.
+static func _reflection_source_for(key: StringName) -> Environment.ReflectionSource:
+	match key:
+		&"disabled":
+			return Environment.REFLECTION_SOURCE_DISABLED
+		&"sky":
+			return Environment.REFLECTION_SOURCE_SKY
+		_:
+			return Environment.REFLECTION_SOURCE_BG

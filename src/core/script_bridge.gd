@@ -183,6 +183,22 @@ func add_player_model(model_id: String, display_name: String, factory: Callable)
 	return _context.add_player_model(StringName(model_id), display_name, factory)
 
 
+## Restyle how the frame is drawn, from a scripted mod: `overrides` is a table of
+## `DemoLook` keys (sky/fog/glow/tonemap/saturation…) applied over whatever look
+## the map authored. The style then appears in the style switch next to the
+## built-in ones.
+##
+## The data-only shape on purpose. A scripted mod ships no code, so it cannot hand
+## over a shader, and pretending otherwise would give it a seam it can only fail
+## to use. A style that needs a screen-space pass is a GDScript `RenderStyle`
+## subclass — and that is an honest capability boundary, not a limitation to
+## paper over.
+func add_render_style(style_id: String, display_name: String, overrides: Dictionary) -> bool:
+	if _context == null:
+		return false
+	return _context.add_render_style_preset(StringName(style_id), display_name, overrides)
+
+
 ## Wrap a Mesh into a simple rigid body: box collider fitted to the AABB with a
 ## sensible default mass. The lowest-friction path for a scripted mod to get a
 ## prop into the spawn menu without hand-rolling physics bodies.

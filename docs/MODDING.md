@@ -45,14 +45,16 @@ res://mods/my_mod/
   并把冲突记到**后注册的那个 mod** 的失败说明里，`Esc` 菜单的 mod 列表能直接看到。
   没有这条检查时，后来者的内容会静默消失，作者无从下手。
 
-工厂类扩展点（poi / prop / combat / terrain / vehicle / **tool** / **npc**）在注册时
-就要求传入**有效的 `Callable`**（或 `SandboxTool` 实例），物品要求 `display_name`——
-不合格的注册当场被拒，而不是等到世界生成时在一个跟错误原因毫无关系的地方炸掉。
+工厂类扩展点（poi / prop / combat / terrain / vehicle / **tool** / **npc** /
+**render style**）在注册时就要求传入**有效的 `Callable`**（或 `SandboxTool` 实例），
+物品要求 `display_name`——不合格的注册当场被拒，而不是等到世界生成时在一个跟错误原因
+毫无关系的地方炸掉。
 
 > **扩展点现状（P3 起）**：`add_prop_factory`（**真消费者**：生成菜单实例化它，
 > 工厂返回 RigidBody3D）、`add_npc_factory`（**真消费者**：生成菜单的 NPC 区，
 > 工厂返回 CharacterBody3D）、`add_tool_callbacks` / `add_tool`（**真消费者**：
-> 工具枪轮盘与建造面板）、`add_player_model`（**真消费者**：替换默认玩家形象）。
+> 工具枪轮盘与建造面板）、`add_player_model`（**真消费者**：替换默认玩家形象）、
+> `add_render_style` / `add_render_style_preset`（**真消费者**：画风切换，`F2`）。
 > `add_poi_factory` 与 `add_terrain_modifier` 仍是预留（旧地形系统的消费者已移除），
 > `add_item_definition` 也仍预留（无库存系统）——注册都安全，只是无可见效果。
 > 在地图上放内容也可以用 `_on_world_populate` 直接注入——见 `mods/lighthouse/`。
@@ -206,6 +208,78 @@ func deserialize(data: Dictionary) -> void:
 
 数据存在 `sections["<你的 mod id>"]` 下，核心存档格式无需改动。返回空字典表示
 本次不写任何数据。
+
+### 11. 换一种画风（真消费者：画风切换，`F2`）
+
+渲染也是可注册的玩法面。画风（render style）决定**画面怎么被画出来**——环境、屏幕
+空间通道、渲染设置——但**绝不碰世界状态**。游戏自带 `写实` 与 `3渲2` 两种，`F2` 循环
+切换；你注册的画风会和它们并列出现在同一个循环里。
+
+**最低成本的一种：只给一张覆盖表。** 键就是 `DemoLook` 的预设键（`src/world/demo_look.gd`
+里的预设表就是全部可用键）。
+
+```gdscript
+func _on_register() -> void:
+    display_name = "我的画风"
+    context.add_render_style_preset(&"golden_hour", "黄金时刻", {
+        "sun_angle": Vector3(-16.0, -62.0, 0.0),
+        "sun_color": Color(1.0, 0.80, 0.52),
+        "sky_horizon": Color(0.98, 0.72, 0.42),
+        "fog_color": Color(0.92, 0.70, 0.50),
+        "saturation": 1.18,
+    })
+```
+
+三条约定，理解它们就不会写出"切换后画面回不去"的画风：
+
+1. **画风是"覆盖"，不是"拥有"。** 它在地图自己写好的气氛之上重调一遍
+   （`DemoLook.apply_to`：预设 + 覆盖，一次调用写回全部键）。所以覆盖表里**没写的键
+   自动回到地图预设的值**——这就是"切回去"能成立的原因，不需要你保存/还原任何东西。
+2. **不要假设是哪张地图、哪个预设。** 想知道当前预设用 `DemoLook.preset_of(env)`；
+   想知道这张地图的调色板用 `DemoLook.preset(...)`（`3渲2` 的手绘天空就是这么拿到
+   地图自己那两种天空色的——风格换的是**处理**，不是**调色板**）。
+3. **`apply()` 与 `release()` 成对。** `apply()` 返回 false 表示这次应用失败，调度器
+   会退回 `写实`；`release()` 必须能把 `apply()` 加进场景的东西收干净。
+
+**要自带着色器/通道时**，写一个 `RenderStyle` 子类：
+
+```gdscript
+class NoirStyle extends RenderStyle:
+    const POST_SHADER: Shader = preload("res://mods/我的mod/noir.gdshader")
+
+    func style_id() -> StringName: return &"noir"
+    func display_name() -> String: return "黑白电影"
+
+    func apply(context: Dictionary) -> bool:
+        if not retune(context, {"saturation": 0.0, "glow_enabled": false}):
+            return false
+        return attach_screen_pass(context, POST_SHADER, "NoirPost") != null
+
+    func release() -> void:
+        release_screen_pass()
+```
+
+> ⚠️ **通道着色器必须是 `shader_type spatial`。** 全屏通道画在一个由 `ScreenPass` 每帧
+> 挪到**当前相机**前面的四边形上，不画在 `CanvasLayer` 上——因为 `canvas_item` 着色器
+> 读不到深度缓冲（`hint_depth_texture` 不支持），而墨线要靠深度。
+> 也因此：**换相机（自由视角、载具座位）通道不会掉**。
+> 需要"一个屏幕像素"的 UV 时声明 `uniform vec2 screen_pixel_size;`，由 `ScreenPass`
+> 每帧推给你（`SCREEN_PIXEL_SIZE` 是 canvas 着色器的内建，spatial 里没有）。
+
+**能力边界（诚实说明）**：
+
+- 3D 材质能读到的 `hint_screen_texture` 是**不透明阶段**的拷贝——透明物体之间互相看不见。
+  所以"整帧替换"式的后处理会把水、以及任何透明面**抹掉**；正确做法是**叠加**（像内置的
+  `3渲2` 那样：输出覆盖色 + alpha，让场景保留自己的颜色）。真要在最终合成之后处理，
+  需要 Godot 4.3+ 的 `CompositorEffect`，那是另一条路。
+- **屏幕空间分色阶天生会有"等高线"**：一大片平坦表面上，只要它的明度刚好落在某个色阶
+  边界附近，那条边界就会被画在表面上——形状取决于该表面明度的微弱漂移（内置 `3渲2`
+  的一堵墙就出现过两道弧，用调试色块定位确认过是墙自身的渐变）。抖动只能柔化边界、
+  去不掉它（平均值仍然跳变）。**真正的解法是按材质给光照分色阶**（`MToon` 对角色就是
+  这么做的，见 `addons/Godot-MToon-Shader`），让色阶边界落在明暗交界、褶皱这些有意义的
+  位置，而不是落在算法算到的地方——那是这个画风的下一步，屏幕空间通道做不到。
+
+可直接抄的例子见 `mods/render_style_demo/`（`黄金时刻` 走纯数据，`黑白电影` 自带着色器）。
 
 ---
 

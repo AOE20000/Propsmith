@@ -54,6 +54,12 @@ signal game_loaded(slot: String)
 signal notification_posted(text: String, level: int)
 signal mods_loaded(mod_ids: PackedStringArray)
 
+## Presentation. Broadcast-only: a session that never switches style never emits
+## this, and a menu that wants a style row subscribes instead of polling.
+## `render_style_changed` fires on a real switch, never on the silent re-apply a
+## map reload performs.
+signal render_style_changed(style_id: StringName, display_name: String)
+
 ## Sandbox props. Broadcast-only: sessions without the sandbox module simply
 ## never emit these.
 signal prop_spawned(prop: Node, prop_id: StringName)

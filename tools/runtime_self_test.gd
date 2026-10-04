@@ -50,6 +50,7 @@ func _ready() -> void:
 	_run_section("scripted mod bridges", 7, _check_scripted_bridges)
 	_run_section("map sources and blueprints", 13, _check_map_sources_and_blueprints)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
+	_run_section("render styles", 32, _check_render_styles)
 	_run_section("boot summary", 4, _check_summary)
 
 	print("")
@@ -1305,6 +1306,133 @@ func constraint_root_for(_store: ConstraintStore) -> Node3D:
 	var root := Node3D.new()
 	add_child(root)
 	return root
+
+
+## The render-style seam.
+##
+## Two things are being checked, and the second is the one the design exists for.
+## The catalogue has to merge built-ins with mod registrations under the same rules
+## every other kind uses, and a style's apply/release pair has to be a **true round
+## trip** — a style that leaves the map's own look altered after you switch away
+## is precisely the failure that "styles retune rather than own the environment"
+## was chosen to make impossible, so it is worth an assertion rather than a hope.
+func _check_render_styles() -> void:
+	# --- the catalogue ---
+	_expect(RenderStyleCatalog.has(&"realistic"), "写实 must be a built-in style")
+	_expect(RenderStyleCatalog.has(&"toon"), "3渲2 must be a built-in style")
+	_expect(not RenderStyleCatalog.has(&"no_such_style"), "an unknown style id must not resolve")
+	_expect(RenderStyleCatalog.make(&"no_such_style") == null, "an unknown style id must not instantiate")
+	_expect(RenderStyleCatalog.ids().size() >= 2, "the catalogue must list the built-ins")
+
+	# --- a mod registering styles ---
+	var context := ModContext.new(&"selftest_render")
+	_expect(
+		context.add_render_style_preset(&"selftest_style", "自测画风", {"saturation": 0.2}),
+		"a data-only style registration must be accepted"
+	)
+	ModHost.contexts[context.get_mod_id()] = context
+	_expect(RenderStyleCatalog.has(&"selftest_style"), "a registered style must appear in the catalogue")
+	var made: RenderStyle = RenderStyleCatalog.make(&"selftest_style")
+	_expect(
+		made != null and made.style_id() == &"selftest_style",
+		"a registered style must instantiate under its own id"
+	)
+	_expect(
+		not context.add_render_style_preset(&"selftest_style", "重复", {"saturation": 0.5}),
+		"a duplicate style id inside one mod must be refused"
+	)
+	_expect(
+		not context.add_render_style_preset(&"selftest_empty", "空画风", {}),
+		"a style with no overrides must be refused: it would be indistinguishable from 写实"
+	)
+	_expect(
+		not context.add_render_style(&"selftest_nameless", "", func() -> RenderStyle: return null),
+		"a style with no display name must be refused"
+	)
+	_expect(
+		context.add_render_style(&"selftest_broken", "坏工厂", func() -> Variant: return 5),
+		"a style registers even with a factory that will misbehave: the factory is only run on apply"
+	)
+	_expect(
+		RenderStyleCatalog.make(&"selftest_broken") == null,
+		"a factory that returns the wrong type must be refused at instantiation, not later"
+	)
+	# Across mods the first registration wins, exactly as for every other kind.
+	var second := ModContext.new(&"selftest_render_2")
+	second.add_render_style_preset(&"selftest_style", "抢占者", {"saturation": 0.7})
+	ModHost.contexts[second.get_mod_id()] = second
+	_expect(
+		RenderStyleCatalog.display_name_of(&"selftest_style") == "自测画风",
+		"the first registration for a style id must win across mods"
+	)
+	ModHost.contexts.erase(second.get_mod_id())
+	context.release_all()
+	_expect(not RenderStyleCatalog.has(&"selftest_style"), "release_all must remove a mod's styles")
+	ModHost.contexts.erase(context.get_mod_id())
+
+	# --- the apply/release round trip ---
+	var world := Node3D.new()
+	add_child(world)
+	DemoLook.apply(world, &"day")
+	var director := RenderDirector.new()
+	add_child(director)
+	# The director listens for the world rather than being handed one, so this is
+	# the same path boot takes.
+	Events.world_ready.emit(world)
+
+	var world_environment := world.get_node_or_null("Environment") as WorldEnvironment
+	_expect(world_environment != null, "the probe world must carry an environment")
+	if world_environment == null:
+		return
+	var environment: Environment = world_environment.environment
+
+	_expect(director.set_style(&"realistic"), "写实 must apply to a live world")
+	_expect(not director.set_style(&"no_such_style"), "an unknown style must be refused")
+	_expect(director.current_id() == &"realistic", "a refused switch must keep the current style")
+
+	var fog_was: bool = environment.fog_enabled
+	var tonemap_was: int = environment.tonemap_mode
+	var saturation_was: float = environment.adjustment_saturation
+
+	_expect(director.set_style(&"toon"), "3渲2 must apply to a live world")
+	_expect(not environment.fog_enabled, "3渲2 must switch fog off")
+	_expect(
+		environment.tonemap_mode == Environment.TONE_MAPPER_LINEAR,
+		"3渲2 must use a flat tone curve"
+	)
+	_expect(
+		environment.adjustment_saturation > saturation_was,
+		"3渲2 must be more saturated than the map's own look"
+	)
+	var pass_node := director.get_node_or_null("ToonPost") as ScreenPass
+	_expect(pass_node != null, "3渲2 must install its screen pass")
+	_expect(
+		pass_node != null and pass_node.material_override is ShaderMaterial,
+		"the screen pass must carry the style's shader"
+	)
+	_expect(
+		pass_node != null and pass_node.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+		"a full-screen pass must not cast a shadow across the whole map"
+	)
+
+	_expect(director.set_style(&"realistic"), "写实 must re-apply over 3渲2")
+	_expect(environment.fog_enabled == fog_was, "switching away must restore the map's fog")
+	_expect(
+		environment.tonemap_mode == tonemap_was,
+		"switching away must restore the map's tone curve"
+	)
+	# `queue_free` is deferred, so "gone" means queued: asserting `== null` here
+	# would fail for a correct release and only pass for an immediate `free()`.
+	var stale := director.get_node_or_null("ToonPost")
+	_expect(
+		stale != null and stale.is_queued_for_deletion(),
+		"the previous style's pass must be released"
+	)
+	_expect(director.cycle(1), "cycling must move to another style")
+	_expect(director.current_id() == &"toon", "cycling from 写实 must land on 3渲2")
+
+	director.queue_free()
+	world.queue_free()
 
 
 ## The one line the boot report prints has to stay parseable and name both runtimes,

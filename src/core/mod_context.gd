@@ -30,6 +30,7 @@ var vehicle_factories: Dictionary = {}
 var tools: Dictionary = {}
 var npc_factories: Dictionary = {}
 var player_models: Dictionary = {}
+var render_styles: Dictionary = {}
 
 
 func _init(owner_mod_id: StringName) -> void:
@@ -195,6 +196,47 @@ func add_player_model(model_id: StringName, display_name: String, factory: Calla
 	}, "player model", "factory")
 
 
+## Register a render style — a way of drawing the frame, offered next to the
+## built-in 写实 and 3渲2 in the style switch.
+##
+## `factory` is a Callable returning a `RenderStyle`. The style is instantiated
+## per application, so a style object must not hold state across switches beyond
+## what its own `release()` clears.
+##
+## A mod's style is applied *over* the map's authored look, so it must not assume
+## a particular map, a particular preset, or that it is the first style applied:
+## derive what you draw from the preset the world carries (`DemoLook.preset_of`)
+## rather than from constants.
+func add_render_style(style_id: StringName, display_name: String, factory: Callable) -> bool:
+	if display_name.strip_edges().is_empty():
+		push_error("[mod:%s] render style '%s' needs a display name: it is what the style switch shows" % [_mod_id, style_id])
+		return false
+	return _register_delivering(render_styles, style_id, {
+		"id": style_id,
+		"display_name": display_name,
+		"category": "mod",
+		"factory": factory,
+		"owner": _mod_id,
+	}, "render style", "factory")
+
+
+## The data-only twin of `add_render_style`: the mod hands over a table of
+## `DemoLook` overrides and gets a style back. This is the shape most mods want —
+## "黄金时刻", "阴天", "黑白" are colour-and-light opinions, not shaders — and it is
+## the only shape a scripted (Lua / sandboxed) mod can use, since it ships no code.
+##
+## A pass that needs a shader still takes the `add_render_style` route with a
+## `RenderStyle` subclass; the cheap case being genuinely cheap is the point.
+func add_render_style_preset(style_id: StringName, display_name: String, overrides: Dictionary) -> bool:
+	if overrides.is_empty():
+		push_error("[mod:%s] render style '%s' has no overrides: it would look exactly like 写实" % [_mod_id, style_id])
+		return false
+	var definition: Dictionary = overrides
+	return add_render_style(style_id, display_name, func() -> RenderStyle:
+		return PresetRenderStyle.new(style_id, display_name, definition)
+	)
+
+
 ## Resolve another mod's registered landmark without knowing which mod owns it.
 ##
 ## Currently unused by the core: it exists so a mod can build on another mod's content
@@ -223,6 +265,7 @@ func _registry_by_name(registry_name: String) -> Dictionary:
 		"tool": return tools
 		"npc": return npc_factories
 		"player model": return player_models
+		"render style": return render_styles
 	return {}
 
 
