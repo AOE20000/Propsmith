@@ -76,8 +76,9 @@ func _ready() -> void:
 			break
 	print("[walk-probe] hips_bone=%d hips_track=%d walk_len=%.3f" % [
 		_bone, _hips_track, walk.length])
-	# Hold "move forward" for the whole run.
+	# Hold "move forward" and sprint for the whole run.
 	Input.action_press(&"move_forward")
+	Input.action_press(&"sprint")
 	print("[walk-probe] bone=%s touched0=%s touched_n=%d thr=%.2f" % [
 		_skel.get_bone_name(_bone),
 		touched[0] if touched.size() > 0 else "<none>",
@@ -86,20 +87,15 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	_frames += 1
+	var model := _player.get_node_or_null("PlayerModel") as Node3D
+	var model_offset := model.global_position - _player.global_position
 	var rot := _skel.get_bone_pose_rotation(_bone)
 	var pose_step: float = rot.angle_to(_prev_rot)
 	_prev_rot = rot
-	# Per-frame for the first 90 frames: the stutter, if it is a frame-level
-	# flip between two poses, shows as alternating zero/non-zero steps.
-	if _frames <= 90:
-		var line := "[walk-probe] f%03d speed=%.2f t=%.4f step=%.6f" % [
-			_frames, _clips._speed, _clips._time, pose_step]
-		if _hips_track >= 0:
-			var walk: Animation = (_clips._library as AnimationLibrary).get_animation(&"walk")
-			var sampled: Quaternion = walk.rotation_track_interpolate(_hips_track, _clips._time)
-			line += " | interp=%s" % sampled
-			line += " | bone=%s" % rot
-		print(line)
-	if _frames >= 90:
+	if _frames <= 120:
+		print("[walk-probe] f%03d pv=%.2f moff=%s ppos=%s step=%.4f" % [
+			_frames, _player.velocity.length(),
+			model_offset, _player.global_position, pose_step])
+	if _frames >= 120:
 		Input.action_release(&"move_forward")
 		get_tree().quit(0)

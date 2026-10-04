@@ -92,6 +92,22 @@ func _retarget(source: Animation, skeleton: Skeleton3D, skeleton_name: String,
 			_:
 				continue
 		var key_count := source.track_get_key_count(index)
+		# Diagnostic: the hips' horizontal travel in the source clip. If the
+		# author animated real forward motion (root-motion style), an in-place
+		# player rig must not inherit it — see the re-anchor below.
+		if bone == "Hips" and track_type == Animation.TYPE_POSITION_3D:
+			var min_x := INF
+			var max_x := -INF
+			var min_z := INF
+			var max_z := -INF
+			for key: int in key_count:
+				var v: Vector3 = source.track_get_key_value(index, key)
+				min_x = minf(min_x, v.x)
+				max_x = maxf(max_x, v.x)
+				min_z = minf(min_z, v.z)
+				max_z = maxf(max_z, v.z)
+			print("[loco]   %s Hips x/z travel: x %.3f..%.3f, z %.3f..%.3f" % [
+				skeleton_name, min_x, max_x, min_z, max_z])
 		var track_index := clip.add_track(track_type)
 		clip.track_set_path(track_index, new_path)
 		for key: int in key_count:
@@ -105,7 +121,15 @@ func _retarget(source: Animation, skeleton: Skeleton3D, skeleton_name: String,
 					# every clip played its first two keys and then froze.
 					var value: Vector3 = source.track_get_key_value(index, key)
 					if bone == "Hips":
-						# Re-anchor the authored bob to our rest height.
+						# In-place locomotion: the authored clip can carry real
+						# forward motion in the hips' x/z (root-motion style).
+						# Played on an in-game character it would shove the
+						# visual model ahead of its physics body and snap back
+						# on every loop — the sprint "200% then flash back"
+						# report. Keep only the authored bob (y), re-anchored
+						# to our rest height; x/z stay at rest.
+						value.x = hips_rest.x
+						value.z = hips_rest.z
 						value.y = hips_rest.y + (value.y - author_min)
 					clip.position_track_insert_key(track_index, time, value)
 				Animation.TYPE_ROTATION_3D:
