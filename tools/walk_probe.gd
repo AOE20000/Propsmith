@@ -12,6 +12,7 @@ var _frames: int = 0
 var _prev_rot: Quaternion
 var _bone: int = -1
 var _skel: Skeleton3D
+var _hips_track: int = -1
 
 
 func _ready() -> void:
@@ -65,6 +66,16 @@ func _ready() -> void:
 	if _bone < 0:
 		_bone = 0
 	_prev_rot = _skel.get_bone_pose_rotation(_bone)
+	# Find the walk clip's Hips *rotation* track, to compare the sampler's raw
+	# interpolation against what actually landed on the bone.
+	var walk: Animation = (_clips._library as AnimationLibrary).get_animation(&"walk")
+	for track: int in walk.get_track_count():
+		var path := String(walk.track_get_path(track))
+		if path.contains("Hips") and walk.track_get_type(track) == Animation.TYPE_ROTATION_3D:
+			_hips_track = track
+			break
+	print("[walk-probe] hips_bone=%d hips_track=%d walk_len=%.3f" % [
+		_bone, _hips_track, walk.length])
 	# Hold "move forward" for the whole run.
 	Input.action_press(&"move_forward")
 	print("[walk-probe] bone=%s touched0=%s touched_n=%d thr=%.2f" % [
@@ -81,8 +92,14 @@ func _process(_delta: float) -> void:
 	# Per-frame for the first 90 frames: the stutter, if it is a frame-level
 	# flip between two poses, shows as alternating zero/non-zero steps.
 	if _frames <= 90:
-		print("[walk-probe] f%03d speed=%.2f walking=%s t=%.3f step=%.4f" % [
-			_frames, _clips._speed, _clips._walking, _clips._time, pose_step])
-	if _frames >= 180:
+		var line := "[walk-probe] f%03d speed=%.2f t=%.4f step=%.6f" % [
+			_frames, _clips._speed, _clips._time, pose_step]
+		if _hips_track >= 0:
+			var walk: Animation = (_clips._library as AnimationLibrary).get_animation(&"walk")
+			var sampled: Quaternion = walk.rotation_track_interpolate(_hips_track, _clips._time)
+			line += " | interp=%s" % sampled
+			line += " | bone=%s" % rot
+		print(line)
+	if _frames >= 90:
 		Input.action_release(&"move_forward")
 		get_tree().quit(0)

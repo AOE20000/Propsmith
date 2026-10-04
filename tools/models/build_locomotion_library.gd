@@ -98,15 +98,20 @@ func _retarget(source: Animation, skeleton: Skeleton3D, skeleton_name: String,
 			var time := source.track_get_key_time(index, key)
 			match track_type:
 				Animation.TYPE_POSITION_3D:
-					var value: Vector3 = source.position_track_interpolate(index, key)
+					# The key's own value — `track_get_key_value`. The previous
+					# version passed the key *index* into `*_track_interpolate`,
+					# whose second parameter is a *time*: key 2 sampled the clip
+					# at 2.0 s, past its length, clamping to the final pose —
+					# every clip played its first two keys and then froze.
+					var value: Vector3 = source.track_get_key_value(index, key)
 					if bone == "Hips":
 						# Re-anchor the authored bob to our rest height.
 						value.y = hips_rest.y + (value.y - author_min)
 					clip.position_track_insert_key(track_index, time, value)
 				Animation.TYPE_ROTATION_3D:
-					var value: Quaternion = source.rotation_track_interpolate(index, key)
+					var value: Quaternion = source.track_get_key_value(index, key)
 					clip.rotation_track_insert_key(track_index, time, value)
 				Animation.TYPE_SCALE_3D:
-					var value: Vector3 = source.scale_track_interpolate(index, key)
+					var value: Vector3 = source.track_get_key_value(index, key)
 					clip.scale_track_insert_key(track_index, time, value)
 	return clip
