@@ -60,6 +60,9 @@ func build(world_root: Node3D, seed_value: int) -> bool:
 	progress.call("铺设草地", 0.1)
 	_build_ground(world_root)
 
+	progress.call("点缀草地", 0.15)
+	_build_grass_patches(world_root, seed_value)
+
 	progress.call("搭建白盒房间", 0.4)
 	_build_rooms(world_root)
 
@@ -162,6 +165,42 @@ func _build_ground(world_root: Node3D) -> void:
 		Vector3(0.0, -POOL_DEPTH - 1.0, pool_centre_z),
 		Vector3(pool_half_width * 2.0, 2.0, POOL_LENGTH),
 		Color(0.30, 0.29, 0.23), 0.98)
+
+
+## Colour patches across the lawn: thin tinted planes a hair above the grass,
+## breaking the single flat green into a lawn that reads as grass. Layout is
+## seed-deterministic like the rest of the decor; patches skip the pond band
+## (submerged tint is invisible work) and never carry collision — the ground
+## box underneath remains the one physics surface.
+func _build_grass_patches(world_root: Node3D, seed_value: int) -> void:
+	var half: float = GROUND_SIZE * 0.5
+	var pool_near: float = half - POOL_BACK_EDGE - POOL_LENGTH
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("playground-patches|%d" % seed_value)
+	var patches := Node3D.new()
+	patches.name = "GrassPatches"
+	world_root.add_child(patches)
+	var base := Color(0.36, 0.52, 0.28)
+	for _slot: int in 26:
+		var size: float = rng.randf_range(3.0, 9.0)
+		var x: float = rng.randf_range(-half + size, half - size)
+		var z: float = rng.randf_range(-half + size, pool_near - size * 0.5)
+		var tint: float = rng.randf_range(-0.05, 0.07)
+		var dry: float = rng.randf() < 0.3
+		var color: Color = base.lightened(maxf(tint, 0.0)) if dry else base.darkened(maxf(-tint, 0.0))
+		if dry:
+			color = Color(base.r + 0.09, base.g + 0.06, base.b * 0.9)
+		var patch := MeshInstance3D.new()
+		patch.name = "Patch"
+		var plane := PlaneMesh.new()
+		plane.size = Vector2(size, size * rng.randf_range(0.6, 1.0))
+		patch.mesh = plane
+		var material := StandardMaterial3D.new()
+		material.albedo_color = color
+		material.roughness = 1.0
+		patch.material_override = material
+		patch.position = Vector3(x, 0.02, z)
+		patches.add_child(patch)
 
 
 ## Three white-box rooms with an open doorway each: something to build inside,
@@ -269,7 +308,9 @@ func _build_walls(world_root: Node3D) -> void:
 
 
 func _boundary_wall(parent: Node3D, at: Vector3, size: Vector3) -> void:
-	_static_box(parent, "BoundaryWall", at, size, Color(0.5, 0.48, 0.45), 0.95)
+	# Hedge-green rather than concrete grey: the boundary is a physical necessity
+	# (props and vehicles stay in play) and reads far better as a clipped hedge.
+	_static_box(parent, "BoundaryWall", at, size, Color(0.24, 0.38, 0.22), 0.95)
 
 
 ## Sky, sun and the whole post-processing stack — all of it from the demo's
@@ -366,18 +407,18 @@ func _build_decor(world_root: Node3D, seed_value: int) -> Dictionary:
 		Rect2(-9.0, -9.0, 18.0, 64.0),
 	]
 
-	# A gentle S rather than a straight line: the curve is what makes the path read
-	# as laid out across the lawn instead of as a runway.
+	# A wider S (nine samples instead of five) so the curve reads as a garden
+	# path rather than two straight ramps stitched together.
 	var path := PackedVector3Array()
-	for step: int in 5:
-		path.append(_path_point(float(step) / 4.0))
+	for step: int in 9:
+		path.append(_path_point(float(step) / 8.0))
 	var slabs: int = Decor.stone_path(decor, path, rng)
 
 	# Lanterns alternate sides of the walkway; benches sit on the west side facing
 	# it. Both sample the same curve the path was laid along, so they follow it.
 	var lanterns: int = 0
-	for index: int in 4:
-		var t: float = 0.13 + float(index) * 0.23
+	for index: int in 6:
+		var t: float = 0.1 + float(index) * 0.155
 		var side: float = 1.0 if index % 2 == 0 else -1.0
 		var lantern := Decor.lantern(rng)
 		lantern.position = _path_point(t) + Vector3(side * 2.5, 0.0, 0.0)
@@ -385,18 +426,18 @@ func _build_decor(world_root: Node3D, seed_value: int) -> Dictionary:
 		lanterns += 1
 
 	var benches: int = 0
-	for index: int in 2:
+	for index: int in 4:
 		var bench := Decor.bench(rng)
-		bench.position = _path_point(0.3 + float(index) * 0.36) + Vector3(-3.4, 0.0, 0.0)
+		bench.position = _path_point(0.22 + float(index) * 0.18) + Vector3(-3.4, 0.0, 0.0)
 		# Facing the walkway, which runs roughly north.
 		bench.rotation_degrees = Vector3(0.0, 90.0, 0.0)
 		decor.add_child(bench)
 		benches += 1
 
-	# Trees in four bands: the two side edges, a grove west of the walkway, and a
-	# band across the approach to the pond that is deliberately allowed to overlap
-	# the water so the reserved list is doing real work rather than guarding a zone
-	# nothing could land in anyway.
+	# Trees in four bands, six slots each: the two side edges, a grove west of
+	# the walkway, and a band across the approach to the pond that is
+	# deliberately allowed to overlap the water so the reserved list is doing
+	# real work rather than guarding a zone nothing could land in anyway.
 	var trees: int = 0
 	var tree_zones: Array[Rect2] = [
 		Rect2(-half + 4.0, -half + 4.0, 26.0, 148.0),
@@ -405,7 +446,7 @@ func _build_decor(world_root: Node3D, seed_value: int) -> Dictionary:
 		Rect2(-half + 4.0, 40.0, 148.0, 38.0),
 	]
 	for zone: Rect2 in tree_zones:
-		for _slot: int in 3:
+		for _slot: int in 6:
 			var spot: Vector2 = Decor.free_spot(zone, reserved, rng, 4.5)
 			if spot == Vector2.INF:
 				continue
@@ -417,7 +458,7 @@ func _build_decor(world_root: Node3D, seed_value: int) -> Dictionary:
 	# Flowers on the strip of grass between the lawn's edge and the water.
 	var flowers: int = 0
 	var bank := Rect2(-pool_half_width, pool_near - 4.2, pool_half_width * 2.0, 3.8)
-	for _slot: int in 6:
+	for _slot: int in 14:
 		var spot: Vector2 = Decor.free_spot(bank, reserved, rng, 1.0)
 		if spot == Vector2.INF:
 			continue
