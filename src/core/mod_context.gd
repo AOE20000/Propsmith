@@ -42,6 +42,22 @@ func get_mod_id() -> StringName:
 
 ## Add a point of interest. `factory` is a Callable returning a Node3D; the world
 ## builder places it and registers its discovery trigger.
+## Record a world-changing decision made by this mod: it is appended to the
+## journal (crash-safe, autosaved) and broadcast to every connected peer in
+## multiplayer. The caller applies the change locally first — the log does not
+## re-apply it. Long-term persistence is the mod's own `serialize` hook: the
+## journal is a broadcast/crash-recovery channel, not a second save file.
+func record_decision(kind: StringName, payload: Dictionary) -> void:
+	DecisionLog.record(StringName("%s/%s" % [_mod_id, kind]), payload)
+
+
+## Register the applier for one of this mod's decision kinds. It will be called
+## on journal replay and whenever a peer's decision of this kind arrives, so it
+## must apply the payload exactly like the live path does.
+func register_decision_applier(kind: StringName, applier: Callable) -> void:
+	DecisionLog.register_applier(StringName("%s/%s" % [_mod_id, kind]), applier, false)
+
+
 func add_poi_factory(poi_id: StringName, display_name: String, factory: Callable, weight: float = 1.0) -> bool:
 	if display_name.strip_edges().is_empty():
 		push_error("[mod:%s] poi '%s' needs a display name: it is what the HUD and the discovery log show" % [_mod_id, poi_id])

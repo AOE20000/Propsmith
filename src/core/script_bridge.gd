@@ -98,6 +98,18 @@ func watchable_events() -> PackedStringArray:
 ## and returns whether it was accepted, so a mod can report a collision instead of
 ## silently doing nothing.
 
+## Record one of this mod's decisions (journaled + broadcast to peers).
+## The mod applies the change itself and keeps long-term state in its own
+## save section — same contract as the GDScript side's `record_decision`.
+func record_decision(kind: String, payload: Dictionary) -> void:
+	_context.record_decision(StringName(kind), payload)
+
+
+## Register the applier for one of this mod's decision kinds (replay + peer sync).
+func register_decision_applier(kind: String, applier: Callable) -> void:
+	_context.register_decision_applier(StringName(kind), applier)
+
+
 func add_poi(poi_id: String, display_name: String, factory: Callable, weight: float = 1.0) -> bool:
 	if _context == null:
 		return false

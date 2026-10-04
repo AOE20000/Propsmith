@@ -65,13 +65,22 @@ pwsh -File tools\check_runtimes.ps1
 | 方法 | 参数 | 说明 |
 |---|---|---|
 | `game:add_poi(id, 显示名, 工厂, 权重)` | 工厂返回 `Node3D` | 新地标 |
-| `game:add_prop(id, 工厂, 密度, 最大坡度)` | 工厂返回 `Mesh` | 新散布道具 |
-| `game:add_item(id, 表)` | 表里至少给 `display_name` | 新物品 |
+| `game:add_prop(id, 工厂, 显示名)` | 工厂返回 `Mesh` | 新生成菜单道具 |
+| `game:add_prop_definition(id, 显示名, 工厂, 分类)` | 工厂返回 `Mesh` | 新散布道具（带分类） |
+| `game:add_item(id, 表)` | 表里至少给 `display_name` | 新物品（预留） |
 | `game:add_combat_provider(id, 工厂)` | 工厂返回 `Node`（实现 `Attacker`） | 新战斗实现 |
 | `game:add_terrain_modifier(id, 函数, 顺序)` | `函数(x, z, 高度, 海岸遮罩) -> 高度` | 地形改造 |
 | `game:add_vehicle(id, 工厂)` | 工厂返回 `Vehicle` | 新载具 |
+| `game:add_tool(id, 显示名, 回调表)` | 回调表：`on_primary` / `on_secondary` 等 | 新工具（回调式，进工具轮盘） |
+| `game:add_npc(id, 显示名, 工厂)` | 工厂返回 `CharacterBody3D` | 新 NPC（进生成菜单 NPC 区） |
+| `game:add_player_model(id, 显示名, 工厂)` | 工厂返回 `Node3D` | 替换默认玩家形象（按 id 序取第一个） |
+| `game:record_decision(kind, payload)` | 决定名与数据 | 把本 mod 的一个世界变更记入决策日志（持久化 + 联机广播） |
+| `game:register_decision_applier(kind, 处理函数)` | 处理函数收到 `payload` | 声明重放/远端同步时如何重建该变更 |
 
-每个方法返回布尔值：**id 重复会被拒绝**而不是静默覆盖，跟 GDScript 那边一致。
+每个注册方法返回布尔值：**id 重复会被拒绝**而不是静默覆盖，跟 GDScript 那边一致。
+
+关于决策日志的完整约定（payload 自足、applier 与实时路径同一代码）见
+[MODDING.md](MODDING.md) 的「决策日志」一章。
 
 ### 订阅
 
@@ -127,6 +136,17 @@ game:add_prop("lua_crystal", function()
 end, 0.7, 38.0)
 
 game:add_item("lua_shard", { display_name = "水晶碎片", stackable = true })
+
+-- 决策日志：世界变更记入日志（崩溃安全 + 联机自动广播给所有玩家）。
+-- applier 会在读档重放与远端同步时被调用，按 payload 原样重建状态。
+game:register_decision_applier("place_shard_pillar", function(payload)
+    game:log("重放：石柱出现在 " .. tostring(payload.x))
+    -- 按 payload 重建你的节点……
+end)
+
+game:on("world_populate", function(world)
+    game:record_decision("place_shard_pillar", { x = 4.0, z = -2.0 })
+end)
 
 -- 事件与钩子。参数按位置传入，跟 GDScript 侧重写时拿到的一样。
 game:watch("poi_discovered", function(poi_id, display_name, position)

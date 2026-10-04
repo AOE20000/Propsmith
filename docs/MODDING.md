@@ -140,7 +140,7 @@ context.add_item_definition(&"my_relic", {
 > 注册是安全的，只是不会产生可见效果；`display_name` 现在是必填，因为任何将来的
 > 消费者第一件事都是把它显示出来。这条边界同时写在 README 的「已知边界」里。
 
-### 4. 新战斗实现
+### 7. 新战斗实现
 
 战斗只有接口，所以"实现一个武器"就是实现 `Attacker`：
 
@@ -161,7 +161,7 @@ context.add_combat_provider(&"my_weapon", func() -> Node:
 `Attacker`（`try_attack` / `is_attacking` / `cancel_attack`）与 `Damageable`
 （`can_receive_damage` / `apply_damage` / `health_fraction` / `is_defeated`）。
 
-### 5. 地形改造（预留，城市地图暂无消费者）
+### 8. 地形改造（预留，城市地图暂无消费者）
 
 ```gdscript
 func _on_register() -> void:
@@ -177,7 +177,7 @@ func _raise(x: float, z: float, height: float, falloff: float) -> float:
 `falloff` 参数沿自旧地形系统（当时是径向遮罩），当前签名保持不变以稳定 mod API。
 注册排序规则（同 `order` 按 id）仍然有断言钉住，只是当前地图上没有高度场可以改。
 
-### 6. 事件与自有信号
+### 9. 事件与自有信号
 
 监听核心事件：
 
@@ -194,7 +194,7 @@ mod 之间通过 `Events.mod_signal` 通信（第一参数是发出者的 mod id
 emit_mod_signal(&"boss_defeated", {"id": "shadow"})
 ```
 
-### 7. 自己存档
+### 10. 自己存档
 
 ```gdscript
 func serialize() -> Dictionary:
@@ -206,6 +206,48 @@ func deserialize(data: Dictionary) -> void:
 
 数据存在 `sections["<你的 mod id>"]` 下，核心存档格式无需改动。返回空字典表示
 本次不写任何数据。
+
+---
+
+## 决策日志：让 mod 的改动自动持久化与联机
+
+mod 对世界做出的**离散变更**（放置/移除/改状态）可以通过决策日志记录。好处：
+
+- **崩溃安全**：每条决定立即追加到日志，进程被杀也不丢失已发生的变更；
+- **联机免费**：联机会话中，决定自动广播给所有玩家——**mod 作者不需要写任何
+  网络代码**；
+- **加载即重放**：读档 = 快照（各 mod 的 `serialize` 节）+ 日志尾重放（调用你
+  注册的 applier）。
+
+```gdscript
+func _on_register() -> void:
+    # 声明决定 kind 与重放器。kind 会自动加 mod id 前缀，不会与别的 mod 冲突。
+    context.register_decision_applier(&"place_shrine", _apply_shrine)
+
+func _apply_shrine(payload: Dictionary) -> void:
+    # 重放与远端同步都会调用这里：按 payload 原样重建状态，
+    # 与"玩家刚刚实时做出这个改动"时走完全相同的代码。
+    var shrine := _make_shrine(String(payload.get("name", "")))
+    shrine.position = payload.get("position")
+    add_child(shrine)
+
+func _on_shrine_placed(name: String, position: Vector3) -> void:
+    # 玩家做出改动：先在本地应用，再把决定交给日志。
+    var shrine := _make_shrine(name)
+    shrine.position = position
+    add_child(shrine)
+    context.record_decision(&"place_shrine", {"name": name, "position": position})
+```
+
+约定（违反会让重放出错）：
+
+- **payload 必须自足**：包含重建状态所需的全部数据，不引用发出时刻的临时状态。
+- **applier 与实时路径共用同一份重建代码**：不要为"读档"另写一份逻辑。
+- 长期持久化仍走你自己的 `serialize` / `deserialize` 钩子——决策日志是
+  广播与崩溃恢复通道，不是第二份存档文件。
+
+Lua / SafeGDScript 同款：`game:record_decision(kind, payload)` 与
+`game:register_decision_applier(kind, handler)`。
 
 ---
 
@@ -261,13 +303,13 @@ func _make_buggy() -> Vehicle:
 
 ```
 ModLoaderStore, ModLoader,    # godot-mod-loader 要求自己占前两位
-Services, Events, GameState, ModHost, SaveSystem
+Services, Events, DecisionLog, GameState, ModHost, SaveSystem
 ```
 
 - `godot-mod-loader` 启动时会断言自己位于前两位，位置不对就报错。两个 autoload 的名字
   也只能是这两个——它的代码里有上百处直接引用 `ModLoaderStore.`。
-- 本项目自己的五个 autoload **相对顺序不能动**：`ModHost` 在 `_ready()` 里向 `SaveSystem`
-  注册存档段，而 `SaveSystem` 声明在它之后——这是改名之前就如此的历史顺序。
+- 本项目自己的 autoload **相对顺序不能动**：`DecisionLog` 需要在 `Events` 之后
+  （订阅其存档信号）、`ModHost` 在 `SaveSystem` 之前（向其注册存档段）。
 - ⚠️ **不要在 `project.godot` 里写解释性注释**：Godot 重写该文件时会丢掉用户注释，
   只保留它自己生成的文件头。这条理由曾经写在 `[autoload]` 段里，在装好加载器、工程被
   Godot 重新保存一次之后就消失了（autoload 条目本身没丢）。所以文档放在这里。
@@ -282,6 +324,7 @@ Services, Events, GameState, ModHost, SaveSystem
 | `map_source` | `Services.get_service(&"map_source")` | 当前地图源：出生点、地图身份、加载统计 |
 | 事件 | `Events.<信号>` | 见 `src/core/event_bus.gd` 全部契约 |
 | 存档 | `SaveSystem` | 存读档、槽位枚举、**读档校验地图身份** |
+| 决策日志 | `DecisionLog.record / register_applier` | 世界变更的持久化与联机广播（建议走 `context` 的包装） |
 
 ---
 
