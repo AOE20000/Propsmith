@@ -16,7 +16,7 @@ var _open: bool = false
 
 
 func _ready() -> void:
-	layer = 40
+	layer = UILayers.SPAWN_MENU
 	_build_panel()
 	visible = false
 

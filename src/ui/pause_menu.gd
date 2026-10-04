@@ -11,7 +11,7 @@ var _status_label: Label = null
 
 
 func _ready() -> void:
-	layer = 20
+	layer = UILayers.PAUSE_MENU
 	visible = false
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build()

@@ -93,6 +93,17 @@ var shots: Array[Dictionary] = [
 		"offset": Vector3(1.2, 1.7, -3.2),
 	},
 	{
+		# The wardrobe screen's layout: the panel sits on the right and the character
+		# stays readable on the left — the shot that proves the panel no longer
+		# covers the thing being adjusted. The subject is the PLAYER (the wardrobe
+		# frames the player anyway), so this shot answers "is the edited figure
+		# visible beside the panel".
+		"name": "look_wardrobe",
+		"subject": &"player",
+		"offset": Vector3(0.0, 1.6, -2.8),
+		"open_panel": true,
+	},
+	{
 		# The render-style seam, photographed. The lawn vantage point is reused for
 		# the day shots so the difference is the style and nothing else.
 		"name": "look_style_toon_pond",
@@ -131,6 +142,11 @@ var _camera: Camera3D = null
 
 
 func _ready() -> void:
+	# The wardrobe shot opens a panel, and that panel pauses the tree. A probe that
+	# froze with it would never reach its own capture — the photograph of the paused
+	# screen is exactly the one that has to keep processing — so the probe opts out
+	# of pausing for itself rather than asking panels not to pause.
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	_keep_only(OS.get_environment("DSH_LOOK_ONLY"))
 	# Reuse the real boot sequence so the probe photographs what a player sees,
 	# not a variant assembled for the camera.
@@ -211,6 +227,10 @@ func _process(_delta: float) -> void:
 
 
 func _apply_shot() -> void:
+	# Every shot starts by claiming the probe's own camera back: the wardrobe shot
+	# hands rendering to the game rig's camera (its framing is the subject), and the
+	# shot after it must not inherit that handover.
+	_camera.make_current()
 	var shot: Dictionary = shots[_index]
 	# Preset first, style second: a style retunes *over* the active preset, so the
 	# order here is the same order the game uses.
@@ -218,18 +238,47 @@ func _apply_shot() -> void:
 		_relight(StringName(shot["preset"]), shot.get("overrides", {}))
 	if shot.has("style"):
 		_switch_style(StringName(shot["style"]))
+	# Positioning first, panel second: the wardrobe view frames the character and
+	# *then* the panel opens over it, so the photograph is the screen the player
+	# actually sees — panel right, character left.
 	if shot.has("subject"):
 		_frame_subject(shot)
-		return
-	_camera.global_position = shot["eye"]
-	var target: Vector3 = shot["target"]
-	var up: Vector3 = Vector3.UP
-	# A camera pointed straight down has no valid "up" to be built from, and
-	# `look_at` refuses a degenerate basis rather than guessing. Tilting the
-	# reference by one axis is enough to keep the overhead shot honest.
-	if absf((target - _camera.global_position).normalized().dot(up)) > 0.999:
-		up = Vector3.FORWARD
-	_camera.look_at(target, up)
+	else:
+		_camera.global_position = shot["eye"]
+		var target: Vector3 = shot["target"]
+		var up: Vector3 = Vector3.UP
+		# A camera pointed straight down has no valid "up" to be built from, and
+		# `look_at` refuses a degenerate basis rather than guessing. Tilting the
+		# reference by one axis is enough to keep the overhead shot honest.
+		if absf((target - _camera.global_position).normalized().dot(up)) > 0.999:
+			up = Vector3.FORWARD
+		_camera.look_at(target, up)
+	if shot.get("open_panel", false):
+		# The probe keeps processing while the panel pauses the tree — it declares
+		# PROCESS_MODE_ALWAYS for exactly this — and the panel stays open until a
+		# V would close it, which is the screen being photographed.
+		var panel: Node = get_tree().get_first_node_in_group(&"character_panel")
+		if panel != null and panel.has_method("open_for_player"):
+			panel.call("open_for_player")
+			# The wardrobe framing moves the *game rig's* camera, so the photograph
+			# has to be taken by that camera — the probe's own framing is a different
+			# view entirely, and shooting through it shows neither the panel's
+			# framing nor the character. The next shot claims the probe camera back
+			# at the top of `_apply_shot`.
+			var player: Node = get_tree().get_first_node_in_group(&"player")
+			var game_cam: Camera3D = null
+			if player is Node3D:
+				var rig: Node = (player as Node3D).get_node_or_null("CameraRig")
+				if rig != null:
+					game_cam = rig.get_node_or_null("SpringArm3D/Camera3D") as Camera3D
+			if game_cam != null:
+				game_cam.make_current()
+				var figure: Node3D = (player as Node3D).get_node_or_null("Visual") as Node3D
+				print("[look] wardrobe: shooting through the rig camera at %s; player visual visible=%s at %s" % [
+					game_cam.global_position,
+					figure.visible if figure != null else false,
+					figure.global_position if figure != null else Vector3.INF,
+				])
 	print("[look] framing %s" % shot["name"])
 
 

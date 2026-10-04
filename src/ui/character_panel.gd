@@ -27,7 +27,7 @@ var _title: Label = null
 
 
 func _ready() -> void:
-	layer = 45
+	layer = UILayers.CHARACTER_PANEL
 	visible = false
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	add_to_group(&"character_panel")
@@ -71,11 +71,18 @@ func open_for_npc(agent: PedestrianAgent) -> void:
 
 
 func _set_open(open: bool) -> void:
+	var npc_mode: bool = _blend_section.has_target()
 	_open = open
 	visible = open
 	get_tree().paused = open
 	GameState.mode = GameState.Mode.CUSTOMIZING if open else GameState.Mode.EXPLORING
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	# The wardrobe camera (third person from the front, character held left of the
+	# frame) is a *player-mode* framing: an NPC edit already has its subject centred
+	# in front of the camera that walked up to it. The check is taken before the
+	# close path clears the target, so closing an NPC edit does not touch the rig.
+	if not npc_mode:
+		_set_wardrobe_camera(open)
 	if not open:
 		_blend_section.flush()
 		_blend_section.clear_npc_target()
@@ -84,6 +91,17 @@ func _set_open(open: bool) -> void:
 		_sync_controls()
 		if _title != null:
 			_title.text = "市民外观（seed %d）— 改动立即生效并入账" % _npc_seed if _blend_section.has_target() else "角色外观"
+
+
+## The wardrobe camera rides on the player rig; group lookup keeps this panel
+## decoupled from the boot order, exactly like the appearance controller above.
+func _set_wardrobe_camera(on: bool) -> void:
+	var player: Node = get_tree().get_first_node_in_group(&"player")
+	if player == null:
+		return
+	var rig := player.get_node_or_null("CameraRig") as CameraRig
+	if rig != null:
+		rig.set_wardrobe_framing(on)
 
 
 ## The controller rides on the player; group lookup keeps this panel decoupled
@@ -104,13 +122,22 @@ func _build() -> void:
 
 	var dim := ColorRect.new()
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	dim.color = Color(0.02, 0.03, 0.05, 0.55)
+	# Light enough to read the character through: the whole point of this screen is
+	# watching the thing you are adjusting, and a heavy dim turns the live preview
+	# into a silhouette. It only has to separate the panel from the world.
+	dim.color = Color(0.02, 0.03, 0.05, 0.28)
 	root.add_child(dim)
 
+	# Anchored to the right edge rather than centred: the camera keeps the character
+	# in the middle of the screen, so a centred panel covers the one thing this
+	# screen exists to show. Growing leftward keeps the width from pushing it off
+	# screen, and the vertical anchors stay centred as the content grows.
 	var chrome := PanelContainer.new()
-	chrome.set_anchors_preset(Control.PRESET_CENTER)
-	chrome.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	chrome.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	chrome.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	chrome.grow_vertical = Control.GROW_DIRECTION_BOTH
+	chrome.offset_right = -20.0
+	chrome.offset_left = -20.0
 	chrome.custom_minimum_size = Vector2(PANEL_WIDTH, 0.0)
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.08, 0.09, 0.11, 0.94)

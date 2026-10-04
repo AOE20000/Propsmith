@@ -84,6 +84,10 @@ static func _can_play() -> bool:
 
 
 func _ready() -> void:
+	# Always-on: a menu that pauses the tree would otherwise silence the beds too,
+	# and a wardrobe that cuts the world's sound reads as a crash, not a menu.
+	# The pause rule and its exceptions are tabled in `UILayers`.
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	_ensure_bus()
 	for index: int in 2:
 		var player := AudioStreamPlayer.new()

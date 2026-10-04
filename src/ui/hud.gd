@@ -25,7 +25,7 @@ var _player: Node3D = null
 
 
 func _ready() -> void:
-	layer = 10
+	layer = UILayers.HUD
 	_build()
 	_connect_events()
 

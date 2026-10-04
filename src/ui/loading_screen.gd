@@ -9,7 +9,7 @@ var _hint: Label = null
 
 
 func _ready() -> void:
-	layer = 100
+	layer = UILayers.LOADING_SCREEN
 	_build()
 	Events.world_generation_progress.connect(_on_progress)
 

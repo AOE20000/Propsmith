@@ -383,7 +383,7 @@ func _finish(failures: Array[String], validate_only: bool) -> void:
 		return
 
 	print("[boot] world ready: map=%s mods=%d" % [GameState.map_id, ModHost.mods.size()])
-	Events.notify("城市已加载 — F1 调试 · F2 画风 · F3 自由视角 · F4 时段 · P 拍照 · V 换装 · F5 保存 · F9 读取 · Esc 菜单", Events.NotifyLevel.SUCCESS)
+	Events.notify("城市已加载 — F1 调试 · F2 画风 · F3 自由视角 · F4 时段 · 滚轮缩放 · T/G 升降 · F6 第一人称 · P 拍照 · V 换装 · F5 保存 · F9 读取 · Esc 菜单", Events.NotifyLevel.SUCCESS)
 
 
 func _count_nodes(node: Node) -> int:

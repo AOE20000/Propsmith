@@ -50,6 +50,7 @@ func _ready() -> void:
 	_run_section("scripted mod bridges", 7, _check_scripted_bridges)
 	_run_section("map sources and blueprints", 14, _check_map_sources_and_blueprints)
 	_run_section("map catalogue", 23, _check_map_catalog)
+	_run_section("camera and wardrobe wiring", 21, _check_camera_and_wardrobe)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -1678,6 +1679,104 @@ func _check_map_catalog() -> void:
 	_expect(duplicate[2]["enabled"] == true, "an unrelated mod must be untouched")
 	_expect(ModHost.failures.has("selftest_dup"), "the collision must be reported with a reason")
 	ModHost.failures.erase("selftest_dup")
+
+
+## The view controls and the wardrobe wiring.
+##
+## The BlendSection half guards a bug that was invisible for its whole life: the
+## constructor once assigned its parameters to themselves, so the player-mode
+## callbacks stayed invalid and *every manual* slider/toggle did nothing — while
+## the panel's own randomize button (which routes through the controller, not
+## through these callables) kept working. The symptom was "random works, manual
+## does not", which reads like an apply problem rather than a wiring one.
+func _check_camera_and_wardrobe() -> void:
+	var seen: Array = []
+	var section := BlendSection.new(null, func(option_id: String, value: Variant) -> void:
+		seen.append([option_id, value]), func() -> Dictionary: return {})
+	section.set_value("身高", 0.7)
+	section.set_toggle("上衣", true)
+	_expect(seen.size() == 2, "player-mode edits must route to the panel's write callback")
+	_expect(
+		seen[0][0] == "身高" and is_equal_approx(float(seen[0][1]), 0.7),
+		"a slider drag must deliver its option and value"
+	)
+	_expect(seen[1][0] == "上衣" and bool(seen[1][1]), "a toggle must deliver its state")
+
+	var rig := CameraRig.new()
+	var arm := SpringArm3D.new()
+	arm.name = "SpringArm3D"
+	# Same shape as the real rig: the arm is a *direct* child — `_ready` looks it up
+	# by that exact path, and the pivot it rotates is the arm's parent (the rig).
+	rig.add_child(arm)
+	var target := Node3D.new()
+	var visual := Node3D.new()
+	visual.name = "Visual"
+	target.add_child(visual)
+	rig.target = target
+	add_child(rig)
+	add_child(target)
+
+	_expect(not rig.is_first_person(), "the camera must start in third person")
+	rig.zoom_in()
+	_expect(
+		is_equal_approx(arm.spring_length, rig.arm_length - rig.zoom_step),
+		"wheel in must shorten the arm"
+	)
+	for _i: int in 40:
+		rig.zoom_out()
+	_expect(
+		is_equal_approx(arm.spring_length, rig.max_arm_length),
+		"zoom must stop at the far limit instead of flying to the moon"
+	)
+	for _i: int in 40:
+		rig.zoom_in()
+	_expect(
+		is_equal_approx(arm.spring_length, rig.min_arm_length),
+		"zoom must stop at the near limit, which is close third person, not the eye"
+	)
+	rig.raise_pivot()
+	_expect(rig.pivot_height > rig.min_pivot_height, "raising must move the orbit centre up")
+	for _i: int in 40:
+		rig.lower_pivot()
+	_expect(
+		is_equal_approx(rig.pivot_height, rig.min_pivot_height),
+		"lowering must stop instead of driving the camera underground"
+	)
+
+	rig.set_first_person(true)
+	_expect(rig.is_first_person(), "first person must turn on")
+	_expect(not visual.visible, "first person must hide the body the camera sits inside")
+	_expect(is_equal_approx(arm.spring_length, 0.0), "first person must put the camera on the eye")
+	rig.zoom_out()
+	_expect(rig.is_first_person(), "the wheel must be inert while first person is on")
+	rig.set_first_person(false)
+	_expect(visual.visible, "leaving first person must give the body back")
+	# The wheel had last clamped the arm at the near stop, so that — not the far
+	# stop — is the distance first person has to restore.
+	_expect(
+		is_equal_approx(arm.spring_length, rig.min_arm_length),
+		"leaving first person must restore the distance the wheel had set"
+	)
+
+	# The wardrobe framing: third person from the front, body shown, panel-side
+	# offset on — and everything back where it was when it ends.
+	rig.set_wardrobe_framing(true)
+	_expect(not rig.is_first_person(), "the wardrobe view must be third person")
+	_expect(visual.visible, "the wardrobe view must show the body being adjusted")
+	_expect(
+		is_equal_approx(arm.spring_length, CameraRig.WARDROBE_ARM_LENGTH),
+		"the wardrobe view must come in close enough to read the outfit"
+	)
+	_expect(absf(rig.rotation.y - PI) < 0.01, "the wardrobe view must face the character")
+	rig.set_wardrobe_framing(false)
+	_expect(
+		is_equal_approx(arm.spring_length, rig.min_arm_length),
+		"closing the wardrobe must restore the wheel distance"
+	)
+	_expect(not rig.is_first_person(), "closing the wardrobe must restore the view mode")
+
+	rig.queue_free()
+	target.queue_free()
 
 
 ## The ambience layer: levels, looping, point sources, teardown.

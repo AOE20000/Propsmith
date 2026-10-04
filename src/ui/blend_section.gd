@@ -32,10 +32,17 @@ var _working: Dictionary = {}
 var _dirty: bool = false
 
 
-func _init(rows: VBoxContainer, on_player_write: Callable, on_player_values: Callable) -> void:
+func _init(rows: VBoxContainer, player_write: Callable, player_values: Callable) -> void:
 	_rows = rows
-	on_player_write = on_player_write
-	on_player_values = on_player_values
+	# The parameters are named differently from the members on purpose: a parameter
+	# shadows its member in GDScript, so `on_player_write = on_player_write` here
+	# assigned the parameter to itself and left the member an invalid callable —
+	# every manual slider/toggle in player mode silently did nothing, while the
+	# panel's own randomize/reset buttons (which route through the controller, not
+	# through these callables) kept working. Same shape of bug as forgetting `self.`,
+	# and just as invisible until something downstream checks `is_valid()`.
+	on_player_write = player_write
+	on_player_values = player_values
 
 
 func has_target() -> bool:

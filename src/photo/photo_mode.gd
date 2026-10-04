@@ -171,7 +171,7 @@ static func _can_capture() -> bool:
 func _build_hint() -> void:
 	_hint = CanvasLayer.new()
 	_hint.name = "PhotoHint"
-	_hint.layer = 60
+	_hint.layer = UILayers.PHOTO_HINT
 	_hint.visible = false
 	add_child(_hint)
 	var label := Label.new()
