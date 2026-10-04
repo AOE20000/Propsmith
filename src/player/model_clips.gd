@@ -10,6 +10,16 @@ class_name ModelClips
 ## skeleton's own node and bone names at build time, with the author rig's
 ## Hips-height re-anchored to ours.
 ##
+## ## Implementation note (2026-10-04): poses are applied **manually** — the
+## clip is sampled with `Animation.track_interpolate` each frame and written
+## straight into the skeleton with `set_bone_pose_*`. The AnimationMixer was
+## measured to advance its cursor **without ever writing a single bone** in
+## this build (Godot 4.7.2): every callback mode, wiring order, cache reset
+## and explicit `advance()` — reproduced on a minimal code-built rig, see
+## `tools/mini_rig_probe.gd`. Manual sampling removes that entire failure
+## surface, and this component needs none of the mixer's machinery anyway:
+## one clip, looped, speed-scaled, no blending.
+##
 ## Division of labour with the other components, all measured:
 ## * While a clip plays it owns the whole pose — so `ModelStance`'s per-frame
 ##   breathing/sway writes are suppressed (they would otherwise overwrite the
@@ -25,45 +35,51 @@ class_name ModelClips
 ## Library path and the clip names inside it (built by the tool script).
 const LIBRARY_PATH: String = "res://assets/animations/locomotion.res"
 const WALK_CLIP: StringName = &"walk"
-## The ground speed the walk clip was authored for (m/s). `speed_scale`
+## The ground speed the walk clip was authored for (m/s). Playback speed
 ## divides the measured speed by this, so faster movement plays the cycle
-## proportionally faster instead of moonwalking.
+## proportionally faster instead of moonwalking at a fixed cadence.
 @export var clip_authored_speed: float = 1.3
 ## Speed above which the figure counts as walking (m/s).
 @export var walk_threshold: float = 0.25
 ## How quickly playback speed follows measured speed (per second).
 @export var speed_lerp: float = 6.0
+## Library injection for tests and probes: when set, it replaces the resource
+## at `LIBRARY_PATH` (which needs an import pass a headless test may not run).
+var library_override: AnimationLibrary = null
 
 var _model: Node3D = null
-var _player: AnimationPlayer = null
+var _skeleton: Skeleton3D = null
+var _library: AnimationLibrary = null
 var _stance: ModelStance = null
+var _current_clip: Animation = null
+## Track index → skeleton bone index, resolved once per started clip.
+var _track_bones: PackedInt32Array = PackedInt32Array()
+## The union of every bone the locomotion clips touch — the set that must be
+## restored when the clips stop, so a figure doesn't idle in mid-stride.
 var _touched_bones: PackedStringArray = []
 var _last_position: Vector3 = Vector3.ZERO
 var _speed: float = 0.0
 var _walking: bool = false
+var _time: float = 0.0
 var _forced: StringName = &""
 
 
-## Bind to a model root and wire the library into its AnimationPlayer.
-## A model without the player/library simply never walks (capsule fallback).
+## Bind to a model root and resolve the pieces the manual sampler needs:
+## the skeleton, the stance (to mute while a clip owns the pose) and the clip
+## library. A model without a skeleton or the library simply never walks
+## (capsule fallback).
 func setup(model: Node3D) -> void:
 	_model = model
 	if model == null:
 		return
-	_player = model.find_children("*", "AnimationPlayer", true, false)[0] as AnimationPlayer \
-		if model.find_children("*", "AnimationPlayer", true, false).size() > 0 else null
-	if _player == null:
-		return
-	if not ResourceLoader.exists(LIBRARY_PATH):
-		return
-	var library := load(LIBRARY_PATH) as AnimationLibrary
-	if library == null:
-		return
-	if _player.get_animation_library_list().has(&"locomotion"):
-		return
-	_player.add_animation_library(&"locomotion", library)
-	_touched_bones = _collect_bones(library)
+	_skeleton = _find_skeleton()
 	_stance = model.get_node_or_null("Stance") as ModelStance
+	if library_override != null:
+		_library = library_override
+	elif ResourceLoader.exists(LIBRARY_PATH):
+		_library = load(LIBRARY_PATH) as AnimationLibrary
+	if _library != null:
+		_touched_bones = _collect_bones(_library)
 	# A model attached while its agent is still outside the tree (boot order)
 	# has no meaningful world position yet — the first _process re-anchors.
 	_last_position = model.global_position if model.is_inside_tree() else Vector3.ZERO
@@ -90,15 +106,20 @@ func _collect_bones(library: AnimationLibrary) -> PackedStringArray:
 ## handle, so a stride can be *photographed*.
 func debug_play(clip_name: StringName) -> void:
 	_forced = clip_name
-	_start_clip(clip_name, 1.0)
+	_start_clip(clip_name)
 
 
 func _process(delta: float) -> void:
-	if _model == null or _player == null:
+	if _model == null or _library == null or _skeleton == null:
 		return
 	if not _model.is_inside_tree():
 		return
+	# A forced clip (probe photography) owns the sampling loop entirely.
 	if not _forced.is_empty():
+		var forced_clip: Animation = _current_clip
+		if forced_clip != null:
+			_time = fmod(_time + delta, forced_clip.length)
+			_apply_sampled_pose(forced_clip, _time)
 		return
 	var displacement := _model.global_position - _last_position
 	_last_position = _model.global_position
@@ -107,40 +128,74 @@ func _process(delta: float) -> void:
 	_speed = lerpf(_speed, speed, minf(1.0, delta * speed_lerp))
 	var walking := _speed > walk_threshold
 	if walking and not _walking:
-		_start_clip(WALK_CLIP, _speed / clip_authored_speed)
+		_start_clip(WALK_CLIP)
 		_walking = true
-	elif walking and _walking:
-		_player.speed_scale = clampf(_speed / clip_authored_speed, 0.6, 2.4)
+	if walking and _walking:
+		_time = fmod(
+			_time + delta * clampf(_speed / clip_authored_speed, 0.6, 2.4),
+			_current_clip.length
+		)
+		_apply_sampled_pose(_current_clip, _time)
 	elif not walking and _walking:
 		_stop_clip()
 		_walking = false
 
 
-func _start_clip(clip_name: StringName, speed_scale: float) -> void:
-	var full_name := StringName("locomotion/%s" % clip_name)
-	if not _player.has_animation(full_name):
+func _start_clip(clip_name: StringName) -> void:
+	if _library == null or not _library.has_animation(clip_name):
 		return
+	_current_clip = _library.get_animation(clip_name)
+	_time = 0.0
+	_resolve_track_bones(_current_clip)
 	# The clip owns the pose; the stance's per-frame writes would fight it.
 	if _stance != null:
 		_stance.set_process(false)
-	_player.speed_scale = speed_scale
-	_player.play(full_name)
+
+
+## Manual sampling: the whole point of this component. The per-type
+## `track_interpolate` reads the blended keyframe value, `set_bone_pose_*`
+## writes it — both measured to work where the mixer's own application does not.
+func _apply_sampled_pose(clip: Animation, time: float) -> void:
+	for track: int in clip.get_track_count():
+		var bone := _track_bones[track]
+		if bone < 0:
+			continue
+		match clip.track_get_type(track):
+			Animation.TYPE_ROTATION_3D:
+				_skeleton.set_bone_pose_rotation(
+					bone, clip.rotation_track_interpolate(track, time))
+			Animation.TYPE_POSITION_3D:
+				_skeleton.set_bone_pose_position(
+					bone, clip.position_track_interpolate(track, time))
+			Animation.TYPE_SCALE_3D:
+				_skeleton.set_bone_pose_scale(
+					bone, clip.scale_track_interpolate(track, time))
+
+
+## Resolve each track's bone name once per started clip: `find_bone` walks the
+## whole bone list, which must not ride on every frame.
+func _resolve_track_bones(clip: Animation) -> void:
+	_track_bones = PackedInt32Array()
+	_track_bones.resize(clip.get_track_count())
+	for track: int in clip.get_track_count():
+		var bone_name := String(clip.track_get_path(track)).get_slice(":", 1)
+		_track_bones[track] = _skeleton.find_bone(bone_name)
 
 
 func _stop_clip() -> void:
-	if _player.current_animation != "":
-		_player.stop()
-	_player.speed_scale = 1.0
-	# Back to rest, then let the stance re-own the pose.
-	var skeleton := _find_skeleton()
-	if skeleton != null:
+	_current_clip = null
+	# Back to rest — rotation, position **and** scale (the walk cycle moves
+	# Hips' position and the breathing rig scales Chest), then let the stance
+	# re-own the pose.
+	if _skeleton != null:
 		for bone_name: String in _touched_bones:
-			var index := skeleton.find_bone(bone_name)
+			var index := _skeleton.find_bone(bone_name)
 			if index < 0:
 				continue
-			var rest := skeleton.get_bone_rest(index)
-			skeleton.set_bone_pose_rotation(index, rest.basis.get_rotation_quaternion())
-			skeleton.set_bone_pose_position(index, rest.origin)
+			var rest := _skeleton.get_bone_rest(index)
+			_skeleton.set_bone_pose_rotation(index, rest.basis.get_rotation_quaternion())
+			_skeleton.set_bone_pose_position(index, rest.origin)
+			_skeleton.set_bone_pose_scale(index, rest.basis.get_scale())
 	if _stance != null:
 		_stance.set_process(true)
 		_stance.reapply()

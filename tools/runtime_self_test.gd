@@ -51,6 +51,7 @@ func _ready() -> void:
 	_run_section("map sources and blueprints", 14, _check_map_sources_and_blueprints)
 	_run_section("map catalogue", 23, _check_map_catalog)
 	_run_section("camera and wardrobe wiring", 31, _check_camera_and_wardrobe)
+	_run_section("model clips sampler", 4, _check_model_clips)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -1858,6 +1859,56 @@ func _check_camera_and_wardrobe() -> void:
 
 	rig2.queue_free()
 	target2.queue_free()
+
+
+## The manual sampler must actually move bones: the AnimationMixer was measured
+## to advance its cursor without writing any pose in this build (see the
+## implementation note in `model_clips.gd`), so this component samples the clip
+## itself. A one-bone rig and a two-key library check the write path end to end.
+func _check_model_clips() -> void:
+	var model := Node3D.new()
+	var skeleton := Skeleton3D.new()
+	model.add_child(skeleton)
+	skeleton.add_bone("TestBone")
+	var bone := skeleton.find_bone("TestBone")
+	var stance := ModelStance.new()
+	stance.name = "Stance"
+	model.add_child(stance)
+	var clips := ModelClips.new()
+	model.add_child(clips)
+
+	var lib := AnimationLibrary.new()
+	var anim := Animation.new()
+	anim.length = 1.0
+	anim.loop_mode = Animation.LOOP_LINEAR
+	var track := anim.add_track(Animation.TYPE_ROTATION_3D)
+	anim.track_set_path(track, NodePath("Skeleton3D:TestBone"))
+	anim.track_insert_key(track, 0.0, Quaternion(Vector3.UP, 0.0))
+	anim.track_insert_key(track, 0.5, Quaternion(Vector3.UP, 1.0))
+	anim.track_insert_key(track, 1.0, Quaternion(Vector3.UP, 0.0))
+	lib.add_animation(&"spin", anim)
+	clips.library_override = lib
+	clips.setup(model)
+	add_child(model)
+
+	clips.debug_play(&"spin")
+	_expect(clips._current_clip != null, "debug_play must bind the clip")
+	_expect(not stance.is_processing(), "the stance must be muted while a clip owns the pose")
+	# Sample a quarter in, by hand — the component's own write path.
+	clips._time = 0.25
+	clips._apply_sampled_pose(clips._current_clip, 0.25)
+	var expected := Quaternion(Vector3.UP, 0.5)
+	var got := skeleton.get_bone_pose_rotation(bone)
+	_expect(got.angle_to(expected) < 0.01, "manual sampling must land on the interpolated key")
+	clips._stop_clip()
+	var rest := skeleton.get_bone_rest(bone)
+	_expect(
+		skeleton.get_bone_pose_rotation(bone).angle_to(rest.basis.get_rotation_quaternion()) < 0.01,
+		"stopping must restore the rest pose"
+	)
+
+	clips.queue_free()
+	model.queue_free()
 
 
 ## The ambience layer: levels, looping, point sources, teardown.

@@ -168,8 +168,11 @@ func _process(delta: float) -> void:
 	# rig can be attached before its target's children exist.
 	_update_visual()
 	# Rotation first, so the lateral offset below is expressed against this frame's
-	# basis rather than the previous one's.
-	rotation.y = _yaw
+	# basis rather than the previous one's. The rig holds a *world* heading: the
+	# body turns to face where it walks (`Player._update_facing`), and this
+	# subtraction keeps the view from swinging along with every pivot.
+	var body_yaw: float = target.rotation.y if target != null and is_instance_valid(target) else 0.0
+	rotation.y = _yaw - body_yaw
 	if _pivot != null:
 		_pivot.rotation.x = _pitch
 	# The lateral offset is taken against the camera's current right, so the
@@ -345,7 +348,8 @@ func set_wardrobe_framing(on: bool) -> void:
 ## up must already be framed — and the SpringArm3D repositions its camera child in
 ## its own step, so the arm's length is applied to the camera **by hand** here.
 func _apply_now() -> void:
-	rotation.y = _yaw
+	var body_yaw: float = target.rotation.y if target != null and is_instance_valid(target) else 0.0
+	rotation.y = _yaw - body_yaw
 	if _pivot != null:
 		_pivot.rotation.x = _pitch
 	if _spring_arm != null:

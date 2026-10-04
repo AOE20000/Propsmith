@@ -39,6 +39,10 @@ const EYE_HEIGHT: float = 1.55
 ## the camera, so it is what lets the character pass under something. Standing back
 ## up is refused while there is no headroom, which is what keeps it honest.
 @export var crouch_speed: float = 2.4
+## How fast the body swings to face the movement direction (lerp factor per
+## second). The camera rig subtracts this turn from its own yaw, so the view
+## keeps its heading while the body pivots under it.
+@export var turn_speed: float = 10.0
 ## Fraction of the standing height the body shrinks to when fully crouched.
 @export var crouch_body_scale: float = 0.58
 @export var crouch_transition_per_second: float = 8.0
@@ -184,10 +188,26 @@ func _physics_process(delta: float) -> void:
 
 	move_and_slide()
 	speed = Vector2(velocity.x, velocity.z).length()
+	_update_facing(delta)
 	_track_distance_travelled(delta)
 
 	if global_position.y < -40.0:
 		_respawn()
+
+
+## Face the movement direction. Third person means the character goes where it
+## walks — before this existed the body kept its spawn heading and every turn
+## looked like sidestep-sliding. The camera rig compensates for the body's turn
+## (see `CameraRig._process`), so the view keeps its heading; the weapon rides
+## on the body, so attacks point where the character actually walks.
+func _update_facing(delta: float) -> void:
+	var flat := Vector2(velocity.x, velocity.z)
+	if flat.length_squared() < 0.01:
+		return
+	# The body's forward is -Z (the model's own 180° flip is authored in
+	# `player_scene`), so the yaw that faces `flat` is atan2(-x, -z).
+	var target_yaw := atan2(-flat.x, -flat.y)
+	rotation.y = lerp_angle(rotation.y, target_yaw, clampf(turn_speed * delta, 0.0, 1.0))
 
 
 func _update_stamina(delta: float, wants_sprint: bool) -> void:
