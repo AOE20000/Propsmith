@@ -89,6 +89,7 @@ src/
     plateau_reader.gd      SDK 读取的唯一天花板（加载/展平/属性/量测）
   world/
     surface_query.gd       地表查询服务（物理射线唯一入口）
+    demo_look.gd           观感基线：调校后的 Environment + 太阳，按预设供地图源调用
   player/
     player.gd              角色控制器（移动/体力/蹲下/可被接管）
     camera_rig.gd          第三人称环绕相机
@@ -120,6 +121,7 @@ addons/plateau/            godot-plateau GDExtension（PLATEAU CityGML 加载）
 addons/mod_loader/         GodotModding/godot-mod-loader（zip 式 Mod 加载器）
 addons/Configura/          Configura 角色创建框架
 addons/vrm/ + addons/Godot-MToon-Shader/   V-Sekai godot-vrm（VRM 1.0 导入）
+assets/shaders/water.gdshader   水面着色器（波纹位移 + 菲涅尔天空反射 + 按水深着色）
 tools/                     测试四件套、地图工具、模型导出与探针
 ```
 
@@ -136,6 +138,7 @@ tools/                     测试四件套、地图工具、模型导出与探�
 | **世界变更统一走决策日志** | 离散决定（生成/移除/上色/外观）入 JSONL 日志：崩溃安全、自动保存 O(1)、联机广播与持久化共用同一事件流。快照节承担连续状态与压实点。 |
 | **玩家与市民共用同一基准模型** | 一只市民 = 一张种子确定性参数表；形态键权重与服装可见性是每实例状态，不复制模型资源。 |
 | **按需渲染三道闸** | 渲染器侧距离剔除（55 m）、阴影纪律（仅躯干与头部投影）、站姿骨骼写入距离门（45 m）——远处市民近乎零成本。 |
+| **观感基线是模块而非基类** | 地图源保留各自主导气氛（自选 `DemoLook` 预设），但曝光、色调映射、雾与辉光只调一处——两张地图的截图才像同一个游戏，而不是两个工程。 |
 | **座位就是一个 `Interactable`** | 上下车复用既有探测/提示/按键链路。 |
 | **两套 Mod 加载器按清单文件名分工** | `ModHost` 认 `mod.json`，godot-mod-loader 认 `manifest.json`，互不扫描对方目录。 |
 

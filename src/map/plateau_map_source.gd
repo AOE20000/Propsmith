@@ -65,6 +65,8 @@ var city_offset: Vector3 = Vector3.ZERO
 ## agents actually spawned. Empty report = no place table was found.
 var mobility_report: Dictionary = {}
 var mobility_agents: int = 0
+## Which `DemoLook` preset this city was lit with, reported by `describe()`.
+var _look_preset: StringName = &"city"
 
 ## Crowd size for the first walking-city milestone. Fixed rather than scaled:
 ## the point is to prove the pipeline (table → readiness → routes → bodies that
@@ -192,6 +194,7 @@ func describe() -> Dictionary:
 		"offset": city_offset,
 		"mobility": MobilityReadiness.describe(mobility_report) if not mobility_report.is_empty() else "无地点表（运行 tools/city_export_activity 导出）",
 		"agents": mobility_agents,
+		"look": "%s / %s" % [_look_preset, DemoLook.label(_look_preset)],
 	}
 
 
@@ -465,36 +468,18 @@ func _settle_city_transform(city_container: Node3D) -> void:
 		_density_centre = centre_sum / float(centre_count) + city_container.position
 
 
-## Sky, sun and light fog. Deliberately minimal: the island's environment stage
-## (sea, island-tuned fog) went with the island, and a city wants its own mood
-## anyway.
+## Sky, sun and post-processing, from the demo's shared baseline with the city's
+## own preset: the island's environment stage went with the island, and the city
+## was left on a hand-rolled sky that predated the baseline. Asking `DemoLook`
+## for `city` keeps the cool, grey temperature the district already had while
+## picking up the shared exposure curve, bloom and ambient occlusion — the same
+## values that will be tuned for the demo, so the two maps stay one game.
+##
+## Screen-space reflections stay off in this preset: the district is far too much
+## geometry to spend a per-pixel ray march on.
 func _build_environment(world_root: Node3D) -> void:
-	var environment := WorldEnvironment.new()
-	environment.name = "CityEnvironment"
-	var sky := Sky.new()
-	var sky_material := ProceduralSkyMaterial.new()
-	sky_material.sky_top_color = Color(0.36, 0.55, 0.78)
-	sky_material.sky_horizon_color = Color(0.71, 0.77, 0.83)
-	sky_material.ground_bottom_color = Color(0.28, 0.28, 0.30)
-	sky_material.ground_horizon_color = Color(0.71, 0.77, 0.83)
-	sky.sky_material = sky_material
-	var env := Environment.new()
-	env.background_mode = Environment.BG_SKY
-	env.sky = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.fog_enabled = true
-	env.fog_density = 0.0012
-	env.fog_sky_affect = 0.0
-	environment.environment = env
-	world_root.add_child(environment)
-
-	var sun := DirectionalLight3D.new()
-	sun.name = "Sun"
-	sun.rotation_degrees = Vector3(-52.0, -28.0, 0.0)
-	sun.light_energy = 1.15
-	sun.light_color = Color(1.0, 0.97, 0.92)
-	sun.shadow_enabled = true
-	world_root.add_child(sun)
+	_look_preset = &"city"
+	DemoLook.apply(world_root, _look_preset)
 
 
 ## Rings outward from the building cluster, first outdoor flat spot wins —

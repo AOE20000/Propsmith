@@ -15,6 +15,23 @@ const GROUND_SIZE: float = 160.0
 const WALL_HEIGHT: float = 6.0
 const WALL_THICKNESS: float = 1.0
 
+## The pond dug into the far edge of the lawn. These four numbers are the whole
+## geometry contract: the lawn is laid out as "everything except this rectangle",
+## and the water surface sits one lip below the grass so the bank reads as a bank.
+const POOL_LENGTH: float = 18.0
+const POOL_DEPTH: float = 2.0
+## Dry grass left between the pond and the boundary wall, and at either end.
+const POOL_BACK_EDGE: float = 2.0
+const POOL_SIDE_EDGE: float = 8.0
+## Water level relative to the lawn surface: slightly below it, so there is a
+## visible lip rather than a surface that z-fights with the grass it floods.
+const WATER_LEVEL: float = -0.12
+
+const WATER_SHADER: Shader = preload("res://assets/shaders/water.gdshader")
+
+## Which `DemoLook` preset this map was built with, reported by `describe()`.
+var _look_preset: StringName = DemoLook.DEFAULT_PRESET
+
 var _spawn_position: Vector3 = Vector3(0.0, 1.0, 0.0)
 
 
@@ -66,32 +83,51 @@ func describe() -> Dictionary:
 		"city": "playground",
 		"size": "%.0f m" % GROUND_SIZE,
 		"place_table": "无（市民游荡）",
+		"look": "%s / %s" % [_look_preset, DemoLook.label(_look_preset)],
 	}
 
 
-## A flat slab of grass. Every prop spawned here lands on it, and the surface
-## query reads it through the map physics layer like any other map's ground.
+## The lawn, and the pond dug into one end of it. Every prop spawned here lands
+## on it, and the surface query reads it through the map physics layer like any
+## other map's ground.
+##
+## The pond is a real basin — banks on three sides and a floor two metres down —
+## rather than a plane laid over the grass, because the water shader grades its
+## colour and opacity by how much water is between the surface and whatever the
+## depth buffer holds. Laid flat on grass there would be no water under it to
+## see, and the whole pond would render as blue paint.
+##
+## The largest piece keeps the name `Ground`: the self-test asserts a playground
+## has ground, and swapping that name for "the north lawn" would break a test for
+## a reason no reader could guess.
 func _build_ground(world_root: Node3D) -> void:
-	var ground := StaticBody3D.new()
-	ground.name = "Ground"
-	ground.collision_layer = 1 | SurfaceQuery.GROUND_MASK
-	ground.collision_mask = 0
-	var shape := CollisionShape3D.new()
-	shape.name = "GroundShape"
-	var box := BoxShape3D.new()
-	box.size = Vector3(GROUND_SIZE, 2.0, GROUND_SIZE)
-	shape.shape = box
-	ground.add_child(shape)
-	ground.position = Vector3(0.0, -1.0, 0.0)
+	var half: float = GROUND_SIZE * 0.5
+	var pool_half_width: float = half - POOL_SIDE_EDGE
+	var pool_near: float = half - POOL_BACK_EDGE - POOL_LENGTH
+	var pool_far: float = half - POOL_BACK_EDGE
+	var pool_centre_z: float = (pool_near + pool_far) * 0.5
 
-	var visual := MeshInstance3D.new()
-	visual.name = "Visual"
-	var plane := BoxMesh.new()
-	plane.size = Vector3(GROUND_SIZE, 2.0, GROUND_SIZE)
-	visual.mesh = plane
-	visual.material_override = _material(Color(0.36, 0.52, 0.28), 0.95)
-	ground.add_child(visual)
-	world_root.add_child(ground)
+	var grass := Color(0.36, 0.52, 0.28)
+	# The lawn, front of the pond: z from -half to pool_near.
+	_static_box(world_root, "Ground",
+		Vector3(0.0, -1.0, (-half + pool_near) * 0.5),
+		Vector3(GROUND_SIZE, 2.0, pool_near + half), grass, 0.95)
+	# Banks either side of the pond, and the strip behind it.
+	_static_box(world_root, "BankWest",
+		Vector3((-half + -pool_half_width) * 0.5, -1.0, pool_centre_z),
+		Vector3(POOL_SIDE_EDGE, 2.0, POOL_LENGTH), grass, 0.95)
+	_static_box(world_root, "BankEast",
+		Vector3((half + pool_half_width) * 0.5, -1.0, pool_centre_z),
+		Vector3(POOL_SIDE_EDGE, 2.0, POOL_LENGTH), grass, 0.95)
+	_static_box(world_root, "BankBack",
+		Vector3(0.0, -1.0, (pool_far + half) * 0.5),
+		Vector3(GROUND_SIZE, 2.0, half - pool_far), grass, 0.95)
+	# The pond floor: its top face is POOL_DEPTH below the lawn, and the banks'
+	# inner faces close the sides, so the basin needs no separate retaining walls.
+	_static_box(world_root, "PondFloor",
+		Vector3(0.0, -POOL_DEPTH - 1.0, pool_centre_z),
+		Vector3(pool_half_width * 2.0, 2.0, POOL_LENGTH),
+		Color(0.30, 0.29, 0.23), 0.98)
 
 
 ## Three white-box rooms with an open doorway each: something to build inside,
@@ -126,56 +162,66 @@ func _room(parent: Node3D, at: Vector3, yaw_degrees: float) -> void:
 
 
 func _wall(parent: Node3D, at: Vector3, size: Vector3, color: Color) -> void:
-	var wall := StaticBody3D.new()
-	wall.collision_layer = 1 | SurfaceQuery.GROUND_MASK
-	wall.collision_mask = 0
-	var shape := CollisionShape3D.new()
-	var box := BoxShape3D.new()
-	box.size = size
-	shape.shape = box
-	wall.add_child(shape)
-	var visual := MeshInstance3D.new()
-	visual.mesh = BoxMesh.new()
-	(visual.mesh as BoxMesh).size = size
-	visual.material_override = _material(color, 0.9)
-	wall.add_child(visual)
-	wall.position = at
-	parent.add_child(wall)
+	_static_box(parent, "Wall", at, size, color, 0.9)
 
 
 func _slab(parent: Node3D, at: Vector3, size: Vector3, color: Color) -> void:
-	var slab := StaticBody3D.new()
-	slab.collision_layer = 1 | SurfaceQuery.GROUND_MASK
-	slab.collision_mask = 0
+	_static_box(parent, "Slab", at, size, color, 0.9)
+
+
+## One static, collidable box with a plain colour: the unit this whole map is
+## built from. Collision so props and players stand on it, the ground mask so the
+## surface query finds it, and nothing else notable — this map is a backdrop for
+## the sandbox, not a level with secrets in it.
+func _static_box(parent: Node3D, box_name: String, at: Vector3, size: Vector3, color: Color, roughness: float) -> StaticBody3D:
+	var body := StaticBody3D.new()
+	body.name = box_name
+	body.collision_layer = 1 | SurfaceQuery.GROUND_MASK
+	body.collision_mask = 0
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
 	box.size = size
 	shape.shape = box
-	slab.add_child(shape)
+	body.add_child(shape)
 	var visual := MeshInstance3D.new()
-	visual.mesh = BoxMesh.new()
-	(visual.mesh as BoxMesh).size = size
-	visual.material_override = _material(color, 0.9)
-	slab.add_child(visual)
-	slab.position = at
-	parent.add_child(slab)
+	visual.name = "Visual"
+	var mesh := BoxMesh.new()
+	mesh.size = size
+	visual.mesh = mesh
+	visual.material_override = _material(color, roughness)
+	body.add_child(visual)
+	body.position = at
+	parent.add_child(body)
+	return body
 
 
-## A water strip along one edge: visual only for now (no swim logic), but it
-## gives the lawn a horizon that is not just more grass.
+## The pond surface: a subdivided plane carrying `water.gdshader`, which wants
+## vertices to displace for its waves and the opaque depth buffer for its colour
+## gradient. Deliberately a little larger than the basin so no sliver of floor
+## shows along the waterline — the overhang is buried inside the banks.
 func _build_water(world_root: Node3D) -> void:
+	var half: float = GROUND_SIZE * 0.5
+	var pool_half_width: float = half - POOL_SIDE_EDGE
+	var pool_centre_z: float = half - POOL_BACK_EDGE - POOL_LENGTH * 0.5
+	var size := Vector2(pool_half_width * 2.0 + 0.6, POOL_LENGTH + 0.6)
+
 	var water := MeshInstance3D.new()
 	water.name = "Water"
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(GROUND_SIZE * 0.9, 18.0)
+	plane.size = size
+	# One-metre quads: the wave field's shortest octave is under three metres, so
+	# anything coarser would sample the displacement below its own Nyquist rate
+	# and put the aliasing straight into the silhouette.
+	plane.subdivide_width = int(size.x)
+	plane.subdivide_depth = int(size.y)
 	water.mesh = plane
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.2, 0.42, 0.6, 0.85)
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.roughness = 0.15
-	material.metallic = 0.3
+	# A transparent surface still casts a shadow by default, which would throw a
+	# hard rectangle of shade onto the pond floor the water is meant to reveal.
+	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var material := ShaderMaterial.new()
+	material.shader = WATER_SHADER
 	water.material_override = material
-	water.position = Vector3(0.0, 0.06, GROUND_SIZE * 0.5 - 11.0)
+	water.position = Vector3(0.0, WATER_LEVEL, pool_centre_z)
 	world_root.add_child(water)
 
 
@@ -189,53 +235,19 @@ func _build_walls(world_root: Node3D) -> void:
 
 
 func _boundary_wall(parent: Node3D, at: Vector3, size: Vector3) -> void:
-	var wall := StaticBody3D.new()
-	wall.collision_layer = 1 | SurfaceQuery.GROUND_MASK
-	wall.collision_mask = 0
-	var shape := CollisionShape3D.new()
-	var box := BoxShape3D.new()
-	box.size = size
-	shape.shape = box
-	wall.add_child(shape)
-	var visual := MeshInstance3D.new()
-	visual.mesh = BoxMesh.new()
-	(visual.mesh as BoxMesh).size = size
-	visual.material_override = _material(Color(0.5, 0.48, 0.45), 0.95)
-	wall.add_child(visual)
-	wall.position = at
-	parent.add_child(wall)
+	_static_box(parent, "BoundaryWall", at, size, Color(0.5, 0.48, 0.45), 0.95)
 
 
-## Sky and sun. Kept local to each map source on purpose: a city and a lawn
-## want different moods, and sharing a "default sky" would couple map sources
-## to a base class they do not otherwise need.
+## Sky, sun and the whole post-processing stack — all of it from the demo's
+## shared baseline.
+##
+## The mood is still this map's own choice (`DemoLook` is opt-in, and the city
+## asks for a different preset), but exposure, bloom, fog and the shadow cascade
+## are now tuned in one place. That is the whole point: two screenshots of two
+## maps should read as two places in one game, not as two projects.
 func _build_environment(world_root: Node3D) -> void:
-	var environment := WorldEnvironment.new()
-	environment.name = "Environment"
-	var sky := Sky.new()
-	var sky_material := ProceduralSkyMaterial.new()
-	sky_material.sky_top_color = Color(0.4, 0.58, 0.82)
-	sky_material.sky_horizon_color = Color(0.76, 0.82, 0.86)
-	sky_material.ground_bottom_color = Color(0.3, 0.32, 0.3)
-	sky_material.ground_horizon_color = Color(0.76, 0.82, 0.86)
-	sky.sky_material = sky_material
-	var env := Environment.new()
-	env.background_mode = Environment.BG_SKY
-	env.sky = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.fog_enabled = true
-	env.fog_density = 0.002
-	env.fog_sky_affect = 0.0
-	environment.environment = env
-	world_root.add_child(environment)
-
-	var sun := DirectionalLight3D.new()
-	sun.name = "Sun"
-	sun.rotation_degrees = Vector3(-48.0, -35.0, 0.0)
-	sun.light_energy = 1.1
-	sun.light_color = Color(1.0, 0.98, 0.94)
-	sun.shadow_enabled = true
-	world_root.add_child(sun)
+	_look_preset = &"day"
+	DemoLook.apply(world_root, _look_preset)
 
 
 ## A small wandering crowd: no place table exists on this map, so the mobility
