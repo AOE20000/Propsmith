@@ -50,7 +50,7 @@ func _ready() -> void:
 	_run_section("scripted mod bridges", 7, _check_scripted_bridges)
 	_run_section("map sources and blueprints", 14, _check_map_sources_and_blueprints)
 	_run_section("map catalogue", 23, _check_map_catalog)
-	_run_section("camera and wardrobe wiring", 21, _check_camera_and_wardrobe)
+	_run_section("camera and wardrobe wiring", 30, _check_camera_and_wardrobe)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -1777,6 +1777,84 @@ func _check_camera_and_wardrobe() -> void:
 
 	rig.queue_free()
 	target.queue_free()
+
+	# Second rig, with a model attached: first person keeps the figure visible —
+	# you can see yourself when you look down — and only the head-side meshes
+	# hide, so the face never fills the lens. The capsule stays hidden in every
+	# view (it is a fallback body, not a second one).
+	var rig2 := CameraRig.new()
+	rig2.capture_mouse_on_start = false
+	var arm2 := SpringArm3D.new()
+	arm2.name = "SpringArm3D"
+	rig2.add_child(arm2)
+	var target2 := Node3D.new()
+	# A bare Node3D has no look_input_enabled property at all — the rig must
+	# treat a missing property as enabled (only an explicit false turns it off).
+	var visual2 := Node3D.new()
+	visual2.name = "Visual"
+	target2.add_child(visual2)
+	var model := Node3D.new()
+	model.name = "PlayerModel"
+	target2.add_child(model)
+	var head_mesh := MeshInstance3D.new()
+	head_mesh.name = "Akane_Head"
+	model.add_child(head_mesh)
+	var hair_mesh := MeshInstance3D.new()
+	hair_mesh.name = "Akane_Hair_Back"
+	model.add_child(hair_mesh)
+	var body_mesh := MeshInstance3D.new()
+	body_mesh.name = "SiroinoSotai_Body"
+	model.add_child(body_mesh)
+	rig2.target = target2
+	add_child(rig2)
+	add_child(target2)
+
+	_expect(rig2.invert_y, "vertical look must start inverted (a toggle, not a trap)")
+	rig2.set_first_person(true)
+	_expect(model.visible, "first person must keep the figure visible so you can see yourself")
+	_expect(
+		not head_mesh.visible and not hair_mesh.visible,
+		"first person must hide the meshes the camera sits inside"
+	)
+	_expect(body_mesh.visible, "first person must keep the body visible")
+	rig2.set_first_person(false)
+	_expect(
+		head_mesh.visible and hair_mesh.visible and body_mesh.visible,
+		"leaving first person must restore every mesh"
+	)
+	_expect(not visual2.visible, "with a model the capsule stays hidden even back in third person")
+
+	# Middle-button height drag: press, drag down raises, drag up lowers, and the
+	# release ends it — a drag after release must not move the camera.
+	var middle_press := InputEventMouseButton.new()
+	middle_press.button_index = MOUSE_BUTTON_MIDDLE
+	middle_press.pressed = true
+	rig2._unhandled_input(middle_press)
+	var before_drag: float = rig2.pivot_height
+	var drag_down := InputEventMouseMotion.new()
+	drag_down.relative = Vector2(0.0, 120.0)
+	rig2._unhandled_input(drag_down)
+	_expect(rig2.pivot_height > before_drag, "a downward middle-drag must raise the camera")
+	var drag_up := InputEventMouseMotion.new()
+	drag_up.relative = Vector2(0.0, -60.0)
+	rig2._unhandled_input(drag_up)
+	_expect(
+		rig2.pivot_height < before_drag + 120.0 * rig2.height_drag_step,
+		"an upward middle-drag must lower the camera"
+	)
+	var middle_release := InputEventMouseButton.new()
+	middle_release.button_index = MOUSE_BUTTON_MIDDLE
+	middle_release.pressed = false
+	rig2._unhandled_input(middle_release)
+	var after_release: float = rig2.pivot_height
+	rig2._unhandled_input(drag_down)
+	_expect(
+		is_equal_approx(rig2.pivot_height, after_release),
+		"a drag after release must not move the camera"
+	)
+
+	rig2.queue_free()
+	target2.queue_free()
 
 
 ## The ambience layer: levels, looping, point sources, teardown.

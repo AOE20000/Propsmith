@@ -6,7 +6,9 @@ class_name CameraRig
 
 @export var target: Node3D = null
 @export var mouse_sensitivity: float = 0.0026
-@export var invert_y: bool = false
+## Vertical look starts inverted (flight-style: mouse up, look down). A toggle,
+## not a layout decision — anything that flips an axis must be flippable back.
+@export var invert_y: bool = true
 @export var min_pitch_degrees: float = -70.0
 @export var max_pitch_degrees: float = 62.0
 @export var follow_lerp: float = 14.0
@@ -22,6 +24,8 @@ class_name CameraRig
 @export var min_arm_length: float = 1.2
 @export var max_arm_length: float = 9.0
 @export var zoom_step: float = 0.6
+## Metres of orbit height per pixel of a held-middle-button vertical drag.
+@export var height_drag_step: float = 0.0035
 ## How far one press of 升高/降低 (T/G) moves the orbit height, and the range it is
 ## allowed to cover: high enough to look down at an outfit, low enough to frame a
 ## face from below.
@@ -35,6 +39,9 @@ var _arm_length: float = 5.4
 ## The third-person distance to restore when first person ends.
 var _saved_arm_length: float = 5.4
 var _first_person: bool = false
+## True while the middle button is held: vertical mouse motion drags the orbit
+## height instead of turning the view.
+var _height_drag: bool = false
 ## Lateral offset of the orbit centre, in camera-right metres. Zero in normal play;
 ## the wardrobe view uses it to hold the character left of the frame while the panel
 ## owns the right half of the screen.
@@ -94,16 +101,32 @@ func _unhandled_input(event: InputEvent) -> void:
 	# A controller that brings its own camera (the debug free camera) turns this
 	# off, so one mouse motion cannot steer two cameras at once. Read dynamically
 	# rather than through a `Player` reference: the rig must keep working for any
-	# target that never heard of this property.
-	if target != null and not bool(target.get(&"look_input_enabled")):
-		return
+	# target that never heard of this property — a missing property reads as
+	# enabled, and only an explicit false turns the view input off. (`bool(null)`
+	# is not a valid constructor call here, so the truthiness check is direct.)
+	if target != null:
+		var look_enabled: Variant = target.get(&"look_input_enabled")
+		if look_enabled != null and not look_enabled:
+			return
 	# The wardrobe owns the framing while it is open — the rig runs under the menu
 	# (see `_ready`), and wheel/height/first-person presses would fight a view the
 	# panel chose on purpose.
 	if _wardrobe:
 		return
-	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+	if event is InputEventMouseMotion:
 		var motion: InputEventMouseMotion = event
+		# A held middle button drags the orbit height, captured or not — the
+		# windowed mouse (no capture) must be able to do it too. Dragging down
+		# raises the camera: pulling the world downward. One sign flips the feel.
+		if _height_drag:
+			pivot_height = clampf(
+				pivot_height + motion.relative.y * height_drag_step,
+				min_pivot_height,
+				max_pivot_height
+			)
+			return
+		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+			return
 		_yaw -= motion.relative.x * mouse_sensitivity
 		var pitch_delta: float = motion.relative.y * mouse_sensitivity
 		_pitch += -pitch_delta if invert_y else pitch_delta
@@ -114,12 +137,20 @@ func _unhandled_input(event: InputEvent) -> void:
 		)
 	elif event is InputEventMouseButton and event.is_pressed():
 		# Wheel up pulls the camera in, wheel down pushes it out — the direction
-		# every third-person game uses, so nobody has to think about it.
+		# every third-person game uses, so nobody has to think about it. The
+		# middle button starts a height drag instead of zooming.
 		var button: InputEventMouseButton = event
 		if button.button_index == MOUSE_BUTTON_WHEEL_UP:
 			zoom_in()
 		elif button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			zoom_out()
+		elif button.button_index == MOUSE_BUTTON_MIDDLE:
+			_height_drag = true
+	elif event is InputEventMouseButton:
+		# The release ends the drag even if the press happened elsewhere —
+		# a lost press must not strand the rig in height-drag mode.
+		if (event as InputEventMouseButton).button_index == MOUSE_BUTTON_MIDDLE:
+			_height_drag = false
 	elif event.is_action_pressed(&"camera_raise"):
 		raise_pivot()
 	elif event.is_action_pressed(&"camera_lower"):
@@ -200,6 +231,7 @@ func set_first_person(on: bool) -> void:
 	else:
 		_apply_arm(_saved_arm_length)
 	_update_visual()
+	_apply_first_person_view(on)
 
 
 func is_first_person() -> bool:
@@ -232,9 +264,36 @@ func _update_visual() -> void:
 		# With a model attached the capsule is a fallback body, not a second one:
 		# it stays hidden in every view, or this line re-opens it each tick and the
 		# capsule re-emerges wrapped around the figure (the wardrobe-view bug).
+		# Without a model the capsule IS the body, so first person hides it —
+		# the camera sits inside it.
 		_visual.visible = not _first_person and not has_model
 	if has_model:
-		_model.visible = not _first_person
+		# The figure stays visible in first person on purpose — looking down must
+		# show you yourself. Only the head meshes hide, once, in
+		# `_apply_first_person_view`; this per-tick line only guards the whole.
+		_model.visible = true
+
+
+## Name parts whose meshes hide in first person, matched case-insensitively as
+## substrings — no fixed list, so a mod-provided model hides its head the same
+## way. `_ear` keeps the underscore so "sportswear" cannot match; a name that
+## slips through is a cosmetic leak, never a crash.
+const FP_HIDDEN_MESH_PARTS: PackedStringArray = [
+	"head", "hair", "face", "eye", "brow", "lash", "_ear", "ahoge",
+	"glass", "hat", "helm", "mask",
+]
+
+
+func _apply_first_person_view(on: bool) -> void:
+	if _model == null or not is_instance_valid(_model):
+		return
+	for node: Node in _model.find_children("*", "MeshInstance3D", true, false):
+		var mesh := node as MeshInstance3D
+		var lower := String(mesh.name).to_lower()
+		for part: String in FP_HIDDEN_MESH_PARTS:
+			if part in lower:
+				mesh.visible = not on
+				break
 
 
 ## The wardrobe view: third person, from the front, the character held left of the
@@ -249,6 +308,9 @@ func set_wardrobe_framing(on: bool) -> void:
 	if _wardrobe == on:
 		return
 	_wardrobe = on
+	# A height drag must not survive into a view the panel owns: its release
+	# event is swallowed by the wardrobe's early return in `_unhandled_input`.
+	_height_drag = false
 	if on:
 		_saved_yaw = _yaw
 		_saved_pitch = _pitch
