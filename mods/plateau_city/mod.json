@@ -1,0 +1,9 @@
+{
+  "id": "plateau_city",
+  "name": "涩谷街区（PLATEAU）",
+  "version": "1.0.0",
+  "author": "Propsmith",
+  "enabled": true,
+  "dependencies": [],
+  "description": "把 PLATEAU 涩谷街区作为一张可选地图载入。需要 godot-plateau GDExtension 与 data/plateau 数据（均不入库，缺失时该地图会给出可操作的报错）。"
+}

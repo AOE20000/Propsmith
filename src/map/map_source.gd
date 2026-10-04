@@ -9,9 +9,13 @@ class_name MapSource
 ## whether the map came from a dataset, an algorithm, or a mod.
 ##
 ## The island implementation lived here once as the whole world builder. It was
-## removed when the project switched to PLATEAU city maps; `PlateauMapSource` is
-## the built-in implementation, and a mod can register its own source through the
-## same service.
+## removed when the project switched to PLATEAU city maps, and it has since moved
+## *out* again the other way: the only map the core ships is the demo lawn
+## (`PlaygroundMapSource`), and the city arrives as a mod
+## (`mods/plateau_city/`) registered through `ModContext.add_map_source`.
+## `MapCatalog` is the one place that knows what is on offer, and the boot resolves
+## through it — a source never learns whether the map came from a dataset, an
+## algorithm, or a mod.
 
 ## Build the world under `world_root`. Returns false on failure, with the reason
 ## pushed to the log, so boot can abort instead of dropping the player into a

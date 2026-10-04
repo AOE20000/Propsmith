@@ -54,6 +54,9 @@ func _ready() -> void:
 		await get_tree().process_frame
 
 	if auto_load_mods:
+		# Must run *before* `_register_core_services`: the map catalogue reads
+		# mod-registered maps when the session resolves its map, and a mod loaded
+		# after that would be a map that silently does not exist.
 		ModHost.load_all()
 
 	_register_core_services(failures)
@@ -117,21 +120,35 @@ func _settle_and_verify() -> void:
 		get_tree().quit(EXIT_BOOT_FAILED)
 
 
-## Which map the session runs on, chosen by `DSH_MAP_SOURCE` (`playground` or
-## the default `plateau`). Mod-registered sources join through the same seam
-## later; the switch lives in exactly one place.
+## Which map the session runs on.
+##
+## The catalogue owns the answer: the core ships the demo lawn and mods may bring
+## more (the PLATEAU city arrives that way), so the choice is "what the environment
+## asked for, resolved against everything registered", and the fallback when the
+## ask cannot be honoured is explained rather than silent. The switch lives in
+## exactly one place — the catalogue.
 func _make_map_source() -> MapSource:
-	match OS.get_environment("DSH_MAP_SOURCE"):
-		"playground":
-			return PlaygroundMapSource.new()
-	return PlateauMapSource.new()
+	var catalog: MapCatalog = Services.get_as(&"maps", &"MapCatalog") as MapCatalog
+	if catalog == null:
+		push_error("[boot] the maps service is missing; cannot resolve a map")
+		return PlaygroundMapSource.new()
+	return catalog.resolve_requested()
 
 
 ## Services are registered by the module that owns them, so swapping a module
 ## means changing one registration rather than editing the boot order.
 func _register_core_services(failures: Array[String]) -> void:
+	if not Services.has(&"maps"):
+		var catalog := MapCatalog.new()
+		catalog.name = "MapCatalog"
+		Services.register(&"maps", catalog)
+		add_child(catalog)
 	if not Services.has(&"map_source"):
-		Services.register(&"map_source", _make_map_source())
+		var source: MapSource = _make_map_source()
+		if source == null:
+			failures.append("no map could be resolved for this session")
+		else:
+			Services.register(&"map_source", source)
 	if not Services.has(&"surface_query"):
 		Services.register(&"surface_query", SurfaceQuery.new())
 	if not Services.has(&"vehicle_system"):

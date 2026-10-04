@@ -49,6 +49,7 @@ func _ready() -> void:
 	_run_section("npc citizens", 11, _check_npc_citizens)
 	_run_section("scripted mod bridges", 7, _check_scripted_bridges)
 	_run_section("map sources and blueprints", 13, _check_map_sources_and_blueprints)
+	_run_section("map catalogue", 17, _check_map_catalog)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -1597,6 +1598,61 @@ func _check_decor_and_presets() -> void:
 
 	director.queue_free()
 	world.queue_free()
+
+
+## The map catalogue: what is on offer, what is the default, and the selector/save
+## identity split.
+##
+## The subtle assertion is the last-but-one: the same source registered under two
+## selectors is *two maps*, because the selector is the stable name a session asks
+## for while `map_id()` is the save fingerprint — for a PLATEAU map that fingerprint
+## changes every time the dataset is re-exported, and keying the catalogue on it
+## would make every re-export a different map.
+func _check_map_catalog() -> void:
+	var catalog := MapCatalog.new()
+	add_child(catalog)
+	_expect(catalog.default_id() == &"playground", "the demo map must be the default")
+	_expect(catalog.requested_id() == &"playground", "an unset environment must mean the default")
+	var lawn: MapSource = catalog.resolve(&"playground")
+	_expect(lawn != null, "the core map must resolve")
+	_expect(lawn is PlaygroundMapSource, "the core map must be the demo lawn")
+	_expect(lawn != null and lawn.map_id() == "playground:1", "the core map must keep its identity")
+	var before: Array[String] = []
+	for entry: Dictionary in catalog.list():
+		before.append(String(entry["id"]))
+	_expect(before.has("playground"), "the core map must be listed")
+	_expect(not before.has("selftest_map"), "a map no mod registered must not be listed")
+	_expect(catalog.resolve(&"selftest_map") == null, "an unregistered map must not resolve")
+	_expect(
+		catalog.resolve(&"shibuya") == null,
+		"the city map is provided by a mod; a session without that mod must not offer it"
+	)
+
+	var context := ModContext.new(&"selftest_maps")
+	_expect(
+		context.add_map_source(PlaygroundMapSource.new(), &"selftest_map", "自测地图"),
+		"a mod must be able to register a whole map"
+	)
+	_expect(not context.add_map_source(null, &"bad_map"), "a null source must be refused")
+	ModHost.contexts["selftest_maps"] = context
+	_expect(catalog.resolve(&"selftest_map") != null, "a mod-registered map must resolve")
+	var after: Array[String] = []
+	for entry: Dictionary in catalog.list():
+		after.append(String(entry["id"]))
+	_expect(after.has("selftest_map"), "a mod-registered map must be listed")
+	_expect(
+		String(catalog.resolve(&"selftest_map").map_id()) == "playground:1",
+		"the registered source must be the one that resolves"
+	)
+	_expect(
+		context.add_map_source(PlaygroundMapSource.new(), &"selftest_other"),
+		"the same source under another selector is another map"
+	)
+	OS.set_environment("DSH_MAP_SOURCE", "selftest_map")
+	_expect(catalog.requested_id() == &"selftest_map", "the environment must name the map")
+	OS.set_environment("DSH_MAP_SOURCE", "")
+	ModHost.contexts.erase("selftest_maps")
+	_expect(catalog.resolve(&"selftest_map") == null, "removing the mod must remove its map")
 
 
 ## The ambience layer: levels, looping, point sources, teardown.

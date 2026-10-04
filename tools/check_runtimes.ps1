@@ -61,6 +61,7 @@ $benignPatterns = @(
     "[render] style 'selftest_broken' factory did not return a RenderStyle"
     "[render] no render style 'no_such_style'"
     "[render] no look preset 'no_such_preset'"
+    "[mod:selftest_maps] add_map_source 'bad_map' needs an actual MapSource"
 )
 
 

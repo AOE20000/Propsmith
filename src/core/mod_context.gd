@@ -31,6 +31,10 @@ var tools: Dictionary = {}
 var npc_factories: Dictionary = {}
 var player_models: Dictionary = {}
 var render_styles: Dictionary = {}
+## Whole maps a mod brings. `&"playground"` is the only map the core ships; a city
+## built on a 1.9 GB dataset the repo does not contain is the shape this slot exists
+## for. Registered with a **selector** id — see `add_map_source`.
+var map_sources: Dictionary = {}
 
 
 func _init(owner_mod_id: StringName) -> void:
@@ -207,6 +211,31 @@ func add_player_model(model_id: StringName, display_name: String, factory: Calla
 ## a particular map, a particular preset, or that it is the first style applied:
 ## derive what you draw from the preset the world carries (`DemoLook.preset_of`)
 ## rather than from constants.
+## Register a whole map.
+##
+## `map_id` is the **selector** a session or a menu uses to ask for this map, and it
+## is deliberately not the same thing as the source's own `map_id()`: that one is the
+## *save identity* — for a PLATEAU map it is a fingerprint of the dataset files, and
+## it changes when the data changes. Keying the catalogue on it would make every
+## re-export of the city a different map. The selector is the stable name; the
+## fingerprint stays inside the source where the save code reads it.
+##
+## `display_name` is what a menu shows; an empty one falls back to the mod's own
+## name, which is right for a mod that exists to provide one map.
+func add_map_source(source: MapSource, map_id: StringName, display_name: String = "") -> bool:
+	if source == null or not (source is MapSource):
+		push_error("[mod:%s] add_map_source '%s' needs an actual MapSource" % [_mod_id, map_id])
+		return false
+	if display_name.strip_edges().is_empty():
+		display_name = String(_mod_id)
+	return _register(map_sources, map_id, {
+		"id": map_id,
+		"display_name": display_name,
+		"source": source,
+		"owner": _mod_id,
+	}, "map source")
+
+
 func add_render_style(style_id: StringName, display_name: String, factory: Callable) -> bool:
 	if display_name.strip_edges().is_empty():
 		push_error("[mod:%s] render style '%s' needs a display name: it is what the style switch shows" % [_mod_id, style_id])

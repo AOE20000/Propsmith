@@ -54,10 +54,28 @@ res://mods/my_mod/
 > 工厂返回 RigidBody3D）、`add_npc_factory`（**真消费者**：生成菜单的 NPC 区，
 > 工厂返回 CharacterBody3D）、`add_tool_callbacks` / `add_tool`（**真消费者**：
 > 工具枪轮盘与建造面板）、`add_player_model`（**真消费者**：替换默认玩家形象）、
-> `add_render_style` / `add_render_style_preset`（**真消费者**：画风切换，`F2`）。
+> `add_render_style` / `add_render_style_preset`（**真消费者**：画风切换，`F2`）、
+> `add_map_source`（**真消费者**：`MapCatalog` 解析会话的地图，`DSH_MAP_SOURCE` 选）。
 > `add_poi_factory` 与 `add_terrain_modifier` 仍是预留（旧地形系统的消费者已移除），
 > `add_item_definition` 也仍预留（无库存系统）——注册都安全，只是无可见效果。
 > 在地图上放内容也可以用 `_on_world_populate` 直接注入——见 `mods/lighthouse/`。
+
+## 扩展点：整张地图
+
+`context.add_map_source(source, selector_id, display_name)` 注册一张**完整的地图**
+——不是放在地图里的内容，而是"这一局发生在哪里"。核心只自带 Demo 地图；涩谷
+（需要 `godot-plateau` 扩展与不入库的数据集）就是这么提供的，见
+`mods/plateau_city/`。
+
+两个 id 别混：
+
+- **`selector_id`**：`DSH_MAP_SOURCE` 与菜单用的**稳定名字**（如 `shibuya`）。
+- **`source.map_id()`**：**存档指纹**——涩谷的是数据集文件的哈希，数据一重导出就变。
+  目录按选择器取键，指纹留在地图源里给存档校验用。
+
+请求了一个目录里没有的地图时，启动会**说明有哪些可选**再回落到 Demo——静默换图
+等于让玩家盯着错误的世界却没人解释。数据式 Mod（只带 JSON、不带代码）**无法**
+注册地图：一张地图就是一个 `MapSource` 子类，这需要代码，属于能力边界而非缺陷。
 
 ### 1. 往世界里放自己的东西（推荐入口）
 
