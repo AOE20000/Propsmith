@@ -50,10 +50,17 @@ static func build() -> Player:
 	return player
 
 
-## The Configura humanoid (an imported example model with a full options set)
-## is the built-in default body; a mod-registered `player_model` replaces it
-## (first id-ordered registration wins, like every other kind). Absent mod and
-## absent model → silent capsule fallback; nothing here may fail the boot.
+## The player's body, with a fallback chain that must survive a wiped or broken
+## `mods/` directory:
+##
+##   1. a mod-registered `player_model` (first id-ordered registration wins),
+##   2. the **built-in** VRM — a core *asset*, not a mod, so core content cannot
+##      be taken out by touching mods/,
+##   3. the silent capsule.
+##
+## The Configura example model is no longer in this chain: it was example
+## content, not a body the game owes the player, and a fallback should look
+## intentional rather than leftover.
 ##
 ## Either way a `CharacterAppearanceController` rides on the player: it owns
 ## the look state, applies it to the model when one exists, and persists it
@@ -61,7 +68,7 @@ static func build() -> Player:
 ## boots even when a later boot falls back to the capsule. A modded model keeps
 ## the panel working: variants, colours and proportions are matched by name and
 ## anything the model does not have is skipped.
-const CONFIGURA_MODEL_SCENE: String = "res://addons/Configura/!example/character_scenes/example_model.tscn"
+const BUILT_IN_MODEL: String = "res://assets/characters/base_female.vrm"
 static func _attach_appearance(player: Player) -> void:
 	var controller := CharacterAppearanceController.new()
 	controller.name = "Appearance"
@@ -81,10 +88,10 @@ static func _attach_appearance(player: Player) -> void:
 		visual.visible = false
 
 
-## Mod override first, built-in Configura second, null means capsule. A mod
-## factory failing is a warning, not a boot failure: the fallback body exists
-## precisely so a broken contribution costs the player their custom look, not
-## the game.
+## Mod override first, the built-in VRM second (a core asset — it survives a
+## wiped or broken mods/ directory), null means capsule. A mod factory failing
+## is a warning, not a boot failure: the fallback chain exists precisely so a
+## broken contribution costs the player their custom look, not the game.
 static func resolve_player_model() -> Node3D:
 	var entries := ModHost.content_ordered(&"player_model")
 	if not entries.is_empty():
@@ -93,9 +100,9 @@ static func resolve_player_model() -> Node3D:
 		if modded != null:
 			return modded
 		push_warning("[player] mod player model factory returned null — falling back")
-	if not ResourceLoader.exists(CONFIGURA_MODEL_SCENE, "PackedScene"):
+	if not ResourceLoader.exists(BUILT_IN_MODEL, "PackedScene"):
 		return null
-	var packed := load(CONFIGURA_MODEL_SCENE) as PackedScene
+	var packed := load(BUILT_IN_MODEL) as PackedScene
 	if packed == null:
 		return null
 	return packed.instantiate() as Node3D
