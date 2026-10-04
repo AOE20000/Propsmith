@@ -51,6 +51,7 @@ func _ready() -> void:
 	_run_section("map sources and blueprints", 13, _check_map_sources_and_blueprints)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
+	_run_section("map decor and look presets", 35, _check_decor_and_presets)
 	_run_section("boot summary", 4, _check_summary)
 
 	print("")
@@ -1430,6 +1431,167 @@ func _check_render_styles() -> void:
 	)
 	_expect(director.cycle(1), "cycling must move to another style")
 	_expect(director.current_id() == &"toon", "cycling from 写实 must land on 3渲2")
+
+	director.queue_free()
+	world.queue_free()
+
+
+## The demo map's scenery, and the map's time of day.
+##
+## Two things are worth asserting here. The builders have to stay inside the
+## project's collision policy — decor is an obstacle, not ground, or a prop spawned
+## on the lawn starts landing on top of lantern posts — and the preset switch has to
+## keep the render-style seam in step, because a style's overrides are *relative* to
+## the preset. The second one is the interesting assertion; the first is the one
+## that would otherwise rot quietly as new scenery gets added.
+func _check_decor_and_presets() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 12345
+
+	# --- builders ---
+	var tree: Node3D = Decor.tree(rng)
+	add_child(tree)
+	_expect(tree.name == "Tree", "a tree must be named for what it is")
+	_expect(
+		tree.find_children("*", "MeshInstance3D", true, false).size() >= 4,
+		"a tree is a trunk under a canopy, not one ball"
+	)
+	var tree_body := tree.get_node_or_null("Obstacle") as StaticBody3D
+	_expect(tree_body != null, "a tree must be solid")
+	_expect(
+		tree_body != null and (tree_body.collision_layer & SurfaceQuery.GROUND_MASK) == 0,
+		"decor must stay off the surface-query mask: a trunk is an obstacle, not ground"
+	)
+	_expect(
+		tree_body != null and (tree_body.collision_layer & 1) != 0,
+		"decor must sit on the world layer, or the player walks through it"
+	)
+
+	var lantern: Node3D = Decor.lantern(rng)
+	add_child(lantern)
+	var glow := lantern.get_node_or_null("Glow") as OmniLight3D
+	_expect(glow != null, "a lantern must carry a light")
+	_expect(glow != null and not glow.shadow_enabled, "lantern shadow maps cost more than they show")
+	var lamp_material: StandardMaterial3D = null
+	var lamp := lantern.get_node_or_null("Lamp") as MeshInstance3D
+	if lamp != null:
+		lamp_material = lamp.material_override as StandardMaterial3D
+	_expect(lamp_material != null and lamp_material.emission_enabled, "the lamp itself must glow")
+
+	var bench: Node3D = Decor.bench(rng)
+	add_child(bench)
+	_expect(bench.get_node_or_null("Obstacle") != null, "a bench must be solid")
+	_expect(
+		bench.find_children("Seat*", "MeshInstance3D", true, false).size() >= 3,
+		"a bench is slatted"
+	)
+
+	var flowers: Node3D = Decor.flower_cluster(rng)
+	add_child(flowers)
+	_expect(flowers.get_node_or_null("Obstacle") == null, "flowers must not be solid")
+	_expect(
+		flowers.find_children("Bloom*", "MeshInstance3D", true, false).size() >= 4,
+		"a cluster is several blooms, not one"
+	)
+
+	var path_host := Node3D.new()
+	add_child(path_host)
+	var laid: int = Decor.stone_path(path_host, PackedVector3Array([
+		Vector3(0.0, 0.0, 0.0), Vector3(0.0, 0.0, 6.0), Vector3(4.0, 0.0, 10.0),
+	]), rng)
+	_expect(laid > 0, "a polyline with a run in it must lay slabs")
+	var path_node := path_host.get_node_or_null("Path")
+	_expect(
+		path_node != null and path_node.get_child_count() == laid,
+		"the reported slab count must match what landed in the scene"
+	)
+	_expect(
+		Decor.stone_path(path_host, PackedVector3Array([Vector3.ZERO]), rng) == 0,
+		"a single point is not a path"
+	)
+
+	# --- determinism ---
+	var first := RandomNumberGenerator.new()
+	first.seed = 777
+	var second := RandomNumberGenerator.new()
+	second.seed = 777
+	var tree_one: Node3D = Decor.tree(first)
+	var tree_two: Node3D = Decor.tree(second)
+	var canopies_one: Array[Node] = tree_one.find_children("Canopy*", "MeshInstance3D", true, false)
+	var canopies_two: Array[Node] = tree_two.find_children("Canopy*", "MeshInstance3D", true, false)
+	_expect(
+		canopies_one.size() > 0 and canopies_one.size() == canopies_two.size()
+		and (canopies_one[0] as MeshInstance3D).position == (canopies_two[0] as MeshInstance3D).position,
+		"the same seed must grow the same tree — the layout is a rule, not a saved file"
+	)
+	tree_one.free()
+	tree_two.free()
+
+	# --- the placement sampler ---
+	var zone := Rect2(-20.0, -20.0, 40.0, 40.0)
+	var blocked: Array[Rect2] = [Rect2(-5.0, -5.0, 10.0, 10.0)]
+	var sampler := RandomNumberGenerator.new()
+	sampler.seed = 99
+	var inside: int = 0
+	var clear: int = 0
+	var samples: int = 40
+	for _attempt: int in samples:
+		var spot: Vector2 = Decor.free_spot(zone, blocked, sampler, 1.0)
+		if spot == Vector2.INF:
+			continue
+		if zone.has_point(spot):
+			inside += 1
+		if not blocked[0].has_point(spot):
+			clear += 1
+	_expect(inside == samples, "every sampled spot must be inside the zone")
+	_expect(clear == samples, "no sampled spot may land in a reserved rectangle")
+	_expect(
+		Decor.free_spot(Rect2(-2.0, -2.0, 4.0, 4.0), [Rect2(-9.0, -9.0, 18.0, 18.0)], sampler, 0.5)
+		== Vector2.INF,
+		"a fully reserved zone must decline a spot rather than force one into a wall"
+	)
+
+	# --- the preset switch, with a style active ---
+	var world := Node3D.new()
+	add_child(world)
+	DemoLook.apply(world, &"day")
+	var director := RenderDirector.new()
+	add_child(director)
+	Events.world_ready.emit(world)
+	var world_environment := world.get_node_or_null("Environment") as WorldEnvironment
+	_expect(world_environment != null, "the preset test needs an environment")
+	if world_environment == null:
+		return
+	var environment: Environment = world_environment.environment
+
+	var day_fog: float = environment.fog_density
+	_expect(director.available_presets().has("dusk"), "dusk must be offerable")
+	_expect(director.set_preset(&"dusk"), "switching to dusk must be accepted")
+	_expect(
+		DemoLook.preset_of(world_environment) == &"dusk",
+		"the world must record which preset it wears — that record is how a style knows what it deviates from"
+	)
+	_expect(environment.fog_density != day_fog, "dusk must actually change the fog")
+	_expect(director.preset_id() == &"dusk", "the director must report the chosen preset")
+	_expect(not director.set_preset(&"no_such_preset"), "an unknown preset must be refused")
+	_expect(director.preset_id() == &"dusk", "a refused preset must not change the choice")
+
+	# The integration that matters: on an active style, moving the preset has to
+	# re-derive the style over it, or the frame ends up wearing two looks at once.
+	_expect(director.set_style(&"toon"), "3渲2 must apply over the chosen preset")
+	_expect(
+		environment.tonemap_mode == Environment.TONE_MAPPER_LINEAR,
+		"3渲2 must have flattened the tone curve"
+	)
+	_expect(not environment.fog_enabled, "3渲2 must have switched dusk's fog off")
+	_expect(director.set_preset(&"day"), "switching back to day must be accepted")
+	_expect(
+		environment.tonemap_mode == Environment.TONE_MAPPER_LINEAR and not environment.fog_enabled,
+		"the style must survive a preset change: the preset moved, the treatment did not"
+	)
+	_expect(DemoLook.preset_of(world_environment) == &"day", "and the world must record the new preset")
+	_expect(director.set_style(&"realistic"), "写实 must hand the frame back")
+	_expect(environment.fog_enabled, "day's fog must come back with 写实")
 
 	director.queue_free()
 	world.queue_free()

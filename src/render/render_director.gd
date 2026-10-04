@@ -20,6 +20,14 @@ var _active_id: StringName = DEFAULT_STYLE
 var _active: RenderStyle = null
 var _world: Node3D = null
 
+## The preset this session has chosen, or empty for "whatever the map built".
+##
+## Empty is the normal case and the right default: a map's mood is the map's own
+## decision, and the director only overrides it once somebody actually asks. When a
+## choice *has* been made it survives a map reload — a player who set dusk should
+## not have it silently reset by walking through a door.
+var _preset_id: StringName = &""
+
 
 func _ready() -> void:
 	Events.world_ready.connect(_on_world_ready)
@@ -29,6 +37,9 @@ func _ready() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(&"cycle_render_style"):
 		cycle(1)
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed(&"cycle_look_preset"):
+		cycle_preset(1)
 		get_viewport().set_input_as_handled()
 
 
@@ -76,9 +87,64 @@ func describe() -> String:
 	var names: PackedStringArray = PackedStringArray()
 	for entry: Dictionary in available():
 		names.append(String(entry.get("id", "")))
-	return "%s / %s — %d 种 [%s]" % [
+	return "%s / %s — %d 种 [%s] · 预设 %s" % [
 		_active_id, current_display_name(), names.size(), ", ".join(names),
+		_preset_id if not _preset_id.is_empty() else "地图自带",
 	]
+
+
+## Which preset of day this session has chosen. Empty means the map's own.
+func preset_id() -> StringName:
+	return _preset_id
+
+
+## Every preset on offer, straight from the look table so a mod that adds one is
+## switchable without touching this file.
+func available_presets() -> PackedStringArray:
+	return DemoLook.preset_names()
+
+
+## Switch the map's time of day. The style is re-applied afterwards because a
+## style's overrides are *relative* to the preset: 3渲2 on dusk is dusk's palette
+## drawn flat, and leaving the old application in place would keep day's colours
+## under a dusk sun.
+func set_preset(preset_name: StringName) -> bool:
+	if not DemoLook.has_preset(preset_name):
+		push_warning("[render] no look preset '%s' — keeping '%s'" % [
+			preset_name, _preset_id if not _preset_id.is_empty() else "the map's own",
+		])
+		return false
+	_preset_id = preset_name
+	if _world != null and is_instance_valid(_world):
+		if not _apply_preset():
+			return false
+		# A style's overrides are relative to the preset, so moving the preset has
+		# to re-derive the style on top of it. Without this, 写实 — the reset style,
+		# which applies no overrides of its own — would sit on whatever the previous
+		# style had left behind, and the frame would be wearing two looks at once.
+		_apply_current()
+	var label: String = DemoLook.label(preset_name)
+	Events.look_preset_changed.emit(preset_name, label)
+	Events.notify("时段：%s" % label, Events.NotifyLevel.SUCCESS)
+	return true
+
+
+## Step through the presets, wrapping. `step` may be negative.
+##
+## Cycling starts from the preset the *map* chose when the session has not chosen
+## one, so the first press moves on from what is actually on screen rather than
+## jumping to the head of the list.
+func cycle_preset(step: int = 1) -> bool:
+	var names: PackedStringArray = available_presets()
+	if names.is_empty():
+		return false
+	var current: StringName = _preset_id
+	if current.is_empty():
+		var environment := _context().get("environment") as WorldEnvironment
+		current = DemoLook.preset_of(environment)
+	var index: int = names.find(String(current))
+	index = 0 if index < 0 else posmod(index + step, names.size())
+	return set_preset(StringName(names[index]))
 
 
 ## The world was (re)built under us. Re-apply the current style: the environment
@@ -87,9 +153,22 @@ func describe() -> String:
 ## every map load would be noise about nothing having happened.
 func _on_world_ready(world: Node3D) -> void:
 	_world = world
+	# The session's preset choice outlives the map: a fresh build arrives wearing
+	# whatever that map defaulted to, which is not what the player picked.
+	if not _preset_id.is_empty():
+		_apply_preset()
 	if not _apply_current():
 		_active_id = DEFAULT_STYLE
 		_apply_current()
+
+
+## Write the chosen preset onto the live world. False when there is nothing to
+## write it to, which is the case before a world exists.
+func _apply_preset() -> bool:
+	var context: Dictionary = _context()
+	var environment: WorldEnvironment = context.get("environment") as WorldEnvironment
+	var sun: DirectionalLight3D = context.get("sun") as DirectionalLight3D
+	return DemoLook.set_preset(environment, sun, _preset_id)
 
 
 ## The world is going away; the style's passes are not part of it. Left applied,

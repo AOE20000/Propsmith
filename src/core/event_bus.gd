@@ -56,9 +56,15 @@ signal mods_loaded(mod_ids: PackedStringArray)
 
 ## Presentation. Broadcast-only: a session that never switches style never emits
 ## this, and a menu that wants a style row subscribes instead of polling.
+##
+## The two axes are separate on purpose. The *preset* is the map's time of day
+## (day / dusk / city) and belongs to the map; the *style* is how that look is
+## drawn (写实 / 3渲2) and belongs to the renderer. A style derives its overrides
+## from whatever preset is active, so the preset has to change first.
 ## `render_style_changed` fires on a real switch, never on the silent re-apply a
 ## map reload performs.
 signal render_style_changed(style_id: StringName, display_name: String)
+signal look_preset_changed(preset_id: StringName, display_name: String)
 
 ## Sandbox props. Broadcast-only: sessions without the sandbox module simply
 ## never emit these.

@@ -9,6 +9,9 @@
 项目当前状态：沙盒基础系统（P0–P4）已全部交付；角色管线（参数化基准模型、
 形状键外观编辑、行走动画）、决策日志持久化与联机传输模块已落地。
 默认地图为 PLATEAU 渋谷街区，街道人流由建筑用途标签驱动。
+另有一张「Demo 冲刺」地图 `playground`（`DSH_MAP_SOURCE=playground`）：
+代码生成的草地、池塘、白盒房间，加上按种子生长的树木/灯柱/长椅/石径/花丛，
+以及可切换的观感基线（`F4` 时段）与画风（`F2`）。
 
 ---
 
@@ -58,6 +61,7 @@ python tools\plateau\scan_cities.py --areas 渋谷区 --max-mb 800 --keep --work
 | `V` | 角色外观面板（玩家） |
 | `F3` / `F1` | 自由视角 / 调试信息 |
 | `F2` | 切换画风（写实 / 3渲2 / Mod 注册的风格） |
+| `F4` | 切换时段（昼 / 昏 / 城市，来自观感预设表） |
 | `F5` / `F9` | 快速保存 / 快速读取 |
 | `Esc` | 菜单 |
 
@@ -65,6 +69,8 @@ python tools\plateau\scan_cities.py --areas 渋谷区 --max-mb 800 --keep --work
 市民外观编辑：面对市民按 `E`，面板将切换为该市民的外观编辑模式。
 画风：`F2` 在注册的画风间循环；Mod 可用 `add_render_style` /
 `add_render_style_preset` 注册自己的画风（见 `docs/MODDING.md`）。
+时段：`F4` 在观感预设间循环——它是「地图的时辰」，与画风是两条正交的轴：
+画风在地图选定的预设**之上**重调，所以换时段会把当前画风重新推导一遍。
 
 ---
 
@@ -93,6 +99,7 @@ src/
   world/
     surface_query.gd       地表查询服务（物理射线唯一入口）
     demo_look.gd           观感基线：调校后的 Environment + 太阳，按预设供地图源调用
+    decor.gd               代码生成的景观件（树/灯柱/长椅/石径/花丛）+ 拒绝采样落点
   player/
     player.gd              角色控制器（移动/体力/蹲下/可被接管）
     camera_rig.gd          第三人称环绕相机

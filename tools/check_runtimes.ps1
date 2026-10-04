@@ -60,6 +60,7 @@ $benignPatterns = @(
     "[mod:selftest_render] render style 'selftest_nameless' needs a display name"
     "[render] style 'selftest_broken' factory did not return a RenderStyle"
     "[render] no render style 'no_such_style'"
+    "[render] no look preset 'no_such_preset'"
 )
 
 

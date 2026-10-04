@@ -32,6 +32,12 @@ const WATER_SHADER: Shader = preload("res://assets/shaders/water.gdshader")
 ## Which `DemoLook` preset this map was built with, reported by `describe()`.
 var _look_preset: StringName = DemoLook.DEFAULT_PRESET
 
+## What `_build_decor` ended up placing, reported by `describe()`. The requested
+## counts and the resulting ones are allowed to differ — rejection sampling
+## declines a spot it cannot find rather than forcing one into a wall — so the
+## report carries what actually landed, not what was asked for.
+var _decor_counts: Dictionary = {}
+
 var _spawn_position: Vector3 = Vector3(0.0, 1.0, 0.0)
 
 
@@ -54,6 +60,9 @@ func build(world_root: Node3D, seed_value: int) -> bool:
 
 	# Ground geometry is in the physics space now, so queries may answer.
 	(Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery).mark_ready()
+
+	progress.call("摆放树木与灯柱", 0.84)
+	_decor_counts = _build_decor(world_root, seed_value)
 
 	progress.call("构建天空与光照", 0.88)
 	_build_environment(world_root)
@@ -83,6 +92,13 @@ func describe() -> Dictionary:
 		"city": "playground",
 		"size": "%.0f m" % GROUND_SIZE,
 		"place_table": "无（市民游荡）",
+		"decor": "树 %d · 灯 %d · 椅 %d · 石 %d · 花 %d" % [
+			int(_decor_counts.get("trees", 0)),
+			int(_decor_counts.get("lanterns", 0)),
+			int(_decor_counts.get("benches", 0)),
+			int(_decor_counts.get("path_slabs", 0)),
+			int(_decor_counts.get("flowers", 0)),
+		],
 		"look": "%s / %s" % [_look_preset, DemoLook.label(_look_preset)],
 	}
 
@@ -270,6 +286,115 @@ func _build_crowd(world_root: Node3D, seed_value: int) -> void:
 		if citizen != null and citizen.get_parent() != container:
 			citizen.get_parent().remove_child(citizen)
 			container.add_child(citizen)
+
+
+## The lawn's furniture: a stone path from the spawn down to the pond, lanterns
+## and benches along it, trees around the edges, and flowers on the near bank.
+##
+## Laid out from the map seed, so the same seed always produces the same scene —
+## which is what lets the layout be a *rule* instead of a saved file. Each piece
+## comes from `Decor`; what lives here is the ground plan: which zones exist and
+## what counts as occupied. Those are facts about this map, and putting them in
+## `Decor` would be a second copy of the layout that could drift from this one.
+##
+## Reserved rectangles are in XZ and cover the pond basin, the three rooms, the two
+## loose slabs and the path corridor. A scatter that lands in one is rejected — the
+## pond band is the zone where that actually bites, since it reaches across the
+## water on purpose.
+func _build_decor(world_root: Node3D, seed_value: int) -> Dictionary:
+	var decor := Node3D.new()
+	decor.name = "Decor"
+	world_root.add_child(decor)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("playground-decor|%d" % seed_value)
+
+	var half: float = GROUND_SIZE * 0.5
+	var pool_half_width: float = half - POOL_SIDE_EDGE
+	var pool_near: float = half - POOL_BACK_EDGE - POOL_LENGTH
+	var reserved: Array[Rect2] = [
+		Rect2(-pool_half_width, pool_near, pool_half_width * 2.0, POOL_LENGTH + POOL_BACK_EDGE),
+		Rect2(-29.0, -23.0, 10.0, 10.0),
+		Rect2(15.0, -27.0, 10.0, 10.0),
+		Rect2(11.0, 15.0, 10.0, 10.0),
+		Rect2(-10.0, 10.0, 8.0, 8.0),
+		Rect2(7.0, 3.0, 6.0, 6.0),
+		# The walkway, kept clear from the spawn to the water's edge.
+		Rect2(-9.0, -9.0, 18.0, 64.0),
+	]
+
+	# A gentle S rather than a straight line: the curve is what makes the path read
+	# as laid out across the lawn instead of as a runway.
+	var path := PackedVector3Array()
+	for step: int in 5:
+		path.append(_path_point(float(step) / 4.0))
+	var slabs: int = Decor.stone_path(decor, path, rng)
+
+	# Lanterns alternate sides of the walkway; benches sit on the west side facing
+	# it. Both sample the same curve the path was laid along, so they follow it.
+	var lanterns: int = 0
+	for index: int in 4:
+		var t: float = 0.13 + float(index) * 0.23
+		var side: float = 1.0 if index % 2 == 0 else -1.0
+		var lantern := Decor.lantern(rng)
+		lantern.position = _path_point(t) + Vector3(side * 2.5, 0.0, 0.0)
+		decor.add_child(lantern)
+		lanterns += 1
+
+	var benches: int = 0
+	for index: int in 2:
+		var bench := Decor.bench(rng)
+		bench.position = _path_point(0.3 + float(index) * 0.36) + Vector3(-3.4, 0.0, 0.0)
+		# Facing the walkway, which runs roughly north.
+		bench.rotation_degrees = Vector3(0.0, 90.0, 0.0)
+		decor.add_child(bench)
+		benches += 1
+
+	# Trees in four bands: the two side edges, a grove west of the walkway, and a
+	# band across the approach to the pond that is deliberately allowed to overlap
+	# the water so the reserved list is doing real work rather than guarding a zone
+	# nothing could land in anyway.
+	var trees: int = 0
+	var tree_zones: Array[Rect2] = [
+		Rect2(-half + 4.0, -half + 4.0, 26.0, 148.0),
+		Rect2(half - 30.0, -half + 4.0, 26.0, 148.0),
+		Rect2(-46.0, -8.0, 24.0, 42.0),
+		Rect2(-half + 4.0, 40.0, 148.0, 38.0),
+	]
+	for zone: Rect2 in tree_zones:
+		for _slot: int in 3:
+			var spot: Vector2 = Decor.free_spot(zone, reserved, rng, 4.5)
+			if spot == Vector2.INF:
+				continue
+			var tree := Decor.tree(rng)
+			tree.position = Vector3(spot.x, 0.0, spot.y)
+			decor.add_child(tree)
+			trees += 1
+
+	# Flowers on the strip of grass between the lawn's edge and the water.
+	var flowers: int = 0
+	var bank := Rect2(-pool_half_width, pool_near - 4.2, pool_half_width * 2.0, 3.8)
+	for _slot: int in 6:
+		var spot: Vector2 = Decor.free_spot(bank, reserved, rng, 1.0)
+		if spot == Vector2.INF:
+			continue
+		var cluster := Decor.flower_cluster(rng)
+		cluster.position = Vector3(spot.x, 0.0, spot.y)
+		decor.add_child(cluster)
+		flowers += 1
+
+	return {
+		"path_slabs": slabs,
+		"lanterns": lanterns,
+		"benches": benches,
+		"trees": trees,
+		"flowers": flowers,
+	}
+
+
+## A point on the walkway curve. Shared by the path, the lanterns and the benches
+## so the three cannot disagree about where the path went.
+func _path_point(t: float) -> Vector3:
+	return Vector3(sin(t * PI) * 5.0, 0.0, -6.0 + t * 60.0)
 
 
 ## The lawn centre is a legal standing spot by construction — flat, outdoors,

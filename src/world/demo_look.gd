@@ -94,6 +94,24 @@ static func apply_to(environment: Environment, sun: DirectionalLight3D, preset_n
 	return true
 
 
+## Switch the preset a live world is wearing.
+##
+## The metadata write is the part that matters, and the reason this exists instead
+## of callers reaching for `apply_to`: `preset_of()` is how a render style asks
+## *what it is deviating from*. A preset changed without updating the meta would
+## leave the next style deriving its overrides from a look the world no longer has
+## — dusk's fog on day's colours, and nothing to point at.
+static func set_preset(world_environment: WorldEnvironment, sun: DirectionalLight3D, preset_name: StringName) -> bool:
+	if world_environment == null or world_environment.environment == null or sun == null:
+		return false
+	if not has_preset(preset_name):
+		push_warning("DemoLook.set_preset: unknown preset '%s'" % preset_name)
+		return false
+	world_environment.set_meta(PRESET_META, String(preset_name))
+	apply_to(world_environment.environment, sun, preset_name)
+	return true
+
+
 ## Preset names in table order, for menus and for the boot report.
 static func preset_names() -> PackedStringArray:
 	return PackedStringArray(table().keys())

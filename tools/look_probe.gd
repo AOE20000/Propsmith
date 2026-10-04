@@ -47,6 +47,21 @@ var shots: Array[Dictionary] = [
 		"target": Vector3(0.0, 0.0, 40.0),
 	},
 	{
+		# The lawn's furniture, from above the spawn looking down the walkway.
+		# Shot twice from the same place on purpose: the preset switch is the other
+		# half of M-B, and the only way to see whether it worked is to look at one
+		# framing under two lights.
+		"name": "look_path_day",
+		"eye": Vector3(-1.0, 9.0, -16.0),
+		"target": Vector3(2.0, 0.5, 26.0),
+	},
+	{
+		"name": "look_path_dusk",
+		"eye": Vector3(-1.0, 9.0, -16.0),
+		"target": Vector3(2.0, 0.5, 26.0),
+		"preset": &"dusk",
+	},
+	{
 		"name": "look_pond_dusk",
 		"eye": Vector3(0.0, 6.5, 42.0),
 		"target": Vector3(0.0, -0.5, 70.0),
