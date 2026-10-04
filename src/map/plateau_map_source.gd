@@ -195,6 +195,11 @@ func describe() -> Dictionary:
 		"mobility": MobilityReadiness.describe(mobility_report) if not mobility_report.is_empty() else "无地点表（运行 tools/city_export_activity 导出）",
 		"agents": mobility_agents,
 		"look": "%s / %s" % [_look_preset, DemoLook.label(_look_preset)],
+		# Asked for and actually built are reported separately: if the figure asset
+		# is missing, `dressing` says "0 人" while `crowd` still says "vrm", and the
+		# disagreement is the diagnostic.
+		"crowd": "%d 人 · 外观 %s" % [mobility_agents, NpcFigure.default_appearance()],
+		"dressing": NpcFigure.cost_report(),
 	}
 
 

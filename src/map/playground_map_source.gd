@@ -38,6 +38,9 @@ var _look_preset: StringName = DemoLook.DEFAULT_PRESET
 ## report carries what actually landed, not what was asked for.
 var _decor_counts: Dictionary = {}
 
+## How many citizens the last `_build_crowd` put on the lawn, for `describe()`.
+var _crowd_size: int = 0
+
 var _spawn_position: Vector3 = Vector3(0.0, 1.0, 0.0)
 
 
@@ -100,6 +103,11 @@ func describe() -> Dictionary:
 			int(_decor_counts.get("flowers", 0)),
 		],
 		"look": "%s / %s" % [_look_preset, DemoLook.label(_look_preset)],
+		# Asked for and actually built are reported separately: if the figure asset
+		# is missing, `dressing` says "0 人" while `crowd` still says "vrm", and the
+		# disagreement is the diagnostic.
+		"crowd": "%d 人 · 外观 %s" % [_crowd_size, NpcFigure.default_appearance()],
+		"dressing": NpcFigure.cost_report(),
 	}
 
 
@@ -278,6 +286,7 @@ func _build_crowd(world_root: Node3D, seed_value: int) -> void:
 	world_root.add_child(container)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash("playground-crowd|%d" % seed_value)
+	_crowd_size = 0
 	for index: int in 8:
 		var angle: float = rng.randf() * TAU
 		var distance: float = 6.0 + rng.randf() * 30.0
@@ -286,6 +295,8 @@ func _build_crowd(world_root: Node3D, seed_value: int) -> void:
 		if citizen != null and citizen.get_parent() != container:
 			citizen.get_parent().remove_child(citizen)
 			container.add_child(citizen)
+		if citizen != null:
+			_crowd_size += 1
 
 
 ## The lawn's furniture: a stone path from the spawn down to the pond, lanterns

@@ -15,6 +15,7 @@ extends Node
 ##
 ## Run with:
 ##   godot --path . res://tools/look_probe.tscn --resolution 1600x900 --quit-after 6000
+## Env: `DSH_LOOK_ONLY=look_citizen` runs one shot; `DSH_MAP_SOURCE` picks the map.
 
 const SHOT_DIR: String = "res://data/screenshots"
 
@@ -82,6 +83,16 @@ var shots: Array[Dictionary] = [
 		},
 	},
 	{
+		# The one shot that finds its own subject. Citizens are wherever their day
+		# plan put them, which on the city map is nowhere near the spawn point — and
+		# "do citizens actually wear the figure?" is exactly the question a fixed
+		# vantage point cannot answer there. `DSH_LOOK_ONLY=look_citizen` runs just
+		# this one.
+		"name": "look_citizen",
+		"subject": &"citizens",
+		"offset": Vector3(1.2, 1.7, -3.2),
+	},
+	{
 		# The render-style seam, photographed. The lawn vantage point is reused for
 		# the day shots so the difference is the style and nothing else.
 		"name": "look_style_toon_pond",
@@ -120,11 +131,40 @@ var _camera: Camera3D = null
 
 
 func _ready() -> void:
+	_keep_only(OS.get_environment("DSH_LOOK_ONLY"))
 	# Reuse the real boot sequence so the probe photographs what a player sees,
 	# not a variant assembled for the camera.
 	var packed: PackedScene = load("res://src/boot/startup.tscn")
 	add_child(packed.instantiate())
 	Events.world_ready.connect(_on_world_ready)
+
+
+## Restrict the run to a comma-separated list of shot names.
+##
+## Exists because a full sweep costs a map load per probe and most iterations are
+## about one framing. Unknown names are reported rather than silently ignored —
+## a typo that photographs nothing is worse than a typo that says so.
+func _keep_only(filter: String) -> void:
+	if filter.strip_edges().is_empty():
+		return
+	var wanted: PackedStringArray = filter.split(",", false)
+	var kept: Array[Dictionary] = []
+	for shot: Dictionary in shots:
+		if wanted.has(String(shot["name"])):
+			kept.append(shot)
+		else:
+			continue
+	var missing: PackedStringArray = PackedStringArray()
+	for name: String in wanted:
+		var found: bool = false
+		for shot: Dictionary in shots:
+			found = found or String(shot["name"]) == name
+		if not found:
+			missing.append(name)
+	if not missing.is_empty():
+		print("[look] DSH_LOOK_ONLY names no such shot: %s" % ", ".join(missing))
+	shots = kept
+	print("[look] filtered to %d shot(s)" % shots.size())
 
 
 func _on_world_ready(world: Node3D) -> void:
@@ -169,6 +209,9 @@ func _apply_shot() -> void:
 		_relight(StringName(shot["preset"]), shot.get("overrides", {}))
 	if shot.has("style"):
 		_switch_style(StringName(shot["style"]))
+	if shot.has("subject"):
+		_frame_subject(shot)
+		return
 	_camera.global_position = shot["eye"]
 	var target: Vector3 = shot["target"]
 	var up: Vector3 = Vector3.UP
@@ -179,6 +222,69 @@ func _apply_shot() -> void:
 		up = Vector3.FORWARD
 	_camera.look_at(target, up)
 	print("[look] framing %s" % shot["name"])
+
+
+## Aim at a live node in a group instead of at a coordinate — how the citizen shot
+## finds its subject on a map whose crowd is scattered across six kilometres.
+##
+## Two things make this work in a city and not just on a lawn. The subject is the
+## group member **nearest the camera**, because a citizen photographed from 400 m
+## answers nothing. And the lens is pulled in along the line of sight until
+## something is visible: a citizen stands next to a building, the naive offset puts
+## the camera inside it, and from inside a wall back-face culling turns the world
+## into sky over floor — a photograph of nothing that looks like a bug in the
+## renderer. It is the same raycast a third-person camera does, for the same reason.
+##
+## A missing subject leaves the previous framing in place and still saves the
+## frame: the point of the shot is to answer "is it there?", and a blank photograph
+## answers it better than a crashed probe.
+func _frame_subject(shot: Dictionary) -> bool:
+	var group: StringName = StringName(shot["subject"])
+	var offset: Vector3 = shot.get("offset", Vector3(1.2, 1.7, -3.2))
+	var subject: Node3D = _nearest_in_group(group)
+	if subject == null:
+		print("[look] %s: no valid node in group '%s'" % [shot["name"], group])
+		return false
+
+	# Chest height, near enough for a person: the point is to read a face and some
+	# clothing, not to frame a whole body at arm's length.
+	var aim: Vector3 = subject.global_position + Vector3(0.0, 1.15, 0.0)
+	var wanted: Vector3 = subject.global_position + offset
+	_camera.global_position = _clear_line(wanted, aim, subject)
+	_camera.look_at(aim, Vector3.UP)
+	print("[look] framing %s on a '%s' at %s (%.1f m away)" % [
+		shot["name"], group, subject.global_position, _camera.global_position.distance_to(subject.global_position),
+	])
+	return true
+
+
+func _nearest_in_group(group: StringName) -> Node3D:
+	var origin: Vector3 = _camera.global_position
+	var best: Node3D = null
+	var best_distance: float = INF
+	for node: Node in get_tree().get_nodes_in_group(group):
+		if not (node is Node3D) or not is_instance_valid(node):
+			continue
+		var candidate := node as Node3D
+		var distance: float = candidate.global_position.distance_to(origin)
+		if distance < best_distance:
+			best_distance = distance
+			best = candidate
+	return best
+
+
+## The offset the shot asked for, unless the world is in the way.
+func _clear_line(from: Vector3, to: Vector3, subject: Node3D) -> Vector3:
+	var space: PhysicsDirectSpaceState3D = _camera.get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(from, to)
+	query.collision_mask = 1
+	if subject is CollisionObject3D:
+		var exclude: Array[RID] = [(subject as CollisionObject3D).get_rid()]
+		query.exclude = exclude
+	var hit: Dictionary = space.intersect_ray(query)
+	if hit.is_empty():
+		return from
+	return (hit["position"] as Vector3) + (hit["normal"] as Vector3) * 0.35
 
 
 ## Swap the running world's look. This is the day/dusk switch, exercised — with

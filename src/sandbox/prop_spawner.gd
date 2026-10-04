@@ -62,7 +62,12 @@ func bind_mobility(
 ## a wanderer when it is not. Counts toward undo like any spawned thing.
 ## `appearance` is `&"capsule"` (default) or `&"vrm"` — the shared base figure
 ## swaps in only when its imported scene exists, otherwise the capsule stands in.
-func spawn_citizen(at: Vector3, seed_value: int, appearance: StringName = &"capsule") -> PedestrianAgent:
+## `appearance` picks the body: `&"vrm"` dresses the citizen in the shared base
+## figure, `&"capsule"` keeps the coloured fallback. Empty — the default — means
+## "whatever the project defaults to", and it has to be spelled as a sentinel
+## rather than as a call to `NpcFigure.default_appearance()` because GDScript
+## default arguments must be constant expressions.
+func spawn_citizen(at: Vector3, seed_value: int, appearance: StringName = &"") -> PedestrianAgent:
 	if _container == null:
 		push_warning("PropSpawner: no world container bound; call setup() after the map builds")
 		return null
@@ -71,7 +76,9 @@ func spawn_citizen(at: Vector3, seed_value: int, appearance: StringName = &"caps
 	citizen.set_meta(&"npc_kind", &"citizen")
 	_container.add_child(citizen)
 	citizen.global_position = at
-	if appearance == &"vrm":
+	var resolved: StringName = appearance if appearance != &"" else NpcFigure.default_appearance()
+	citizen.set_meta(&"appearance", resolved)
+	if resolved == &"vrm":
 		citizen.apply_base_figure()
 	if _mobility_cache != null and not _mobility_candidates.is_empty() and not _mobility_patterns.is_empty():
 		var rng := RandomNumberGenerator.new()
