@@ -52,6 +52,8 @@ func _ready() -> void:
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
+	_run_section("ambience", 12, _check_ambience)
+	_run_section("photo mode", 9, _check_photo_mode)
 	_run_section("boot summary", 4, _check_summary)
 
 	print("")
@@ -1595,6 +1597,97 @@ func _check_decor_and_presets() -> void:
 
 	director.queue_free()
 	world.queue_free()
+
+
+## The ambience layer: levels, looping, point sources, teardown.
+##
+## The load-bearing assertion is the level normalisation. The shipped beds differ
+## by up to 13 dB in average level, so one gain for all of them would make the
+## ambience lurch every time the sky changed — and the expected gain below is the
+## *measured* level of the forest file, which is why it is a number rather than a
+## note saying "should be quieter".
+func _check_ambience() -> void:
+	var buses_before: int = AudioServer.bus_count
+	var ambience := Ambience.new()
+	add_child(ambience)
+	_expect(AudioServer.get_bus_index(Ambience.BUS_NAME) >= 0, "the ambience bus must exist")
+	_expect(ambience.describe().contains("无"), "an ambience with no beds must say so")
+
+	var forest: AudioStream = load("res://assets/audio/ambience_forest.ogg")
+	var night: AudioStream = load("res://assets/audio/ambience_night.ogg")
+	_expect(forest != null and night != null, "the shipped beds must load")
+	ambience.set_beds({&"default": forest, &"dusk": night}, &"day", 0.0)
+	_expect(ambience.beds_declared() == 2, "the map's beds must be declared")
+
+	var point := ambience.attach_point(forest, Vector3(1.0, 2.0, 3.0))
+	_expect(point != null, "a point source must be creatable")
+	_expect(
+		point != null and is_equal_approx(point.volume_db, Ambience.BED_TARGET_DB - (-24.2)),
+		"a bed must be normalised by its measured level, not played raw"
+	)
+	_expect(
+		point != null and point.global_position.is_equal_approx(Vector3(1.0, 2.0, 3.0)),
+		"a point source must sit where the map asked for it"
+	)
+	_expect(
+		forest is AudioStreamOggVorbis and (forest as AudioStreamOggVorbis).loop,
+		"a bed must be turned into a loop, or the world goes quiet after 45 seconds"
+	)
+
+	var unmeasured := AudioStreamOggVorbis.new()
+	var raw_point := ambience.attach_point(unmeasured, Vector3.ZERO)
+	_expect(
+		raw_point != null and is_zero_approx(raw_point.volume_db),
+		"a stream this module has never measured must play at its own level"
+	)
+
+	var second := Ambience.new()
+	add_child(second)
+	_expect(AudioServer.bus_count == buses_before + 1, "a second ambience must not add a second bus")
+	second.queue_free()
+
+	Events.world_teardown_started.emit()
+	_expect(ambience.beds_declared() == 0, "teardown must drop the map's beds")
+	_expect(
+		point != null and is_instance_valid(point) and point.is_queued_for_deletion(),
+		"teardown must release the point sources it owns"
+	)
+	ambience.queue_free()
+
+
+## The photo viewfinder: it hides everything, gives it back, and stands down when
+## another mode takes over.
+##
+## The last two checks are the ones worth having. Photo mode is *not* a
+## `GameState.Mode`, deliberately, so the only thing stopping it from leaving an
+## invisible interface behind a pause menu is that it watches modes and yields —
+## which is exactly the kind of behaviour that rots quietly without an assertion.
+func _check_photo_mode() -> void:
+	var neighbour := CanvasLayer.new()
+	add_child(neighbour)
+	var photo := PhotoMode.new()
+	add_child(photo)
+
+	_expect(not photo.is_active(), "photo mode must start off")
+	_expect(not PhotoMode._can_capture(), "a headless run has no frame to capture")
+	photo.set_active(true)
+	_expect(photo.is_active(), "photo mode must turn on")
+	_expect(not neighbour.visible, "photo mode must hide the interface")
+	_expect(photo.get_node("PhotoHint").visible, "photo mode must keep its own hint visible")
+
+	photo.set_active(false)
+	_expect(neighbour.visible, "leaving photo mode must give the interface back")
+	_expect(not photo.is_active(), "photo mode must turn off")
+
+	var mode_was: int = GameState.mode
+	photo.set_active(true)
+	GameState.mode = GameState.Mode.PAUSED
+	_expect(not photo.is_active(), "a pause must stand photo mode down")
+	_expect(neighbour.visible, "and give the interface back before the menu opens")
+	GameState.mode = mode_was
+
+	photo.queue_free()
+	neighbour.queue_free()
 
 
 ## The one line the boot report prints has to stay parseable and name both runtimes,

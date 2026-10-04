@@ -158,6 +158,18 @@ func _register_core_services(failures: Array[String]) -> void:
 		director.name = "RenderDirector"
 		Services.register(&"render_style", director)
 		add_child(director)
+	# Session-level like the render director, and for the same reason: the beds must
+	# outlive a map reload, and a map declares its own sound through this seam.
+	if not Services.has(&"ambience"):
+		var ambience := Ambience.new()
+		ambience.name = "Ambience"
+		Services.register(&"ambience", ambience)
+		add_child(ambience)
+	if not Services.has(&"photo_mode"):
+		var photo := PhotoMode.new()
+		photo.name = "PhotoMode"
+		Services.register(&"photo_mode", photo)
+		add_child(photo)
 	# The persistence node registers the sandbox section with the save system;
 	# bound explicitly so it talks to exactly the services registered above.
 	var persistence := SandboxPersistence.new()
@@ -350,7 +362,7 @@ func _finish(failures: Array[String], validate_only: bool) -> void:
 		return
 
 	print("[boot] world ready: map=%s mods=%d" % [GameState.map_id, ModHost.mods.size()])
-	Events.notify("城市已加载 — F1 调试 · F2 画风 · F3 自由视角 · F4 时段 · V 换装 · F5 保存 · F9 读取 · Esc 菜单", Events.NotifyLevel.SUCCESS)
+	Events.notify("城市已加载 — F1 调试 · F2 画风 · F3 自由视角 · F4 时段 · P 拍照 · V 换装 · F5 保存 · F9 读取 · Esc 菜单", Events.NotifyLevel.SUCCESS)
 
 
 func _count_nodes(node: Node) -> int:
@@ -403,3 +415,9 @@ func _report_world() -> void:
 		printerr("[boot] render_style service is not available")
 	else:
 		print("[boot] render style: %s" % director.describe())
+
+	var ambience: Ambience = Services.get_as(&"ambience", &"Ambience") as Ambience
+	if ambience == null:
+		printerr("[boot] ambience service is not available")
+	else:
+		print("[boot] ambience: %s" % ambience.describe())

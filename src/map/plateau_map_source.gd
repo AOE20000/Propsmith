@@ -29,6 +29,10 @@ class_name PlateauMapSource
 ## surface query sees exactly the map and nothing that walks.
 
 const DEFAULT_CITY: String = "shibuya"
+
+## The city's ambience: a CC0 street recording from BigSoundBank. See
+## `assets/audio/LICENSE_SOURCES.md` for provenance and what was done to it.
+const BED_CITY: AudioStream = preload("res://assets/audio/ambience_city.ogg")
 ## JGD2011 plane rectangular coordinate system zone 9 covers Tokyo (and Shibuya).
 const ZONE_ID: int = 9
 ## Half-extent of the flat ground plane, in metres. The plane must cover not
@@ -151,6 +155,9 @@ func build(world_root: Node3D, seed_value: int) -> bool:
 
 	progress.call("构建天空与光照", 0.88)
 	_build_environment(world_root)
+
+	progress.call("铺上环境音", 0.9)
+	_build_ambience(world_root)
 
 	progress.call("通知 Mod 介入地图", 0.94)
 	ModHost.notify_world_generate(world_root)
@@ -485,6 +492,19 @@ func _settle_city_transform(city_container: Node3D) -> void:
 func _build_environment(world_root: Node3D) -> void:
 	_look_preset = &"city"
 	DemoLook.apply(world_root, _look_preset)
+
+
+## The city's sound: one bed, no time-of-day variant.
+##
+## Deliberately no `dusk` entry, so the preset falls through to `default` — a city
+## at dusk still sounds like a city, and a forest-at-night bed in Shibuya would be
+## worse than no change at all. Silent when the ambience service is absent, which is
+## how the headless tests build this map.
+func _build_ambience(_world_root: Node3D) -> void:
+	var ambience: Ambience = Services.get_as(&"ambience", &"Ambience") as Ambience
+	if ambience == null:
+		return
+	ambience.set_beds({&"default": BED_CITY}, _look_preset)
 
 
 ## Rings outward from the building cluster, first outdoor flat spot wins —

@@ -29,6 +29,14 @@ const WATER_LEVEL: float = -0.12
 
 const WATER_SHADER: Shader = preload("res://assets/shaders/water.gdshader")
 
+## The lawn's sound. CC0 recordings from BigSoundBank — see
+## `assets/audio/LICENSE_SOURCES.md` for provenance and what was done to them.
+## Loading a `.ogg` rather than an `.mp3` is deliberate: MP3 encoder padding breaks
+## gapless looping, and these are loops.
+const BED_FOREST: AudioStream = preload("res://assets/audio/ambience_forest.ogg")
+const BED_NIGHT: AudioStream = preload("res://assets/audio/ambience_night.ogg")
+const WATER_STREAM: AudioStream = preload("res://assets/audio/water_stream.ogg")
+
 ## Which `DemoLook` preset this map was built with, reported by `describe()`.
 var _look_preset: StringName = DemoLook.DEFAULT_PRESET
 
@@ -69,6 +77,9 @@ func build(world_root: Node3D, seed_value: int) -> bool:
 
 	progress.call("构建天空与光照", 0.88)
 	_build_environment(world_root)
+
+	progress.call("铺上环境音", 0.9)
+	_build_ambience(world_root)
 
 	ModHost.notify_world_generate(world_root)
 
@@ -272,6 +283,29 @@ func _boundary_wall(parent: Node3D, at: Vector3, size: Vector3) -> void:
 func _build_environment(world_root: Node3D) -> void:
 	_look_preset = &"day"
 	DemoLook.apply(world_root, _look_preset)
+
+
+## The lawn's sound: a forest bed that becomes a night bed when the light does, and
+## a stream at the pond.
+##
+## Silent when the ambience service is absent. The headless tests build this map
+## with no audio module at all, and a map that insisted on sound would turn a
+## supported configuration into a failure — the same rule the rest of the optional
+## modules follow.
+##
+## No `city` bed is listed, so the preset falls through to `default`: a lawn does
+## not become a city, and the fallback is what keeps the mapping table short
+## instead of exhaustive.
+func _build_ambience(_world_root: Node3D) -> void:
+	var ambience: Ambience = Services.get_as(&"ambience", &"Ambience") as Ambience
+	if ambience == null:
+		return
+	ambience.set_beds({&"default": BED_FOREST, &"dusk": BED_NIGHT}, _look_preset)
+	# The stream is placed where the water is, so it fades in as the pond comes into
+	# earshot rather than being a global layer.
+	var half: float = GROUND_SIZE * 0.5
+	var pool_centre_z: float = half - POOL_BACK_EDGE - POOL_LENGTH * 0.5
+	ambience.attach_point(WATER_STREAM, Vector3(0.0, WATER_LEVEL, pool_centre_z), 40.0, 10.0)
 
 
 ## A small wandering crowd: no place table exists on this map, so the mobility

@@ -190,15 +190,24 @@ func _process(_delta: float) -> void:
 			_timer = 0
 			_apply_shot()
 		return
-	if _timer < LOOK_FRAMES:
+	# `_timer == LOOK_FRAMES` is the frame whose draw carries this shot's framing, so
+	# the capture is *requested* here and resolves after that draw. The camera only
+	# moves on the following frame: moving it in the same `_process` would put the
+	# next shot in front of the lens before this frame was drawn, and every saved
+	# image would be the *next* shot instead of this one — which is exactly what
+	# happened the moment `_capture` became a coroutine, and why all twelve images
+	# came out shifted by one.
+	if _timer == LOOK_FRAMES:
+		_capture(String(shots[_index]["name"]))
 		return
-	_capture(String(shots[_index]["name"]))
+	if _timer <= LOOK_FRAMES:
+		return
 	_index += 1
 	_timer = 0
 	if _index >= shots.size():
 		get_tree().quit(0)
-	else:
-		_apply_shot()
+		return
+	_apply_shot()
 
 
 func _apply_shot() -> void:
@@ -330,7 +339,13 @@ func _hide_ui() -> void:
 
 
 func _capture(file_name: String) -> void:
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(SHOT_DIR))
-	var image: Image = get_viewport().get_texture().get_image()
-	image.save_png(ProjectSettings.globalize_path(SHOT_DIR.path_join(file_name)) + ".png")
-	print("[look] saved %s (%dx%d)" % [file_name, image.get_width(), image.get_height()])
+	# Through the photo module's own capture, not a copy of it: the probe is then a
+	# real consumer of the feature, and every sweep re-verifies the loop, the
+	# two-frame wait and the write end to end.
+	var photo: PhotoMode = Services.get_as(&"photo_mode", &"PhotoMode") as PhotoMode
+	if photo == null:
+		push_warning("[look] no photo_mode service; cannot capture")
+		return
+	var path: String = await photo.capture(file_name, SHOT_DIR)
+	if not path.is_empty():
+		print("[look] saved %s" % file_name)

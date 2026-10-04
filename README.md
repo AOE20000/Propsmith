@@ -62,6 +62,7 @@ python tools\plateau\scan_cities.py --areas 渋谷区 --max-mb 800 --keep --work
 | `F3` / `F1` | 自由视角 / 调试信息 |
 | `F2` | 切换画风（写实 / 3渲2 / Mod 注册的风格） |
 | `F4` | 切换时段（昼 / 昏 / 城市，来自观感预设表） |
+| `P` / `F10` | 拍照模式（隐藏 UI） / 拍一张（存到 `user://photos`） |
 | `F5` / `F9` | 快速保存 / 快速读取 |
 | `Esc` | 菜单 |
 
@@ -71,6 +72,9 @@ python tools\plateau\scan_cities.py --areas 渋谷区 --max-mb 800 --keep --work
 `add_render_style_preset` 注册自己的画风（见 `docs/MODDING.md`）。
 时段：`F4` 在观感预设间循环——它是「地图的时辰」，与画风是两条正交的轴：
 画风在地图选定的预设**之上**重调，所以换时段会把当前画风重新推导一遍。
+拍照：`P` 隐藏全部界面，`F10` 把当前帧存成 PNG；**滤镜就是画风**——
+`F2`/`F4` 在取景器里照常可用，Mod 注册的画风也就自动成了照片滤镜。
+环境音随时段自动交叉淡化（昼/昏各一床，池塘的水声按方位衰减）。
 
 ---
 
@@ -114,6 +118,10 @@ src/
     interactable.gd / interaction_probe.gd   可交互物契约与朝向探测
   net/
     enet_transport.gd      ENet 联机传输模块（决定广播/追赶/位置中继）
+  audio/
+    ambience.gd            环境音混音：随时段交叉淡化的床 + 3D 点声源 + 运行时总线
+  photo/
+    photo_mode.gd          拍照模式：隐藏全部界面、存 PNG、随其它模式自动退出
   render/                  画风（渲染风格）注册点与切换
     render_style.gd        画风契约：apply/release、环境重调、屏幕空间通道
     render_style_catalog.gd  画风目录（内置 + Mod 注册）
@@ -266,6 +274,7 @@ res://mods/my_mod/
 | [SiroinoSotai（しろいの素体）](https://booth.pm/ja/items/8268676) 基准模型的**躯干**（16.7k 三角 · Mobile 版 3.5k · 99 个形态键） | **CC0 1.0 全世界**（商用/修改/再分发皆可，**无需署名**） | 原始包与 PSD 不入库（在 `vendor/models/`，gitignore） |
 | [茜犬-Akane-](https://booth.pm/ja/items/8861598)（山野重工赤山派閥独立支部）基准模型的**头部**与**基色贴图** | **CC0 1.0 全世界**，作者并将**角色设计的著作权**一并声明适用 CC0 | 与上者合成为 `assets/characters/base_female.vrm`（原始包与 PSD 不入库） |
 | [Godot4-OpenAnimationLibraries](https://github.com/catprisbrey/Godot4-OpenAnimationLibraries)（catprisbrey）**行走动画**来源：其 ShooterLib 的 `walk` / `idle` / `run_067` 经骨骼重定向进入 `assets/animations/locomotion.res`（构建脚本 `tools/models/build_locomotion_library.gd`） | **CC-BY 4.0**（须署名——本行即署名） | 仅保留三个剪辑的重定向副本（81 KB）；原库 2.9 MB 不入库 |
+| [BigSoundBank](https://bigsoundbank.com/)（LaSonotheque，Joseph SARDIN）**环境音**四条：森林（2749）、乡村夜晚（1469）、街道路口（2722）、流水（1522）——逐条来源、许可与处理记录见 [`assets/audio/LICENSE_SOURCES.md`](assets/audio/LICENSE_SOURCES.md) | **CC0 1.0**（公有领域等价：可商用/修改/再分发，无需署名——本项目仍逐条登记） | `assets/audio/*.ogg`（截取至 45 s 并加 20 ms 淡变，重编码 Vorbis，共 2.3 MB） |
 
 `assets/characters/base_female.vrm` 是上两行作者成果的**合成**：SiroinoSotai 的
 躯干 + Akane 的头部与基色贴图，由 `tools/models/export_akane_vrm.py` 从 FBX
