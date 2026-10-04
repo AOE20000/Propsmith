@@ -22,6 +22,7 @@
 | 联机 | ENet 传输模块（决定广播/追赶/位置中继） | ✅ 模块已交付 |
 | 当前冲刺 | 唯美画风开放世界 Demo（M-A…M-D） | ✅ 已交付（开场镜头序列与城市夜间床遗留） |
 | 地图布局 | **Demo（playground）为默认地图**；涩谷改为 Mod 载入（`mods/plateau_city/`，`DSH_MAP_SOURCE=shibuya`），并移除二者之外的其它地图 | ✅ 已交付（`MapCatalog` + `add_map_source`） |
+| Demo 玩法 | **导览动线**：把模块可用性清单变成九站打卡路线，D1–D6 分期（对话/任务/联机界面/设置） | 📋 设计定稿 → [`demo_design.md`](demo_design.md) |
 | 后续 | 联机界面与远端玩家完善、公网托管、男性基准模型 | 📋 规划 |
 
 ---
