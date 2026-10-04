@@ -31,6 +31,10 @@ func _ready() -> void:
 	var after_spawn := _journal_lines(journal)
 	print("[sdlog] spawn: id=%s lines %d -> %d (expect +1)" % [decision_id, lines_before, after_spawn])
 
+	# 1b) reweight: mass is journaled and snapshot-serialized
+	_spawner.reweight_by_decision_id(decision_id, 40.0)
+	DecisionLog.record(&"reweight_prop", {"decision_id": decision_id, "mass": 40.0})
+
 	# 2) paint: applied locally, journaled
 	var color := Color(0.9, 0.2, 0.1)
 	_spawner.paint_by_decision_id(decision_id, color)
@@ -40,12 +44,12 @@ func _ready() -> void:
 	print("[sdlog] paint: lines -> %d (expect +1)" % after_paint)
 
 	# 3) save: the covered tail compacts away, the snapshot carries the prop
-	#    with its decision id + paint colour.
+	#    with its decision id + paint colour + mass.
 	SaveSystem.save_game("probe")
 	var after_save := _journal_lines(journal)
 	var covered_left := 0
 	for record: Dictionary in _journal_records(journal):
-		if String(record.get("kind", "")) in ["spawn_prop", "despawn_prop", "paint_prop", "clear_props"]:
+		if String(record.get("kind", "")) in ["spawn_prop", "despawn_prop", "paint_prop", "reweight_prop", "clear_props"]:
 			covered_left += 1
 	print("[sdlog] save: lines %d -> %d covered_left=%d (expect 0)" % [
 		after_paint, after_save, covered_left])
@@ -53,6 +57,7 @@ func _ready() -> void:
 	var saved_props: Array = snapshot.get("props", [])
 	var ids_ok := false
 	var paint_ok := false
+	var mass_ok := false
 	for record: Variant in saved_props:
 		if record is Dictionary and String((record as Dictionary).get("decision_id", "")) == decision_id:
 			ids_ok = true
@@ -60,7 +65,11 @@ func _ready() -> void:
 			if albedo.size() >= 3:
 				paint_ok = is_equal_approx(float(albedo[0]), color.r) \
 					and is_equal_approx(float(albedo[1]), color.g)
-	print("[dlog] snapshot: props=%d decision_id=%s paint=%s" % [saved_props.size(), ids_ok, paint_ok])
+			mass_ok = is_equal_approx(float((record as Dictionary).get("mass", 0.0)), 40.0)
+			if albedo.size() >= 3:
+				paint_ok = is_equal_approx(float(albedo[0]), color.r) \
+					and is_equal_approx(float(albedo[1]), color.g)
+	print("[dlog] snapshot: props=%d decision_id=%s paint=%s mass=%s" % [saved_props.size(), ids_ok, paint_ok, mass_ok])
 
 	# 4) post-save tail: despawn the saved prop, spawn a new one
 	_spawner.remove(prop)
@@ -76,12 +85,14 @@ func _ready() -> void:
 	var second_gone := _spawner.get_by_decision_id(second_id) == null
 	var visual := _spawner.get_by_decision_id(decision_id)
 	var paint_back := false
+	var mass_back := false
 	if visual != null:
 		var mesh := visual.get_node_or_null("Visual") as MeshInstance3D
 		if mesh != null and mesh.material_override is StandardMaterial3D:
 			paint_back = (mesh.material_override as StandardMaterial3D).albedo_color.is_equal_approx(color)
-	print("[dlog] load=%s first_back=%s paint_back=%s second_gone=%s" % [
-		loaded, first_back, paint_back, second_gone])
+		mass_back = is_equal_approx((visual as RigidBody3D).mass, 40.0)
+	print("[dlog] load=%s first_back=%s paint_back=%s mass_back=%s second_gone=%s" % [
+		loaded, first_back, paint_back, mass_back, second_gone])
 	print("[dlog] journal_after_load=%d (expect 0)" % _journal_lines(journal))
 
 	print("[sdlog] ALL_PASS")

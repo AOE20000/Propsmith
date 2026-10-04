@@ -38,6 +38,7 @@ func setup(container: Node3D) -> void:
 	DecisionLog.register_applier(&"spawn_prop", _apply_spawn_decision, true)
 	DecisionLog.register_applier(&"despawn_prop", _apply_despawn_decision, true)
 	DecisionLog.register_applier(&"paint_prop", _apply_paint_decision, true)
+	DecisionLog.register_applier(&"reweight_prop", _apply_reweight_decision, true)
 
 
 ## Give spawned citizens a day plan. The map source calls this after loading its
@@ -210,6 +211,13 @@ func _apply_despawn_decision(payload: Dictionary) -> void:
 	remove_by_decision_id(String(payload.get("decision_id", "")))
 
 
+## Journal applier for `reweight_prop`.
+func _apply_reweight_decision(payload: Dictionary) -> void:
+	var prop := get_by_decision_id(String(payload.get("decision_id", "")))
+	if prop != null:
+		prop.mass = float(payload.get("mass", prop.mass))
+
+
 ## Journal applier for `paint_prop`.
 func _apply_paint_decision(payload: Dictionary) -> void:
 	var color_values: Array = payload.get("color", [1.0, 1.0, 1.0])
@@ -233,6 +241,15 @@ func paint_by_decision_id(decision_id: String, color: Color) -> bool:
 	if material == null:
 		return false
 	material.albedo_color = color
+	return true
+
+
+## Recolour 榜同款：按决策 ID 设置质量（paint applier 同型）。
+func reweight_by_decision_id(decision_id: String, mass: float) -> bool:
+	var prop := get_by_decision_id(decision_id)
+	if prop == null:
+		return false
+	prop.mass = mass
 	return true
 
 
@@ -329,6 +346,7 @@ func serialize_props() -> Array:
 		var euler: Vector3 = prop.rotation
 		var albedo: Array = []
 		var mesh := node.get_node_or_null("Visual") as MeshInstance3D
+		var mass_value: float = (node as RigidBody3D).mass
 		if mesh != null and mesh.material_override is StandardMaterial3D:
 			var c: Color = (mesh.material_override as StandardMaterial3D).albedo_color
 			albedo = [c.r, c.g, c.b, c.a]
@@ -336,6 +354,7 @@ func serialize_props() -> Array:
 			"id": String(prop_id),
 			"decision_id": String(node.get_meta(&"decision_id", "")),
 			"albedo": albedo,
+			"mass": mass_value,
 			"instance": prop.get_instance_id(),
 			"position": [prop.global_position.x, prop.global_position.y, prop.global_position.z],
 			"rotation": [euler.x, euler.y, euler.z],
@@ -363,6 +382,8 @@ func restore_prop(record: Dictionary) -> RigidBody3D:
 	prop.rotation = Vector3(
 		float(rotation_values[0]), float(rotation_values[1]), float(rotation_values[2])
 	)
+	if record.has("mass"):
+		prop.mass = float(record["mass"])
 	var albedo_values: Array = record.get("albedo", [])
 	if albedo_values.size() >= 3:
 		var visual := prop.get_node_or_null("Visual") as MeshInstance3D

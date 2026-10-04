@@ -85,6 +85,9 @@ func _reweight(prop: RigidBody3D) -> void:
 			next = candidate
 			break
 	prop.mass = next
+	var decision_id := String(prop.get_meta(&"decision_id", ""))
+	if decision_id != "":
+		DecisionLog.record(&"reweight_prop", {"decision_id": decision_id, "mass": next})
 	Events.notify("质量 %.0f kg" % next, Events.NotifyLevel.INFO)
 
 
