@@ -48,8 +48,8 @@ func _ready() -> void:
 	_run_section("tool gun and constraints", 15, _check_tools_and_constraints)
 	_run_section("npc citizens", 11, _check_npc_citizens)
 	_run_section("scripted mod bridges", 7, _check_scripted_bridges)
-	_run_section("map sources and blueprints", 13, _check_map_sources_and_blueprints)
-	_run_section("map catalogue", 17, _check_map_catalog)
+	_run_section("map sources and blueprints", 14, _check_map_sources_and_blueprints)
+	_run_section("map catalogue", 23, _check_map_catalog)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -1245,7 +1245,12 @@ func _check_map_sources_and_blueprints() -> void:
 	var world := Node3D.new()
 	add_child(world)
 	_expect(playground.build(world, 7), "the playground must build headlessly")
-	_expect(playground.map_id() == "playground:1", "the playground identity must be stable")
+	# Declared identity: owner + selector + content version, no fingerprint in it.
+	# A raw source resolves to `unknown` until a registrar hands it its identity —
+	# which is what keeps a map from disagreeing with its own registration.
+	_expect(playground.map_id() == "unknown", "an unregistered source has no declared identity")
+	playground.identity_selector = "playground"
+	_expect(playground.map_id() == "core:playground@1", "the playground identity must be declared")
 	_expect(world.get_node_or_null("Ground") != null, "the playground must have ground")
 	var query: SurfaceQuery = Services.get_as(&"surface_query", &"SurfaceQuery") as SurfaceQuery
 	_expect(query != null and query.is_ready(), "the playground must publish surface queries")
@@ -1616,7 +1621,11 @@ func _check_map_catalog() -> void:
 	var lawn: MapSource = catalog.resolve(&"playground")
 	_expect(lawn != null, "the core map must resolve")
 	_expect(lawn is PlaygroundMapSource, "the core map must be the demo lawn")
-	_expect(lawn != null and lawn.map_id() == "playground:1", "the core map must keep its identity")
+	# The declared identity, composed from owner + selector + content version — and
+	# *not* containing any fingerprint, which is advisory.
+	_expect(lawn != null and lawn.map_id() == "core:playground@1", "the core identity must be declared, not computed")
+	_expect(lawn != null and lawn.identity_selector == "playground", "the selector must be the stable name")
+	_expect(lawn != null and lawn.map_fingerprint() == "", "a map with no dataset has no fingerprint")
 	var before: Array[String] = []
 	for entry: Dictionary in catalog.list():
 		before.append(String(entry["id"]))
@@ -1630,20 +1639,21 @@ func _check_map_catalog() -> void:
 
 	var context := ModContext.new(&"selftest_maps")
 	_expect(
-		context.add_map_source(PlaygroundMapSource.new(), &"selftest_map", "自测地图"),
+		context.add_map_source(PlaygroundMapSource.new(), &"selftest_map", "自测地图", "2"),
 		"a mod must be able to register a whole map"
 	)
 	_expect(not context.add_map_source(null, &"bad_map"), "a null source must be refused")
 	ModHost.contexts["selftest_maps"] = context
-	_expect(catalog.resolve(&"selftest_map") != null, "a mod-registered map must resolve")
+	var registered: MapSource = catalog.resolve(&"selftest_map")
+	_expect(registered != null, "a mod-registered map must resolve")
+	_expect(
+		registered != null and registered.map_id() == "selftest_maps:selftest_map@2",
+		"the declared content version must flow into the save identity"
+	)
 	var after: Array[String] = []
 	for entry: Dictionary in catalog.list():
 		after.append(String(entry["id"]))
 	_expect(after.has("selftest_map"), "a mod-registered map must be listed")
-	_expect(
-		String(catalog.resolve(&"selftest_map").map_id()) == "playground:1",
-		"the registered source must be the one that resolves"
-	)
 	_expect(
 		context.add_map_source(PlaygroundMapSource.new(), &"selftest_other"),
 		"the same source under another selector is another map"
@@ -1653,6 +1663,21 @@ func _check_map_catalog() -> void:
 	OS.set_environment("DSH_MAP_SOURCE", "")
 	ModHost.contexts.erase("selftest_maps")
 	_expect(catalog.resolve(&"selftest_map") == null, "removing the mod must remove its map")
+
+	# Two mods claiming one id used to load both and let the second overwrite the
+	# first in `contexts` — its registrations and its save section winning silently.
+	# The gate disables the later one and names both directories instead.
+	var duplicate: Array[Dictionary] = [
+		{"id": &"selftest_dup", "dir": "res://mods/first", "enabled": true},
+		{"id": &"selftest_dup", "dir": "res://mods/second", "enabled": true},
+		{"id": &"selftest_lone", "dir": "res://mods/third", "enabled": true},
+	]
+	ModHost._reject_duplicate_ids(duplicate)
+	_expect(duplicate[0]["enabled"] == true, "the first claimant must keep its id")
+	_expect(duplicate[1]["enabled"] == false, "the later duplicate must be disabled")
+	_expect(duplicate[2]["enabled"] == true, "an unrelated mod must be untouched")
+	_expect(ModHost.failures.has("selftest_dup"), "the collision must be reported with a reason")
+	ModHost.failures.erase("selftest_dup")
 
 
 ## The ambience layer: levels, looping, point sources, teardown.

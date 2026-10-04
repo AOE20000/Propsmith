@@ -68,7 +68,9 @@ func load_all() -> void:
 	unload_all()
 	failures.clear()
 
-	for candidate: Dictionary in _order_by_dependencies(_scan()):
+	var candidates: Array[Dictionary] = _order_by_dependencies(_scan())
+	_reject_duplicate_ids(candidates)
+	for candidate: Dictionary in candidates:
 		if not bool(candidate.get("enabled", true)):
 			continue
 		var mod: ModBase = _instantiate(candidate)
@@ -214,6 +216,7 @@ func _scan() -> Array[Dictionary]:
 			"display_name": String(manifest.get("name", directory_name)),
 			"version": String(manifest.get("version", "1.0.0")),
 			"author": String(manifest.get("author", "")),
+			"content_version": String(manifest.get("content_version", "1")),
 			"enabled": bool(manifest.get("enabled", true)),
 			"dependencies": _string_list(manifest.get("dependencies", [])),
 			"dir": mod_dir,
@@ -303,6 +306,7 @@ func _apply_metadata(mod: ModBase, candidate: Dictionary) -> void:
 	mod.mod_id = candidate["id"]
 	mod.display_name = String(candidate.get("display_name", mod.mod_id))
 	mod.version = String(candidate.get("version", "1.0.0"))
+	mod.content_version = String(candidate.get("content_version", "1"))
 	mod.author = String(candidate.get("author", ""))
 	mod.dependencies = candidate.get("dependencies", PackedStringArray())
 
@@ -317,6 +321,35 @@ func _fail(mod_id: StringName, reason: String) -> void:
 func _record(mod_id: StringName, reason: String) -> void:
 	failures[String(mod_id)] = reason
 	Events.mod_failed.emit(mod_id, reason)
+
+
+## Refuse a second mod that declares an id the first one already claimed.
+##
+## Nothing used to check this, and the failure was the worst kind: both mods loaded,
+## and the second silently overwrote the first in `contexts` — its registrations won,
+## its save section collided with the first's, and neither author had any idea. The
+## declared id is load-bearing (registries, save sections, load order), so a
+## collision is a misconfiguration to *name*, not a race to arbitrate. The loser is
+## disabled with a reason naming both directories; the winner, and every other mod,
+## keep working.
+##
+## Runs after dependency ordering so "first" is the deterministic one — the mod that
+## would have loaded first, not whichever the filesystem listed first.
+func _reject_duplicate_ids(candidates: Array[Dictionary]) -> void:
+	var claimed: Dictionary = {}
+	for candidate: Dictionary in candidates:
+		var id: StringName = candidate["id"]
+		if not claimed.has(id):
+			claimed[id] = candidate
+			continue
+		var winner: Dictionary = claimed[id]
+		var reason: String = (
+			"mod id '%s' is already claimed by the mod in '%s' — the one in '%s' is disabled" % [
+				id, winner["dir"], candidate["dir"],
+			]
+		)
+		_fail(id, reason)
+		candidate["enabled"] = false
 
 
 ## Depth-first ordering where a mod always follows the mods it depends on. The algorithm

@@ -182,12 +182,20 @@ func find_spawn_position() -> Vector3:
 	return _spawn_position
 
 
-func map_id() -> String:
-	# The dataset fingerprint (all bldg file names, hashed) — deliberately NOT
-	# the loaded-file count: a place table can cover the whole ward while a
-	# session loads one square, and that is the same map. A re-downloaded
-	# dataset changes the names, which is what this must react to.
-	return "plateau:%s:%d:%s" % [city, _active_lod(), _dataset_fingerprint()]
+## How the loaded data differs from the last time anyone looked: a hash of the
+## bldg file names.
+##
+## Deliberately NOT part of `map_id()` any more. It used to be, which made every
+## re-export of the dataset a different map and refused a save the player had every
+## right to expect would load. Now it is advisory only: the save path compares it
+## and warns when it differs, and whatever in the save no longer resolves is
+## temporarily ignored and named rather than deleted.
+##
+## Still "file names, not the loaded count" — a place table can cover the whole ward
+## while a session loads one square, and that is the same map. Still cheap: names
+## only, no file contents.
+func map_fingerprint() -> String:
+	return PlateauReader.dataset_fingerprint(_find_gml_files(city, "bldg"))
 
 
 func describe() -> Dictionary:
@@ -221,13 +229,24 @@ func _build_mobility(world_root: Node3D, city_container: Node3D, seed_value: int
 	var candidates: Array[Dictionary] = table.get("candidates", [] as Array[Dictionary])
 	if candidates.is_empty():
 		return
-	# The table was derived from a specific dataset (fingerprinted by file
-	# names). If the running map no longer matches, positions would be subtly
-	# wrong — people inside walls — so the table is refused rather than trusted.
+	# The table was derived from a specific dataset, and positions would be subtly
+	# wrong — people inside walls — if the running data no longer matches it. So the
+	# comparison is against the **fingerprint**, not the declared identity: the
+	# table's guarantee is "derived from that data", which is about the data and not
+	# about who shipped the map or what they called the version. Declaring a new
+	# content version must not silently invalidate a table that is still true.
 	var exported_version: String = String(table.get("map_version", ""))
-	if exported_version != map_id():
-		push_warning("地点表版本不匹配（表：%s，当前：%s）——重新运行 tools/city_export_activity 导出" % [
-			exported_version, map_id(),
+	var exported_fingerprint: String = String(table.get("map_fingerprint", ""))
+	if exported_fingerprint.is_empty() and not exported_version.is_empty():
+		# Tables exported before the fingerprint got its own field carried it as the
+		# last segment of the old identity string.
+		var segments: PackedStringArray = exported_version.split(":")
+		if segments.size() >= 3:
+			exported_fingerprint = segments[segments.size() - 1]
+	var running_fingerprint: String = map_fingerprint()
+	if not running_fingerprint.is_empty() and exported_fingerprint != running_fingerprint:
+		push_warning("地点表与当前数据不匹配（表：%s，当前：%s）——重新运行 tools/city_export_activity 导出" % [
+			exported_fingerprint, running_fingerprint,
 		])
 		return
 	# The exported offset covers the WHOLE dataset; a session that loaded a
@@ -642,12 +661,9 @@ func _find_gml_files(city_name: String, kind: String) -> PackedStringArray:
 	return files
 
 
-func _active_lod() -> int:
-	return int(_env_or("DSH_MAP_LOD", "1"))
-
-
 ## The fingerprint over the **full** dataset, independent of how many files the
-## session chose to load.
+## session chose to load. See `map_fingerprint()` — this is its implementation, kept
+## beside the file discovery it leans on.
 func _dataset_fingerprint() -> String:
 	return PlateauReader.dataset_fingerprint(_find_gml_files(city, "bldg"))
 

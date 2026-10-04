@@ -222,16 +222,27 @@ func add_player_model(model_id: StringName, display_name: String, factory: Calla
 ##
 ## `display_name` is what a menu shows; an empty one falls back to the mod's own
 ## name, which is right for a mod that exists to provide one map.
-func add_map_source(source: MapSource, map_id: StringName, display_name: String = "") -> bool:
+## `content_version` is the provider's declaration of when the *shape* of its
+## content changed, and it flows into the map's save identity. It is a parameter
+## here — rather than read off the source — so the manifest stays the single place
+## a mod declares it.
+func add_map_source(
+	source: MapSource,
+	map_id: StringName,
+	display_name: String = "",
+	content_version: String = "1",
+) -> bool:
 	if source == null or not (source is MapSource):
 		push_error("[mod:%s] add_map_source '%s' needs an actual MapSource" % [_mod_id, map_id])
 		return false
 	if display_name.strip_edges().is_empty():
 		display_name = String(_mod_id)
+	source.content_version = content_version
 	return _register(map_sources, map_id, {
 		"id": map_id,
 		"display_name": display_name,
 		"source": source,
+		"content_version": content_version,
 		"owner": _mod_id,
 	}, "map source")
 

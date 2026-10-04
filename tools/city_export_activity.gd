@@ -87,9 +87,12 @@ func _ready() -> void:
 			"position": [position.x, position.y, position.z],
 		})
 
-	var map_version: String = "plateau:%s:%d:%s" % [
-		city, lod, PlateauReader.dataset_fingerprint(gml_files),
-	]
+	var fingerprint: String = PlateauReader.dataset_fingerprint(gml_files)
+	# The old identity format, kept in `map_version` so an older reader can still
+	# refuse a table that does not belong to its data. The loader itself compares
+	# `map_fingerprint`: the table's guarantee is "derived from that dataset", which
+	# is about the data, not about who shipped it or what they called the version.
+	var map_version: String = "plateau:%s:%d:%s" % [city, lod, fingerprint]
 	# TSV, not JSON: Godot's JSON.parse_string crawls on a 10 MB document (the
 	# full ward hung load for minutes), while a split-per-line parse is
 	# milliseconds. Header lines carry the metadata the loader needs.
@@ -103,7 +106,7 @@ func _ready() -> void:
 		get_tree().quit(1)
 		return
 	file.store_line("# plateau place table")
-	file.store_line("# city=%s lod=%d map_version=%s" % [city, lod, map_version])
+	file.store_line("# city=%s lod=%d map_version=%s map_fingerprint=%s" % [city, lod, map_version, fingerprint])
 	file.store_line("# offset=%.3f %.3f %.3f" % [offset.x, offset.y, offset.z])
 	file.store_line("# id\ttag\tx\ty\tz")
 	for place: Dictionary in places:

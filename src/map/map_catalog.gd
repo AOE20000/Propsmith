@@ -78,11 +78,33 @@ func list() -> Array[Dictionary]:
 func resolve(id: StringName) -> MapSource:
 	var built: Dictionary = BUILT_IN.get(id, {})
 	if not built.is_empty():
-		return ((built["script"] as GDScript).new() as MapSource)
+		var source: MapSource = (built["script"] as GDScript).new() as MapSource
+		_apply_identity(source, id, "core", String(built.get("content_version", "1")))
+		return source
 	var payload: Variant = ModHost.content(&"map").get(id, null)
 	if payload == null:
 		return null
-	return (payload as Dictionary).get("source", null) as MapSource
+	var mod_source: MapSource = (payload as Dictionary).get("source", null) as MapSource
+	if mod_source == null:
+		return null
+	_apply_identity(
+		mod_source, id,
+		String((payload as Dictionary).get("owner", "mod")),
+		String((payload as Dictionary).get("content_version", "1")),
+	)
+	return mod_source
+
+
+## Hand a resolved source its declared identity.
+##
+## Composing happens in the source (`map_id()`), but the *parts* belong to the
+## registration: the selector is the key it was registered under and the content
+## version is the provider's declaration. Setting them here means a source cannot
+## disagree with its own registration.
+func _apply_identity(source: MapSource, id: StringName, owner: String, version: String) -> void:
+	source.identity_owner = owner
+	source.identity_selector = String(id)
+	source.content_version = version
 
 
 ## What a session runs when nothing was asked for.

@@ -37,11 +37,47 @@ func find_spawn_position() -> Vector3:
 var spawn_anchor: Vector3 = Vector3.ZERO
 
 
-## Identity written into every save. Loading a save whose map_id differs from
-## the running map is refused by `SaveSystem` — silently teleporting a player
-## into a different city is the failure mode this exists to prevent.
+## Identity, split into two parts that answer different questions.
+##
+## **`map_id()` is what a save is bound to, and it is *declared*** — composed from
+## the three fields below, which the registrar (the core, or the mod that owns the
+## map) hands in. It is the stable answer to "which world was this save made in".
+##
+## **`map_fingerprint()` is what the data is, and it is *computed*** — it is NOT part
+## of the identity. A fingerprint inside the identity made every re-export of a
+## dataset look like a different map, and refused a save that the player had every
+## right to expect would load. The fingerprint's job is narrower: at load time it is
+## compared against the save's, and a difference is **a warning, not a refusal** —
+## the save loads, and whatever in it no longer resolves is temporarily ignored and
+## named. Declaration governs identity; computation governs difference; difference
+## degrades.
+
+## Who provides this map: the core, or the id of the mod that registered it.
+var identity_owner: String = "core"
+
+## The stable selector a session asks for (`DSH_MAP_SOURCE`, a menu). Deliberately
+## not the same thing as `map_id()`: the selector must not change when the data
+## changes, or every re-export of a dataset is a different map.
+var identity_selector: String = ""
+
+## The content version the provider declares, and the one thing it promises to bump
+## when the *shape* of its content changes. If it is forgotten, the fingerprint
+## comparison is what notices.
+var content_version: String = "1"
+
+
+## The declared identity a save is bound to.
 func map_id() -> String:
-	return "unknown"
+	if identity_selector.is_empty():
+		return "unknown"
+	return "%s:%s@%s" % [identity_owner, identity_selector, content_version]
+
+
+## A cheap, computed description of the underlying data, for drift detection only.
+## Override in a source whose world comes from data that can change independently of
+## the code (a city dataset, a downloadable pack). Empty means "no drift detection".
+func map_fingerprint() -> String:
+	return ""
 
 
 ## Facts for the boot report, printed in validate-only mode.

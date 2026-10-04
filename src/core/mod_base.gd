@@ -28,6 +28,15 @@ var mod_id: StringName = &""
 ## Human-readable name shown in the mod list.
 var display_name: String = ""
 var version: String = "1.0.0"
+## The version of the *content's shape*, as opposed to the mod release.
+##
+## Bump it when something a save or a cache could be keyed on changes its shape —
+## for a map mod, the buildings and places; for a content mod, item definitions.
+## Forgetting to is not fatal: the map fingerprint comparison is what notices a
+## dataset that changed under an unchanged version, and it warns rather than
+## refuses. Declared here so a mod states it once in the manifest instead of
+## deriving it in code.
+var content_version: String = "1"
 var author: String = ""
 ## Mod ids that must load before this one. A missing dependency only warns, so a
 ## broken optional mod never blocks the game from starting.

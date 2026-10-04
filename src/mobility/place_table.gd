@@ -34,22 +34,27 @@ static func load_for(city: String, data_root: String = "") -> Dictionary:
 
 
 ## Parse table text (or a hand-written fixture — same shape, same rules).
-## Returns candidates plus the metadata lines: `map_version` keys route caches
-## and save identity; `offset` is the whole-dataset settle the exporter used.
+## Returns candidates plus the metadata lines: `map_fingerprint` is what the loader
+## compares (the table's guarantee is about the *data*), `map_version` is kept for
+## tables exported before the fingerprint had its own field, and `offset` is the
+## whole-dataset settle the exporter used.
 static func parse_text(text: String) -> Dictionary:
 	var candidates: Array[Dictionary] = []
 	var map_version: String = ""
+	var map_fingerprint: String = ""
 	var offset := Vector3.ZERO
 	for line: String in text.split("\n"):
 		var trimmed: String = line.strip_edges()
 		if trimmed.is_empty():
 			continue
 		if trimmed.begins_with("#"):
-			if trimmed.begins_with("# city=") or trimmed.contains(" map_version="):
+			if trimmed.begins_with("# city=") or trimmed.contains(" map_version=") or trimmed.contains(" map_fingerprint="):
 				var parts: PackedStringArray = trimmed.substr(2).split(" ")
 				for part: String in parts:
 					if part.begins_with("map_version="):
 						map_version = part.substr("map_version=".length())
+					elif part.begins_with("map_fingerprint="):
+						map_fingerprint = part.substr("map_fingerprint=".length())
 			elif trimmed.begins_with("# offset="):
 				var values: PackedStringArray = trimmed.substr("# offset=".length()).split(" ")
 				if values.size() == 3:
@@ -65,7 +70,12 @@ static func parse_text(text: String) -> Dictionary:
 		candidates.append(DestinationChooser.make_candidate(
 			StringName(id), StringName(columns[1]), position
 		))
-	return {"candidates": candidates, "map_version": map_version, "offset": offset}
+	return {
+		"candidates": candidates,
+		"map_version": map_version,
+		"map_fingerprint": map_fingerprint,
+		"offset": offset,
+	}
 
 
 ## Convenience for tests: parse a payload-shaped fixture (id/tag/position rows).

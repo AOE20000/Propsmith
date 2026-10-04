@@ -97,9 +97,8 @@ func find_spawn_position() -> Vector3:
 	return _spawn_position
 
 
-func map_id() -> String:
-	return "playground:1"
-
+## The declared identity comes from the base class (`core:playground@1`) — the lawn
+## has no dataset to drift, so it overrides nothing about identity.
 
 func describe() -> Dictionary:
 	return {

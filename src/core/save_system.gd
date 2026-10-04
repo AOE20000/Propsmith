@@ -114,16 +114,29 @@ func load_game(slot: String = DEFAULT_SLOT) -> bool:
 		last_error = "save file has no readable state"
 		return false
 
-	# Map identity is checked before anything is applied: a save made in another
-	# city (or on the removed island, whose saves carry no map id at all) must be
-	# refused outright, because its places, discoveries and routes all point into
-	# a world that is not the one running.
+	# Map identity is checked before anything is applied, and it is *declared*: a
+	# save made in another city must be refused outright, because its places,
+	# discoveries and routes all point into a world that is not the one running.
 	var saved_map_id: String = String((state as Dictionary).get("map_id", ""))
 	var running_map_id: String = GameState.map_id
-	if saved_map_id != running_map_id:
+	if not _same_map(saved_map_id, running_map_id):
 		last_error = "存档属于其他地图（存档：%s，当前：%s）— 拒绝读取" % [saved_map_id, running_map_id]
 		push_error("SaveSystem: " + last_error)
 		return false
+
+	# A difference in the *data fingerprint* is a different question, and it gets a
+	# different answer: the identity says "same world", so the save is loaded — but
+	# whatever in it no longer resolves against the current dataset is **warned about
+	# and temporarily ignored, never removed**. Ignoring rather than deleting is the
+	# whole point: a player who re-downloads the dataset, or rolls the mod back,
+	# finds their discoveries exactly where they left them. Pruning a save to match
+	# the data of the moment would turn a temporary mismatch into permanent loss.
+	var saved_fingerprint: String = String((state as Dictionary).get("map_fingerprint", ""))
+	var running_fingerprint: String = GameState.map_fingerprint
+	if not saved_fingerprint.is_empty() and saved_fingerprint != running_fingerprint:
+		push_warning("SaveSystem: 存档的数据与当前数据集不同（存档 %s / 当前 %s）— 已载入；当前数据里不存在的条目将被临时忽略" % [
+			saved_fingerprint, running_fingerprint,
+		])
 
 	GameState.from_dict(state)
 
@@ -146,6 +159,23 @@ func delete_save(slot: String = DEFAULT_SLOT) -> bool:
 	if not has_save(slot):
 		return false
 	return DirAccess.remove_absolute(ProjectSettings.globalize_path(slot_path(slot))) == OK
+
+
+## Whether a saved map identity names the map that is running.
+##
+## Equality is the normal case. The prefix rule is a **one-time migration**, not a
+## general leniency: saves made before the identity became declared
+## (`plateau:<city>:<lod>:<fingerprint>` / `playground:1`) carried the selector
+## inside a computed string, and every one of them would otherwise be refused the
+## moment this shipped. A save whose selector matches is accepted and will be
+## rewritten in the new format on the next save. A save from a genuinely different
+## map does not contain this map's selector, and is still refused.
+func _same_map(saved_map_id: String, running_map_id: String) -> bool:
+	if saved_map_id == running_map_id:
+		return true
+	# The bare selector, for the pre-declared-format migration only.
+	var selector: String = GameState.map_selector
+	return not selector.is_empty() and saved_map_id.contains(selector)
 
 
 ## JSON has no vector types, so containers are tagged on the way out and rebuilt

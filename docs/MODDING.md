@@ -62,16 +62,24 @@ res://mods/my_mod/
 
 ## 扩展点：整张地图
 
-`context.add_map_source(source, selector_id, display_name)` 注册一张**完整的地图**
-——不是放在地图里的内容，而是"这一局发生在哪里"。核心只自带 Demo 地图；涩谷
-（需要 `godot-plateau` 扩展与不入库的数据集）就是这么提供的，见
+`context.add_map_source(source, selector_id, display_name, content_version)` 注册一张
+**完整的地图**——不是放在地图里的内容，而是"这一局发生在哪里"。核心只自带 Demo 地图；
+涩谷（需要 `godot-plateau` 扩展与不入库的数据集）就是这么提供的，见
 `mods/plateau_city/`。
 
-两个 id 别混：
+三个 id/version 各管一件事，别混：
 
 - **`selector_id`**：`DSH_MAP_SOURCE` 与菜单用的**稳定名字**（如 `shibuya`）。
-- **`source.map_id()`**：**存档指纹**——涩谷的是数据集文件的哈希，数据一重导出就变。
-  目录按选择器取键，指纹留在地图源里给存档校验用。
+- **`content_version`**：你**声明**的内容形状版本，进入存档身份
+  （`plateau_city:shibuya@1`）。建筑/地点的形状变了就递增——它来自 `mod.json` 的
+  `content_version` 字段，一处声明。
+- **`source.map_fingerprint()`**：对**数据**的计算（涩谷是数据集文件名的哈希），
+  **不属于身份**。它只做两件 advisory 的事：存档载入时数据变了会**警告并临时忽略**
+  失效条目（绝不从存档里删——玩家装回数据后进度要还在）；导出的地点表按它比对
+  （表的保证是"来自那份**数据**"，与谁发布、版本叫什么无关）。
+
+Mod id 本身也由加载器**强制唯一**：两个目录声明同一个 `id`，后载入的被禁用并
+写明两个目录的路径，其余 mod 照常。
 
 请求了一个目录里没有的地图时，启动会**说明有哪些可选**再回落到 Demo——静默换图
 等于让玩家盯着错误的世界却没人解释。数据式 Mod（只带 JSON、不带代码）**无法**

@@ -33,10 +33,31 @@ var world_seed: int = 20260930
 ## surprise — the discovered places and the routes all reference another world.
 var map_id: String = ""
 
+## The stable selector inside that identity (`playground`, `shibuya`), kept apart
+## because the one-time save migration matches on it: saves made before the
+## identity became declared spelled the selector inside a computed string with no
+## `@version` on it, so matching against the full id would refuse them all.
+var map_selector: String = ""
+
+## A cheap computed description of the map's *data*, advisory only and never part
+## of the identity. Stored so a load can notice the dataset changed under an
+## unchanged declared version.
+##
+## The policy when it differs on load is **warn and temporarily ignore** — entries
+## in the save that no longer resolve against the current data stay in the save and
+## are simply not used this session. Never prune: a player who re-downloads the
+## dataset or rolls the mod back must find their discoveries exactly where they
+## left them, and pruning is what turns a temporary mismatch into permanent loss.
+var map_fingerprint: String = ""
+
 var play_time_seconds: float = 0.0
 var total_distance_travelled: float = 0.0
 
 ## Discovery and collection progress, keyed for stable saves.
+##
+## Entries whose POI no longer exists in the current dataset are **temporarily
+## ignored** (skipped by consumers, counted, and warned about once) — not removed.
+## See `map_fingerprint` for why.
 var discovered_pois: Dictionary = {}
 var collected_items: Dictionary = {}
 var visited_regions: Dictionary = {}
@@ -59,6 +80,8 @@ func reset_for_new_world(new_seed: int = -1) -> void:
 	if new_seed >= 0:
 		world_seed = new_seed
 	map_id = ""
+	map_selector = ""
+	map_fingerprint = ""
 	play_time_seconds = 0.0
 	total_distance_travelled = 0.0
 	discovered_pois.clear()
@@ -118,6 +141,7 @@ func to_dict() -> Dictionary:
 		"save_version": SAVE_VERSION,
 		"world_seed": world_seed,
 		"map_id": map_id,
+		"map_fingerprint": map_fingerprint,
 		"play_time_seconds": play_time_seconds,
 		"total_distance_travelled": total_distance_travelled,
 		"discovered_pois": discovered_pois.duplicate(true),
@@ -136,6 +160,10 @@ func from_dict(data: Dictionary) -> void:
 	# A save from before the map identity existed (the island era) reads as an
 	# empty string and is refused for exactly that reason.
 	map_id = String(data.get("map_id", ""))
+	# Advisory, like the map id: a difference from the running fingerprint is
+	# warned about by `SaveSystem` and means "temporarily ignore what no longer
+	# resolves", never "delete from the save".
+	map_fingerprint = String(data.get("map_fingerprint", ""))
 	play_time_seconds = float(data.get("play_time_seconds", 0.0))
 	total_distance_travelled = float(data.get("total_distance_travelled", 0.0))
 	discovered_pois = (data.get("discovered_pois", {}) as Dictionary).duplicate(true)

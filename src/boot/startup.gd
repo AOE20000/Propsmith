@@ -226,7 +226,11 @@ func _build_world(failures: Array[String]) -> void:
 	print("[boot] map build: %d ms" % (Time.get_ticks_msec() - started_at))
 	# The map source owns its identity; the session state just records it, so a
 	# save made from here carries the same id the save check will compare against.
+	# The fingerprint is advisory — recorded so a load can notice data drift — and
+	# the check that consumes it warns rather than refuses.
 	GameState.map_id = typed_source.map_id()
+	GameState.map_selector = typed_source.identity_selector
+	GameState.map_fingerprint = typed_source.map_fingerprint()
 
 
 func _spawn_player(failures: Array[String]) -> void:

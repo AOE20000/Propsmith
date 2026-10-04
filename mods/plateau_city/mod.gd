@@ -20,4 +20,6 @@ func _on_register() -> void:
 	display_name = "涩谷街区（PLATEAU）"
 	version = "1.0.0"
 	author = "Propsmith"
-	context.add_map_source(PlateauMapSource.new(), MAP_SELECTOR, "涩谷街区（PLATEAU）")
+	# `content_version` comes from mod.json and flows into the map's save identity
+	# (`plateau_city:shibuya@<version>`); the dataset fingerprint stays advisory.
+	context.add_map_source(PlateauMapSource.new(), MAP_SELECTOR, "涩谷街区（PLATEAU）", content_version)
