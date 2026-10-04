@@ -51,7 +51,7 @@ func _ready() -> void:
 	_run_section("map sources and blueprints", 14, _check_map_sources_and_blueprints)
 	_run_section("map catalogue", 23, _check_map_catalog)
 	_run_section("camera and wardrobe wiring", 31, _check_camera_and_wardrobe)
-	_run_section("model clips sampler", 4, _check_model_clips)
+	_run_section("model clips sampler", 7, _check_model_clips)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -1887,6 +1887,19 @@ func _check_model_clips() -> void:
 	anim.track_insert_key(track, 0.5, Quaternion(Vector3.UP, 1.0))
 	anim.track_insert_key(track, 1.0, Quaternion(Vector3.UP, 0.0))
 	lib.add_animation(&"spin", anim)
+	# The same loop registered as the walk gear, so the hysteresis test can
+	# actually switch back to WALK_CLIP — a library without it fails the
+	# switch silently (has_animation is false) and the run clip lingers.
+	lib.add_animation(&"walk", anim)
+	var run := Animation.new()
+	run.length = 0.5
+	run.loop_mode = Animation.LOOP_LINEAR
+	var run_track := run.add_track(Animation.TYPE_ROTATION_3D)
+	run.track_set_path(run_track, NodePath("Skeleton3D:TestBone"))
+	run.track_insert_key(run_track, 0.0, Quaternion(Vector3.UP, 2.0))
+	run.track_insert_key(run_track, 0.25, Quaternion(Vector3.UP, 3.0))
+	run.track_insert_key(run_track, 0.5, Quaternion(Vector3.UP, 2.0))
+	lib.add_animation(&"run_067", run)
 	clips.library_override = lib
 	clips.setup(model)
 	add_child(model)
@@ -1905,6 +1918,34 @@ func _check_model_clips() -> void:
 	_expect(
 		skeleton.get_bone_pose_rotation(bone).angle_to(rest.basis.get_rotation_quaternion()) < 0.01,
 		"stopping must restore the rest pose"
+	)
+
+	# Gear selection: driving the brain with a sprint speed must select the run
+	# clip, and the gear must hold through the hysteresis window before walking
+	# returns — a speed hovering at the threshold must not flip the clip. The
+	# brain is a pure function of measured speed, so the test drives it
+	# directly instead of fighting the engine's own ticks over model position.
+	clips._forced = &""
+	clips._walking = false
+	clips._running = false
+	clips._speed = 0.0
+	for i: int in 12:
+		clips._decide_gear(1.0 / 30.0, 9.0)  # sprint
+	_expect(
+		clips._running and clips._current_clip == lib.get_animation(&"run_067"),
+		"sprint speed must select the run clip"
+	)
+	for i: int in 4:
+		clips._decide_gear(1.0 / 30.0, 5.0)  # below the threshold
+	_expect(clips._running, "the run gear must hold through the hysteresis window")
+	for i: int in 12:
+		clips._decide_gear(1.0 / 30.0, 5.0)
+	var clip_label: String = "walk" if clips._current_clip == lib.get_animation(&"walk") else "other"
+	_expect(
+		not clips._running and clips._current_clip == lib.get_animation(&"walk"),
+		"below the threshold the walk clip must return after the hold (running=%s clip=%s speed=%.2f gear_t=%.2f)" % [
+			clips._running, clip_label, clips._speed, clips._gear_time,
+		]
 	)
 
 	clips.queue_free()

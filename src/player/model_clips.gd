@@ -35,10 +35,22 @@ class_name ModelClips
 ## Library path and the clip names inside it (built by the tool script).
 const LIBRARY_PATH: String = "res://assets/animations/locomotion.res"
 const WALK_CLIP: StringName = &"walk"
+const RUN_CLIP: StringName = &"run_067"
 ## The ground speed the walk clip was authored for (m/s). Playback speed
 ## divides the measured speed by this, so faster movement plays the cycle
 ## proportionally faster instead of moonwalking at a fixed cadence.
 @export var clip_authored_speed: float = 1.3
+## The same for the run clip. Sprint (8.6 m/s) maps to ~2.5× — the cap below
+## keeps it inside the clip's believable stride.
+@export var run_authored_speed: float = 3.4
+## Speed above which the figure runs instead of walks (m/s). The walk speed
+## (5.2) stays below it, the sprint (8.6) crosses it.
+@export var run_threshold: float = 6.5
+## Minimum seconds a walk/run gear holds before the other gear may take over —
+## the same anti-flicker hysteresis the reference movement system calls
+## RunToWalkTime: a measured speed hovering near the threshold must not flip
+## the clip every frame.
+@export var gear_hold: float = 0.3
 ## Speed above which the figure counts as walking (m/s).
 @export var walk_threshold: float = 0.25
 ## How quickly playback speed follows measured speed (per second).
@@ -60,6 +72,9 @@ var _touched_bones: PackedStringArray = []
 var _last_position: Vector3 = Vector3.ZERO
 var _speed: float = 0.0
 var _walking: bool = false
+var _running: bool = false
+## Seconds the current gear has held — the hysteresis budget for switching.
+var _gear_time: float = 0.0
 var _time: float = 0.0
 var _forced: StringName = &""
 
@@ -108,7 +123,6 @@ func debug_play(clip_name: StringName) -> void:
 	_forced = clip_name
 	_start_clip(clip_name)
 
-
 func _process(delta: float) -> void:
 	if _model == null or _library == null or _skeleton == null:
 		return
@@ -125,27 +139,62 @@ func _process(delta: float) -> void:
 	_last_position = _model.global_position
 	displacement.y = 0.0
 	var speed := displacement.length() / maxf(delta, 1e-4)
-	_speed = lerpf(_speed, speed, minf(1.0, delta * speed_lerp))
+	_decide_gear(delta, speed)
+
+
+## The whole locomotion brain, as a pure function of measured speed — walking
+## state machine, gear hysteresis, clip time and pose sampling in one place.
+## Isolated from `_process` so tests can drive it with exact speeds instead of
+## fighting the engine's own ticks over the same accumulator.
+func _decide_gear(delta: float, measured_speed: float) -> void:
+	_speed = lerpf(_speed, measured_speed, minf(1.0, delta * speed_lerp))
 	var walking := _speed > walk_threshold
 	if walking and not _walking:
 		_start_clip(WALK_CLIP)
 		_walking = true
+		_running = false
+		_gear_time = 0.0
 	if walking and _walking:
+		# Gear selection with hold-time hysteresis: the measured speed hovers
+		# around the threshold during acceleration, and without the hold the
+		# clip flips walk/run every frame (the reference system's
+		# RunToWalkTime, same reason).
+		_gear_time += delta
+		var want_run := _speed > run_threshold
+		if want_run != _running and _gear_time >= gear_hold:
+			_running = want_run
+			_gear_time = 0.0
+			_start_clip(RUN_CLIP if _running else WALK_CLIP, true)
+		# A gear switch to a clip the library lacks (or any path that lost the
+		# current one) must not sample into null — fall back to the walk clip.
+		if _current_clip == null:
+			_start_clip(WALK_CLIP)
+			if _current_clip == null:
+				return
+		var authored := run_authored_speed if _running else clip_authored_speed
 		_time = fmod(
-			_time + delta * clampf(_speed / clip_authored_speed, 0.6, 2.4),
+			_time + delta * clampf(_speed / authored, 0.6, 2.4),
 			_current_clip.length
 		)
 		_apply_sampled_pose(_current_clip, _time)
 	elif not walking and _walking:
 		_stop_clip()
 		_walking = false
+		_running = false
 
 
-func _start_clip(clip_name: StringName) -> void:
+func _start_clip(clip_name: StringName, keep_phase: bool = false) -> void:
 	if _library == null or not _library.has_animation(clip_name):
 		return
-	_current_clip = _library.get_animation(clip_name)
-	_time = 0.0
+	var next: Animation = _library.get_animation(clip_name)
+	if keep_phase and _current_clip != null and _current_clip.length > 0.0:
+		# Carry the cycle phase across the gear switch: walking and running
+		# loops differ in length, but keeping the *ratio* means the stride
+		# continues from the same leg instead of snapping to step one.
+		_time = fmod(_time / _current_clip.length * next.length, next.length)
+	else:
+		_time = 0.0
+	_current_clip = next
 	_resolve_track_bones(_current_clip)
 	# The clip owns the pose; the stance's per-frame writes would fight it.
 	if _stance != null:
