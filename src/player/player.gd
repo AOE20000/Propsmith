@@ -44,6 +44,11 @@ const EYE_HEIGHT: float = 1.38
 ## the camera, so it is what lets the character pass under something. Standing back
 ## up is refused while there is no headroom, which is what keeps it honest.
 @export var crouch_speed: float = 2.4
+## Fraction of the vertical speed kept when the jump key is released mid-rise.
+## 1.0 would mean "always full height" (no variable jump); ~0.45 makes a tap a
+## hop and a hold a leap, which is the feel the reference controllers converge
+## on. Only applied on the release edge, and only while still rising.
+@export var jump_release_factor: float = 0.45
 ## How fast the body swings to face the movement direction (rad/s) in third
 ## person. The camera rig subtracts this turn from its own yaw, so the view
 ## keeps its heading while the body pivots under it.
@@ -91,6 +96,9 @@ var camera: Camera3D = null
 
 var _coyote_timer: float = 0.0
 var _jump_buffer_timer: float = 0.0
+## Whether the jump key was held on the previous physics tick — the release
+## edge is what cuts a variable jump short.
+var _jump_was_held: bool = false
 var _was_grounded_last_frame: bool = false
 var _gravity_scale: float = 1.0
 ## 0 = standing, 1 = fully crouched. Kept as a float so the transition can be
@@ -195,6 +203,14 @@ func _physics_process(delta: float) -> void:
 	else:
 		velocity.y -= gravity * _gravity_scale * delta
 		velocity.y = maxf(velocity.y, -55.0)
+
+	# Variable jump height: letting the key go while still rising cuts the
+	# ascent short, so a tap is a hop and a hold is a leap. Only on the release
+	# edge — re-reading the held state every frame would keep halving the rise.
+	var jump_held: bool = Input.is_action_pressed(&"jump")
+	if _jump_was_held and not jump_held and velocity.y > 0.0:
+		velocity.y *= jump_release_factor
+	_jump_was_held = jump_held
 
 	move_and_slide()
 	speed = Vector2(velocity.x, velocity.z).length()
