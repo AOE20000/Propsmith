@@ -32,6 +32,15 @@ class_name CameraRig
 @export var height_step: float = 0.35
 @export var min_pivot_height: float = 0.4
 @export var max_pivot_height: float = 3.2
+## Handheld breathing: how far the camera drifts off its orbit while the figure
+## moves (m). Zero would be a tripod; a small figure-wide drift is what makes a
+## moving shot read as *held by a person* rather than bolted to a rail. The
+## motion is two out-of-phase sines, not noise — noise flickers at low frame
+## rates, sines just wobble.
+@export var walk_bob_strength: float = 0.018
+@export var walk_bob_speed: float = 8.2
+
+var _bob_time: float = 0.0
 
 var _pitch: float = -0.18
 var _yaw: float = 0.0
@@ -191,6 +200,15 @@ func _process(delta: float) -> void:
 	var desired: Vector3 = target.global_position \
 		+ Vector3.UP * pivot_height + right * _pivot_offset.x \
 		+ forward * _eye_forward()
+	# Handheld drift: two out-of-phase sines scaled by the figure's planar
+	# speed — a tripod when still, breathing the most at a sprint. Sines rather
+	# than noise because noise flickers at low frame rates; sines just wobble.
+	var planar: float = Vector2(target.velocity.x, target.velocity.z).length() \
+		if target is Player else 0.0
+	var bob: float = walk_bob_strength * clampf(planar / 8.6, 0.0, 1.0)
+	_bob_time += delta
+	desired += right * sin(_bob_time * walk_bob_speed) * bob \
+		+ Vector3.UP * sin(_bob_time * walk_bob_speed * 1.7 + 1.3) * bob * 0.6
 	global_position = global_position.lerp(desired, clampf(follow_lerp * delta, 0.0, 1.0))
 
 

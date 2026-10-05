@@ -32,14 +32,25 @@ const STANCE_IGNORED_BONES: PackedStringArray = ["eye"]
 
 
 ## Attach the full stack in the canonical order (stance → shape keys →
-## locomotion clips → head aim). Order matters for tree position, which decides
-## per-frame write order: `ModelHeadAim` composes on the head's pose, so it must
-## run *after* whoever wrote that pose (the clips, or the stance).
+## locomotion clips → head aim → lean). Order matters for tree position, which
+## decides per-frame write order: `ModelHeadAim` composes on the head's pose and
+## `ModelLean` on the chest's, so both must run *after* whoever wrote those
+## poses (the clips, or the stance).
 static func attach_all(model: Node3D) -> void:
 	attach_stance_if_unanimated(model)
 	attach_blend_shapes(model)
 	attach_locomotion(model)
 	attach_head_aim(model)
+	attach_lean(model)
+
+
+## Speed-and-steering lean, composed on the chest pose the clips just wrote.
+## Zero new animation clips; a model without a chest bone simply does not lean.
+static func attach_lean(model: Node3D) -> void:
+	var component := ModelLean.new()
+	component.name = "Lean"
+	model.add_child(component)
+	component.setup(model)
 
 
 static func attach_stance_if_unanimated(model: Node3D) -> void:
