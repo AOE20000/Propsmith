@@ -50,14 +50,16 @@ const EYE_HEIGHT: float = 1.38
 ## on. Only applied on the release edge, and only while still rising.
 @export var jump_release_factor: float = 0.45
 ## How fast the body swings to face the movement direction (rad/s) in third
-## person. The camera rig subtracts this turn from its own yaw, so the view
-## keeps its heading while the body pivots under it.
+## person. The camera rig holds its own world heading (it is top-level), so the
+## view keeps its heading while the body pivots under it.
 @export var turn_speed: float = 10.0
 ## How fast the body follows the *view* in first person (rad/s) — deliberately
 ## slower than `turn_speed`: the head leads (it absorbs the look difference up
 ## to its own limit, see `ModelHeadAim`) and the shoulders catch up after, so
-## looking around reads as looking, not as spinning on the spot.
-@export var body_follow_speed: float = 3.0
+## looking around reads as looking, not as spinning on the spot. Fast enough
+## that a quick mouse throw does not leave the shoulders behind for a second;
+## beyond a quarter turn `_update_facing` snaps instead of chasing.
+@export var body_follow_speed: float = 12.0
 ## Fraction of the standing height the body shrinks to when fully crouched.
 @export var crouch_body_scale: float = 0.58
 @export var crouch_transition_per_second: float = 8.0
@@ -232,7 +234,8 @@ func _physics_process(delta: float) -> void:
 ##   picks a side deterministically and the rate is bounded.
 ## * **First person** — the body belongs to the view, not to the movement:
 ##   strafing and backpedalling must not spin the character. It follows the
-##   view's yaw slowly, with the head leading (see `ModelHeadAim`).
+##   view's yaw with the head leading (see `ModelHeadAim`), and a flick past a
+##   quarter turn snaps outright.
 func _update_facing(delta: float) -> void:
 	var flat := Vector2(velocity.x, velocity.z)
 	var target_yaw: float
@@ -240,6 +243,12 @@ func _update_facing(delta: float) -> void:
 	if camera_rig != null and camera_rig.is_first_person():
 		target_yaw = camera_rig.get_view_yaw()
 		rate = body_follow_speed
+		# A hard flick must not make the shoulders take half a second to arrive:
+		# past a quarter turn the body snaps to the view and the chase resumes
+		# from there. Third person keeps the bounded rate — that is what stops a
+		# 180° reversal from dithering (see the doc comment above).
+		if absf(angle_difference(rotation.y, target_yaw)) > PI * 0.5:
+			rotation.y = target_yaw
 	else:
 		if flat.length_squared() < 0.01:
 			return

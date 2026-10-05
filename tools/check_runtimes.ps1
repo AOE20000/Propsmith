@@ -63,6 +63,12 @@ $benignPatterns = @(
     "[render] no look preset 'no_such_preset'"
     "[mod:selftest_maps] add_map_source 'bad_map' needs an actual MapSource"
     "[ModHost] selftest_dup: mod id 'selftest_dup' is already claimed"
+    # Duplicate-registration guards the test provokes on purpose (re-registering
+    # 'selftest_style' at runtime_self_test.gd:1357/:1378 and tour stop 'alpha'
+    # at :2172). The render-style line continues with an em dash that mojibakes
+    # in captured output, so only the ASCII prefix is matched.
+    "[tour] stop id 'alpha' is empty or already taken"
+    "[mod:selftest_render] render style id 'selftest_style' already taken by mod 'selftest_render'"
 )
 
 

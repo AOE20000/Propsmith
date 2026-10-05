@@ -107,7 +107,21 @@ func _ready() -> void:
 		_pivot = _spring_arm.get_parent() as Node3D
 		_spring_arm.spring_length = arm_length
 	_arm_length = arm_length
+	# Decouple from the target's transform. As a plain child of the player the
+	# rig inherited the *interpolated* player transform every rendered frame,
+	# while the compensation it applied (`rotation.y = _yaw - body_yaw`) read
+	# the body's raw 60 Hz physics yaw — during a turn the two disagreed by up
+	# to one physics tick of rotation (≈9.5° at turn_speed 10), shaking the
+	# camera's world-space heading every frame the body pivoted or stopped.
+	# Top-level, the rig owns its world transform outright: yaw is written
+	# directly and the follow lerp below already does all the position work.
+	# The world yaw/position are captured before the toggle and re-applied
+	# after, so the spawn placement survives the decoupling regardless of the
+	# engine's toggle semantics.
 	_yaw = global_rotation.y
+	var spawn_position := global_position
+	top_level = true
+	global_position = spawn_position
 	if capture_mouse_on_start:
 		set_mouse_captured(true)
 
@@ -183,11 +197,11 @@ func _process(delta: float) -> void:
 	# rig can be attached before its target's children exist.
 	_update_visual()
 	# Rotation first, so the lateral offset below is expressed against this frame's
-	# basis rather than the previous one's. The rig holds a *world* heading: the
-	# body turns to face where it walks (`Player._update_facing`), and this
-	# subtraction keeps the view from swinging along with every pivot.
-	var body_yaw: float = target.rotation.y if target != null and is_instance_valid(target) else 0.0
-	rotation.y = _yaw - body_yaw
+	# basis rather than the previous one's. The rig holds a *world* heading (it is
+	# top-level — see `_ready`): the body turns to face where it walks
+	# (`Player._update_facing`), and the view keeps its heading while the body
+	# pivots under it.
+	rotation.y = _yaw
 	if _pivot != null:
 		_pivot.rotation.x = _pitch
 	# The lateral offset is taken against the camera's current right, so the
@@ -459,8 +473,8 @@ func set_wardrobe_framing(on: bool) -> void:
 ## up must already be framed — and the SpringArm3D repositions its camera child in
 ## its own step, so the arm's length is applied to the camera **by hand** here.
 func _apply_now() -> void:
-	var body_yaw: float = target.rotation.y if target != null and is_instance_valid(target) else 0.0
-	rotation.y = _yaw - body_yaw
+	# Top-level (see `_ready`): `_yaw` is already a world heading.
+	rotation.y = _yaw
 	if _pivot != null:
 		_pivot.rotation.x = _pitch
 	if _spring_arm != null:
