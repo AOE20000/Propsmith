@@ -182,10 +182,16 @@ func _process(delta: float) -> void:
 	if _pivot != null:
 		_pivot.rotation.x = _pitch
 	# The lateral offset is taken against the camera's current right, so the
-	# character stays on their side of the frame at any yaw.
+	# character stays on their side of the frame at any yaw. In first person the
+	# pivot also steps forward along the view: the eye sits in front of the
+	# body's axis, which is what makes looking down show chest and feet instead
+	# of the near plane slicing the torso open.
 	var right: Vector3 = global_transform.basis.x
+	var forward: Vector3 = -global_transform.basis.z
+	var eye_forward: float = FIRST_PERSON_FORWARD if _first_person else 0.0
 	var desired: Vector3 = target.global_position \
-		+ Vector3.UP * pivot_height + right * _pivot_offset.x
+		+ Vector3.UP * pivot_height + right * _pivot_offset.x \
+		+ forward * eye_forward
 	global_position = global_position.lerp(desired, clampf(follow_lerp * delta, 0.0, 1.0))
 
 
@@ -300,6 +306,14 @@ const FP_HIDDEN_MESH_PARTS: PackedStringArray = [
 ]
 
 
+## How far in front of the body's axis the first-person eye sits (m). Real eyes
+## are on the face, not on the spine: with the camera left on the axis, looking
+## down puts the near plane *through* the torso — you see an interior rather than
+## your own chest. A hand's width forward lands the view where a person's does:
+## above the chest, looking down at it.
+const FIRST_PERSON_FORWARD: float = 0.14
+
+
 func _apply_first_person_view(on: bool) -> void:
 	if _model == null or not is_instance_valid(_model):
 		return
@@ -373,5 +387,8 @@ func _apply_now() -> void:
 			cam.global_position = _spring_arm.global_transform * Vector3(0.0, 0.0, _arm_length)
 	if target != null and is_instance_valid(target):
 		var right: Vector3 = global_transform.basis.x
+		var forward: Vector3 = -global_transform.basis.z
+		var eye_forward: float = FIRST_PERSON_FORWARD if _first_person else 0.0
 		global_position = target.global_position \
-			+ Vector3.UP * pivot_height + right * _pivot_offset.x
+			+ Vector3.UP * pivot_height + right * _pivot_offset.x \
+			+ forward * eye_forward

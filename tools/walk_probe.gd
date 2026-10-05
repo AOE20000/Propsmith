@@ -25,6 +25,7 @@ var _stopped: bool = false
 var _jumped: bool = false
 var _shot_taken: bool = false
 var _wheel_shot: bool = false
+var _fp_shot: bool = false
 var _run_frames: int = 0
 var _worst_hips_jump: float = 0.0
 
@@ -145,7 +146,21 @@ func _process(delta: float) -> void:
 			await get_tree().process_frame
 			var wheel_shot := get_viewport().get_texture().get_image()
 			wheel_shot.save_png("data/screenshots/tool_wheel.png")
-	if _elapsed >= 10.0:
+	# First person, looking down: the shot that proves the eye sits *forward* of
+	# the body axis (chest and feet are visible, the torso is not sliced open).
+	if not _fp_shot and _elapsed > 9.6:
+		_fp_shot = true
+		var open_wheel := get_tree().root.find_child("ToolWheel", true, false) as ToolWheel
+		if open_wheel != null and open_wheel._open:
+			open_wheel._close_wheel(false)
+		if _player.camera_rig != null:
+			_player.camera_rig.set_first_person(true)
+			_player.camera_rig._pitch = deg_to_rad(-55.0)
+			await get_tree().process_frame
+			await get_tree().process_frame
+			var fp_shot := get_viewport().get_texture().get_image()
+			fp_shot.save_png("data/screenshots/first_person_down.png")
+	if _elapsed >= 10.5:
 		print("[walk-probe] summary: run_frames=%d worst_hijump=%.4f" % [
 			_run_frames, _worst_hips_jump])
 		get_tree().quit(0)
