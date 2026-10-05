@@ -90,6 +90,11 @@ var _joints: Array[Joint] = []
 var _chain_parent: int = -1
 var _accumulator: float = 0.0
 var _active: bool = false
+## Whether the chain has been parked on its rest tails **in the tree**. The
+## setup-time reset must wait for that: outside the tree the skeleton's
+## global transform is unreadable, and the frame it would read is not the
+## frame the chain will live in.
+var _reset_in_tree: bool = false
 
 
 func setup(model: Node3D) -> void:
@@ -111,7 +116,14 @@ func setup(model: Node3D) -> void:
 	for joint: Joint in _joints:
 		_measure_joint(joint)
 	_chain_parent = _skeleton.get_bone_parent(_joints[0].bone)
-	reset_points()
+	# The model is usually still outside the tree here — `setup` runs during
+	# assembly, before the scene adds it — and reading the skeleton's global
+	# transform then is an engine error, plus the frame it reads would be
+	# wrong. Park the chain at the first tick that finds the model in the
+	# tree instead (see `advance`).
+	_reset_in_tree = _model.is_inside_tree()
+	if _reset_in_tree:
+		reset_points()
 	set_process(true)
 
 
@@ -203,6 +215,12 @@ func _process(delta: float) -> void:
 ## Advance the simulation by `delta` seconds of fixed substeps. Public so the
 ## probes can drive it deterministically without a viewport.
 func advance(delta: float) -> void:
+	# The deferred setup-time reset (the model was outside the tree when
+	# `setup` ran): park the chain on its rest tails now that a global
+	# transform can actually be read.
+	if not _reset_in_tree and _model != null and _model.is_inside_tree():
+		_reset_in_tree = true
+		reset_points()
 	var dt := 1.0 / maxf(substep_hz, 1.0)
 	_accumulator += delta
 	var steps := 0

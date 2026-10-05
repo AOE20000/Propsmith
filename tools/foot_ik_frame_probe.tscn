@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cfikframeprobe1"]
+
+[ext_resource type="Script" path="res://tools/foot_ik_frame_probe.gd" id="1_probe"]
+
+[node name="FootIkFrameProbe" type="Node"]
+script = ExtResource("1_probe")

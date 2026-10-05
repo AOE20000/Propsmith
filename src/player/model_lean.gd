@@ -34,6 +34,11 @@ var _prev_pos: Vector3 = Vector3.ZERO
 var _prev_yaw: float = 0.0
 var _pitch: float = 0.0
 var _roll: float = 0.0
+## Whether the motion anchor has been taken **in the tree**. `setup` runs
+## while the model is still being assembled — usually outside the tree, where
+## reading its global transform is an engine error — so the anchor is taken
+## lazily on the first tick instead.
+var _anchored: bool = false
 
 
 ## Bind to a model root. A model without a chest bone simply does not lean.
@@ -47,8 +52,10 @@ func setup(model: Node3D) -> void:
 	if _skeleton == null:
 		return
 	_chest = _skeleton.find_bone("Chest")
-	_prev_pos = _model.global_position
-	_prev_yaw = _model.global_rotation.y
+	_anchored = _model.is_inside_tree()
+	if _anchored:
+		_prev_pos = _model.global_position
+		_prev_yaw = _model.global_rotation.y
 	set_process(_chest >= 0)
 
 
@@ -56,6 +63,11 @@ func _process(delta: float) -> void:
 	if _chest < 0 or _model == null or _skeleton == null:
 		return
 	if not _model.is_inside_tree():
+		return
+	if not _anchored:
+		_prev_pos = _model.global_position
+		_prev_yaw = _model.global_rotation.y
+		_anchored = true
 		return
 	# Planar speed from the model root's own motion: the root does not carry the
 	# bone animation (that lives in the children), so its translation *is* the

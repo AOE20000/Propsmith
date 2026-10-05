@@ -32,15 +32,18 @@ const STANCE_IGNORED_BONES: PackedStringArray = ["eye"]
 
 
 ## Attach the full stack in the canonical order (stance → shape keys →
-## locomotion clips → head aim → lean → spring bones). Order matters for tree
-## position, which decides per-frame write order: `ModelHeadAim` composes on
-## the head's pose and `ModelLean` on the chest's, so both must run *after*
+## locomotion clips → foot IK → head aim → lean → spring bones). Order matters
+## for tree position, which decides per-frame write order: `ModelFootIK` reads
+## the leg poses the clips just wrote, so it sits directly after them and
+## before anything that leans on the finished figure. `ModelHeadAim` composes
+## on the head's pose and `ModelLean` on the chest's, so both must run *after*
 ## whoever wrote those poses (the clips, or the stance). `ModelSpringBones`
 ## reads the head's finished global pose as its chain anchor, so it goes last.
 static func attach_all(model: Node3D) -> void:
 	attach_stance_if_unanimated(model)
 	attach_blend_shapes(model)
 	attach_locomotion(model)
+	attach_foot_ik(model)
 	attach_head_aim(model)
 	attach_lean(model)
 	attach_spring_bones(model)
@@ -107,6 +110,18 @@ static func attach_locomotion(model: Node3D) -> void:
 		return
 	var component := ModelClips.new()
 	component.name = "Clips"
+	model.add_child(component)
+	component.setup(model)
+
+
+## Foot planting, directly after the clips: it reads the leg pose the clip
+## just wrote and pins the ankles to the ground while the clip would slide
+## them. Attached unconditionally — a model without VRM-named leg bones (the
+## Configura body, a capsule) never plants, which makes this self-retiring the
+## same way the stance is.
+static func attach_foot_ik(model: Node3D) -> void:
+	var component := ModelFootIK.new()
+	component.name = "FootIK"
 	model.add_child(component)
 	component.setup(model)
 
