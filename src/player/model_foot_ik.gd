@@ -2,48 +2,29 @@ extends Node
 class_name ModelFootIK
 ## Plants the feet instead of letting the clip slide them.
 ##
-## **NOT WIRED UP — kept as a documented experiment.** The approach is right
-## (semi-procedural planting, Rune Johanson's scheme) and the diagnosis tooling
-## in here is sound, but the hand-rolled solver does not yet land the foot: it
-## assumes conventions this rig's rest pose does not honour, and the numbers say
-## so — 10-30 cm of residual error with the correction at full weight, against
-## 30 cm of slide with the component off. `figure_attachment` therefore does not
-## attach it. Two things are worth keeping: the measurement harness (planted
-## drift and solve error, per side) and the finding below.
+## **NOT WIRED UP — one known defect left.** Progress, so the next iteration
+## does not repeat it:
 ##
-## What went wrong, for whoever picks it up: rotating each bone by an angle
-## *derived from the law of cosines* is only correct when the leg is already
-## straight. An animated leg is bent, so the chain direction is not the target
-## direction, and the correction lands where the foot never asked to go. The
-## rewrite to "swing the current direction onto the wanted one, thigh then shin"
-## is the right shape but scored no better here, which means the remaining fault
-## is upstream of the angles — most likely the `parent_global · pose` convention
-## this component inherited from `ModelStance` (measured on a standing figure,
-## where rest *is* the pose) versus a skeleton the locomotion clips move every
-## frame. The next move is a **visual** probe (photograph a leg mid-sprint) or
-## handing the solve to the engine's own two-bone solver rather than trusting a
-## hand-derived one.
+## * Solved and *photographically verified*: the bend direction. The first
+##   build rotated about the character's right axis and the picture showed a
+##   backwards knee — thigh straight down, shin folded behind. Flipping the
+##   bend normal (`-basis.x`) puts the knee back where a knee belongs. This is
+##   what the visual probe (`tools/foot_ik_probe.tscn`) bought: the same
+##   sprint, same camera, one frame with the IK off and one with it on.
+## * Measured and understood: the leg straightens because the goal is out of
+##   reach. Chain length (origin-to-origin, the only correct measure on this
+##   rig — rest Y axes all read 1.0 because Godot stores rest rotations
+##   without scale) is thigh 0.333 + shin 0.391 = 0.724 m, while the hip sits
+##   0.93 m from a planted ankle. The reach clamp then pins the leg at full
+##   extension. The fix is the standard one this component lacks: **pelvis
+##   compensation** — when the goal is out of reach, drop the hips by the
+##   shortfall instead of straightening the knee. Until that exists, attaching
+##   this would give every character a stiff-legged run.
 ##
-## The locomotion clips are speed-driven, so their footfalls are *close* to
-## right but not exact: the cycle was authored for one speed, and phase, turning
-## and the ground under the character all shift it. The result is the one thing
-## that reads as amateur the moment a camera is close: **feet skating**.
-##
-## The fix is deliberately *semi-procedural* (Rune Johansen's locomotion
-## approach, still the basis of UE/Unity locomotion): the clip keeps doing the
-## work, and this only corrects the minimum — while a foot is on the ground, it
-## is **pinned to the world point it landed on** and reached by a two-bone solve.
-## Swing legs are left entirely alone, so the authored motion survives.
-##
-## Nothing here reads the animation's events (we sample clips by hand, there are
-## none): the phase is inferred from the foot's own height over the ground,
-## which is exactly what a viewer perceives.
-##
-## The pose-writing convention is the one `ModelStance` established and measured
-## on this rig:
-##   * `global_pose = parent_global_pose · pose`, and
-##   * a bone's pose defaults to its rest transform, so the correction has to be
-##     solved in the parent frame rather than the bone's own.
+## Kept and still true: the law-of-cosines hip angle is only the right rotation
+## when the leg is already straight; an animated leg needs its current
+## direction swung onto the wanted one, thigh then shin, each measured after
+## the previous is placed.
 
 ## The VRM 1.0 humanoid names, which the importer normalises to (the same
 ## convention `ModelStance` uses for the arms).
@@ -95,6 +76,8 @@ var _clearance: Array[float] = [0.0, 0.0]
 var _grounded: Array[bool] = [false, false]
 ## How far the foot ended up from where the solve asked for (probe diagnostics).
 var _ik_error: Array[float] = [0.0, 0.0]
+## (thigh length, shin length, hip→target distance) from the last solve.
+var _last_reach: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 ## bone name -> the global basis this component last wrote, for the chain solve.
 var _applied_global: Dictionary = {}
 
@@ -193,6 +176,9 @@ func _solve(side: int, target: Vector3, weight: float) -> void:
 	var foot: int = int(chain["foot"])
 	if upper < 0 or lower < 0 or foot < 0:
 		return
+	# Bone length: the distance from this bone's origin to the next one's. (Not
+	# the rest transform's Y axis — on this rig that reads 1.0 for every
+	# bone, Godot storing rest rotations without scale.)
 	var l1: float = _rest_length(upper, lower)
 	var l2: float = _rest_length(lower, foot)
 	if l1 <= 0.0 or l2 <= 0.0:
@@ -204,10 +190,14 @@ func _solve(side: int, target: Vector3, weight: float) -> void:
 	# Clamp the goal into the chain's reach so the two swings stay consistent
 	# instead of asking for a length the leg does not have.
 	var reach: float = clampf(to_target.length(), absf(l1 - l2) + 0.001, l1 + l2 - 0.001)
+	_last_reach[side] = Vector3(l1, l2, to_target.length())
 	var goal: Vector3 = hip + to_target.normalized() * reach
-	# The knee folds in the plane containing the character's right axis, so the
-	# legs always bend the same way without the rig's rest axes leaking in.
-	var bend_normal: Vector3 = _model.global_transform.basis.x.normalized()
+	# The knee folds in a fixed plane so the legs always bend the same way
+	# without the rig's rest axes leaking in. The sign matters and is not
+	# guessable: the first build used the character's right axis and the
+	# photographed result was a backwards knee (thigh straight down, shin
+	# folded behind) — the rotations ran the wrong way round the bend.
+	var bend_normal: Vector3 = -_model.global_transform.basis.x.normalized()
 	if absf(bend_normal.dot(to_target.normalized())) > 0.99:
 		bend_normal = _model.global_transform.basis.z.normalized()
 	var thigh_dir: Vector3 = (_bone_origin(lower) - hip).normalized()
@@ -302,6 +292,13 @@ func foot_weight(side: int) -> float:
 
 func is_planted(side: int) -> bool:
 	return _planted[side] if side >= 0 and side < _planted.size() else false
+
+
+## The chain lengths and goal distance the last solve worked with — a leg
+## straightened by the reach clamp looks identical to a leg with no bend until
+## you can see the numbers.
+func last_reach(side: int) -> Vector3:
+	return _last_reach[side] if side >= 0 and side < _last_reach.size() else Vector3.ZERO
 
 
 ## Diagnostics for the walk probe: how high the foot sits over the ground, and
