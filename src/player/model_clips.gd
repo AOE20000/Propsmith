@@ -44,10 +44,10 @@ const RUN_CLIP: StringName = &"run"
 ## frame; `fall` is a true loop. Both come from the same build as the rest.
 const AIR_UP_CLIP: StringName = &"jump"
 const AIR_DOWN_CLIP: StringName = &"fall"
-## Quiet instantaneous-velocity ticks (at 60 Hz) that end a fall. Small
-## because the landing should feel immediate; the anti-flicker duty belongs to
-## the smoothed speed, not to this count.
-const LAND_QUIET_TICKS: int = 3
+## Quiet instantaneous-velocity ticks (at 60 Hz) that end an airborne stretch.
+## Eight (about 0.13 s) sits well clear of the apex, which is quiet for about
+## three — and it is what lets a jump onto a *different* height land at all.
+const LAND_QUIET_TICKS: int = 8
 ## Seconds after touchdown during which a still-negative *smoothed* vertical
 ## speed must not be read as a new fall — the smoothing that protects the
 ## thresholds also lags the ground's abrupt absorption by about this long.
@@ -128,9 +128,6 @@ var _blend_t: float = 0.0
 var _blend_from: Dictionary = {}
 ## 0 grounded, 1 rising (jump action), 2 falling (fall loop).
 var _air_phase: int = 0
-## Whether the current airborne stretch has ever measured a real descent —
-## the gate that lets "zero vertical speed" mean *landed* rather than *apex*.
-var _fell_far_enough: bool = false
 ## Consecutive ticks whose instantaneous vertical speed has been quiet —
 ## counted instead of trusting the smoothed value for the landing judgement.
 var _still_ticks: int = 0
@@ -307,16 +304,18 @@ func _decide_gear(
 ## The hold rules matter more than the thresholds: a leap's *action* clip is
 ## much shorter than its rise, so it hands over to the fall loop mid-ascent —
 ## and a fall phase entered that way must not be dragged back to "rising" by a
-## still-positive velocity, nor be mistaken for a landing at the apex (where
-## the speed is zero in either direction). Hence: falling persists until a
-## **real** descent — one that reached `fall_threshold` — has been followed by
-## a few quiet ticks (`_still_ticks`), which is the ground absorbing it.
+## still-positive velocity.
+##
+## Landing is judged by a **quiet stretch** (`_still_ticks`), not by "a real
+## descent happened first": a jump onto a ledge of a different height is caught
+## by the ground while still rising, and waiting for a descent left the state
+## machine stuck in the air — the reported "the jump freezes when it does not
+## land on the same plane". The apex is quiet too, but only for about three
+## ticks, which is why the threshold sits well above that.
 func _resolve_air_phase(vertical_speed: float) -> int:
 	var falling_deeply := vertical_speed < fall_threshold
-	if falling_deeply:
-		_fell_far_enough = true
 	if _air_phase == 2:
-		if not _fell_far_enough or _still_ticks < LAND_QUIET_TICKS:
+		if _still_ticks < LAND_QUIET_TICKS:
 			return 2
 		return 0
 	if vertical_speed > rise_threshold:
@@ -341,8 +340,6 @@ func _enter_air(delta: float, phase: int) -> void:
 	_running = false
 	if _air_phase != phase:
 		_air_phase = phase
-		if phase == 1:
-			_fell_far_enough = false
 		# Cross-faded: entering the air from a walk (or switching phases) must
 		# not snap the pose.
 		_start_clip(AIR_UP_CLIP if phase == 1 else AIR_DOWN_CLIP, false, true)
@@ -378,7 +375,6 @@ func _advance_air_pose(delta: float) -> void:
 ## — the same transition the stop uses, which is exactly the right shape here.
 func _leave_air() -> void:
 	_air_phase = 0
-	_fell_far_enough = false
 	_still_ticks = 0
 	_land_cooldown = LAND_COOLDOWN
 	_begin_stop_blend()

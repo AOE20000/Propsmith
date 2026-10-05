@@ -32,13 +32,14 @@ const STANCE_IGNORED_BONES: PackedStringArray = ["eye"]
 
 
 ## Attach the full stack in the canonical order (stance → shape keys →
-## locomotion clips). Order matters only for tree position, which decides
-## per-frame write order; the components are written not to fight each other,
-## but keeping one canonical order makes that reasoning local.
+## locomotion clips → head aim). Order matters for tree position, which decides
+## per-frame write order: `ModelHeadAim` composes on the head's pose, so it must
+## run *after* whoever wrote that pose (the clips, or the stance).
 static func attach_all(model: Node3D) -> void:
 	attach_stance_if_unanimated(model)
 	attach_blend_shapes(model)
 	attach_locomotion(model)
+	attach_head_aim(model)
 
 
 static func attach_stance_if_unanimated(model: Node3D) -> void:
@@ -82,6 +83,17 @@ static func attach_locomotion(model: Node3D) -> void:
 		return
 	var component := ModelClips.new()
 	component.name = "Clips"
+	model.add_child(component)
+	component.setup(model)
+
+
+## The head turns before the body does in first person. Attached **last** so it
+## is the final writer of the head's pose — the components before it re-write
+## that pose every frame, which is the substrate this one composes on. Harmless
+## on a figure with no head bone, or with no camera at its eye.
+static func attach_head_aim(model: Node3D) -> void:
+	var component := ModelHeadAim.new()
+	component.name = "HeadAim"
 	model.add_child(component)
 	component.setup(model)
 

@@ -193,6 +193,26 @@ func _attach(target: RigidBody3D) -> void:
 	add_child(_joint)
 	_joint.node_a = _joint.get_path_to(_anchor)
 	_joint.node_b = _joint.get_path_to(_held)
+	# Explicit per-axis limits. All three linear axes locked at zero offset but
+	# soft and damped — the prop is *drawn* along the beam and heavy ones lag —
+	# and all three angular axes free, so cargo keeps its orientation unless
+	# the crosshair turns. Relying on the joint's defaults produced props that
+	# would only slide along one axis ("the wrench only moves things in a
+	# straight line").
+	var param_setters: Array[Callable] = [
+		_joint.set_param_x, _joint.set_param_y, _joint.set_param_z,
+	]
+	var flag_setters: Array[Callable] = [
+		_joint.set_flag_x, _joint.set_flag_y, _joint.set_flag_z,
+	]
+	for axis: int in 3:
+		flag_setters[axis].call(Generic6DOFJoint3D.FLAG_ENABLE_LINEAR_LIMIT, true)
+		flag_setters[axis].call(Generic6DOFJoint3D.FLAG_ENABLE_ANGULAR_LIMIT, false)
+		param_setters[axis].call(Generic6DOFJoint3D.PARAM_LINEAR_LOWER_LIMIT, 0.0)
+		param_setters[axis].call(Generic6DOFJoint3D.PARAM_LINEAR_UPPER_LIMIT, 0.0)
+		param_setters[axis].call(Generic6DOFJoint3D.PARAM_LINEAR_LIMIT_SOFTNESS, 0.7)
+		param_setters[axis].call(Generic6DOFJoint3D.PARAM_LINEAR_DAMPING, 1.0)
+		param_setters[axis].call(Generic6DOFJoint3D.PARAM_LINEAR_RESTITUTION, 0.3)
 	# A held prop must not shove the player it is held by: the beam pulls the
 	# body, and without this the body pushes back through the character
 	# whenever the two get close.

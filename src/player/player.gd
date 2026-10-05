@@ -19,7 +19,12 @@ class_name Player
 const BODY_HEIGHT: float = 1.8
 const BODY_RADIUS: float = 0.35
 ## Height above the origin the camera orbits at when standing.
-const EYE_HEIGHT: float = 1.55
+## Camera height while standing. The base figure is a touch under 1.8 m to the
+## crown; this sits above the chest and below the neck root — the level a
+## first-person camera reads as natural. 1.55 was reported as looking "a bit
+## high and centred", i.e. at the collarbone rather than at the eyes of a
+## head that in first person is not drawn.
+const EYE_HEIGHT: float = 1.38
 
 @export_group("Movement")
 @export var walk_speed: float = 5.2
@@ -39,10 +44,15 @@ const EYE_HEIGHT: float = 1.55
 ## the camera, so it is what lets the character pass under something. Standing back
 ## up is refused while there is no headroom, which is what keeps it honest.
 @export var crouch_speed: float = 2.4
-## How fast the body swings to face the movement direction (lerp factor per
-## second). The camera rig subtracts this turn from its own yaw, so the view
+## How fast the body swings to face the movement direction (rad/s) in third
+## person. The camera rig subtracts this turn from its own yaw, so the view
 ## keeps its heading while the body pivots under it.
 @export var turn_speed: float = 10.0
+## How fast the body follows the *view* in first person (rad/s) — deliberately
+## slower than `turn_speed`: the head leads (it absorbs the look difference up
+## to its own limit, see `ModelHeadAim`) and the shoulders catch up after, so
+## looking around reads as looking, not as spinning on the spot.
+@export var body_follow_speed: float = 3.0
 ## Fraction of the standing height the body shrinks to when fully crouched.
 @export var crouch_body_scale: float = 0.58
 @export var crouch_transition_per_second: float = 8.0
@@ -195,19 +205,33 @@ func _physics_process(delta: float) -> void:
 		_respawn()
 
 
-## Face the movement direction. Third person means the character goes where it
-## walks — before this existed the body kept its spawn heading and every turn
-## looked like sidestep-sliding. The camera rig compensates for the body's turn
-## (see `CameraRig._process`), so the view keeps its heading; the weapon rides
-## on the body, so attacks point where the character actually walks.
+## Turn the body. Two regimes, because they answer different questions:
+##
+## * **Third person** — the character goes where it walks: the body turns
+##   toward the movement direction at a constant angular rate. A fixed rate
+##   (rather than an exponential `lerp_angle`) is also what stops a 180°
+##   reversal from dithering: `lerp_angle`'s direction is undefined at exactly
+##   π, so the body oscillated and the camera — which compensates for the
+##   body's turn — read that as about a second of jitter. `angle_difference`
+##   picks a side deterministically and the rate is bounded.
+## * **First person** — the body belongs to the view, not to the movement:
+##   strafing and backpedalling must not spin the character. It follows the
+##   view's yaw slowly, with the head leading (see `ModelHeadAim`).
 func _update_facing(delta: float) -> void:
 	var flat := Vector2(velocity.x, velocity.z)
-	if flat.length_squared() < 0.01:
-		return
-	# The body's forward is -Z (the model's own 180° flip is authored in
-	# `player_scene`), so the yaw that faces `flat` is atan2(-x, -z).
-	var target_yaw := atan2(-flat.x, -flat.y)
-	rotation.y = lerp_angle(rotation.y, target_yaw, clampf(turn_speed * delta, 0.0, 1.0))
+	var target_yaw: float
+	var rate: float = turn_speed
+	if camera_rig != null and camera_rig.is_first_person():
+		target_yaw = camera_rig.get_view_yaw()
+		rate = body_follow_speed
+	else:
+		if flat.length_squared() < 0.01:
+			return
+		# The body's forward is -Z (the model's own 180° flip is authored in
+		# `player_scene`), so the yaw that faces `flat` is atan2(-x, -z).
+		target_yaw = atan2(-flat.x, -flat.y)
+	var diff := angle_difference(rotation.y, target_yaw)
+	rotation.y += clampf(diff, -rate * delta, rate * delta)
 
 
 func _update_stamina(delta: float, wants_sprint: bool) -> void:

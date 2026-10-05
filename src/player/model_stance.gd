@@ -152,6 +152,11 @@ func _process(delta: float) -> void:
 	var sway := sin(_phase * sway_speed) * deg_to_rad(sway_degrees)
 	_drift_bone(&"Spine", Vector3(0.0, 0.0, sway))
 	_drift_bone(&"Neck", Vector3(0.0, 0.0, -sway * 0.4))
+	# Re-assert the head every frame, with no offset of its own. `ModelHeadAim`
+	# composes its look-around offset on top of whatever the head holds, so a
+	# pose left behind there would accumulate frame over frame; writing the
+	# base back gives that component a clean substrate to multiply into.
+	_drift_bone(&"Head", Vector3.ZERO)
 
 
 ## Camera distance decides whether this figure animates. No camera (headless

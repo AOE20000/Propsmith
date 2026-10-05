@@ -247,6 +247,13 @@ func is_first_person() -> bool:
 	return _first_person
 
 
+## The view's world yaw. `Player` reads it so the body can follow the view in
+## first person; the rig itself holds a *world* heading (see `_process`), which
+## is exactly what the caller wants here.
+func get_view_yaw() -> float:
+	return _yaw
+
+
 func _set_arm_length(value: float) -> void:
 	_arm_length = clampf(value, min_arm_length, max_arm_length)
 	_apply_arm(_arm_length)

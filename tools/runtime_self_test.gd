@@ -1989,7 +1989,7 @@ func _check_model_clips() -> void:
 		clips._air_phase == 2 and clips._current_clip == lib.get_animation(&"fall"),
 		"descending must keep the fall clip"
 	)
-	for i: int in 4:
+	for i: int in 10:
 		clips._decide_gear(1.0 / 30.0, 0.0, 0.0)
 	_expect(
 		clips._air_phase == 0 and clips._blend_active,
