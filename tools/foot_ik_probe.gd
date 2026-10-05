@@ -12,8 +12,11 @@ class_name FootIkProbe
 ## It also prints the three quantities that separate those theories: where the
 ## ankle ended up, where the solve asked for it, and the difference.
 
-const SHOT_TIMES: Array[float] = [1.8, 2.15, 2.5, 2.85]
-const RUN_TIME: float = 4.2
+const SHOT_TIMES: Array[float] = [2.5, 3.4, 5.0, 6.4]
+const RUN_TIME: float = 8.0
+## Ignore the boot frames: the first seconds run at a few frames per second
+## while shaders compile, and their huge deltas swamp any jitter measurement.
+const MEASURE_FROM: float = 2.0
 
 var _player: Node3D = null
 var _foot_ik: ModelFootIK = null
@@ -29,6 +32,10 @@ var _last_ankle: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 var _plant_frames: int = 0
 var _plant_sum: float = 0.0
 var _plant_max: float = 0.0
+## Pelvis-offset jitter: the reported symptom was legs snapping forward and
+## jerking a few seconds in, which is this number spiking.
+var _last_pelvis: Vector3 = Vector3.ZERO
+var _pelvis_step_max: float = 0.0
 
 
 func _ready() -> void:
@@ -107,6 +114,8 @@ func _process(delta: float) -> void:
 		Input.action_release(&"sprint")
 		print("[foot-ik-probe] planted drift: frames=%d mean=%.4fm max=%.4fm" % [
 			_plant_frames, _plant_sum / float(maxi(_plant_frames, 1)), _plant_max])
+		print("[foot-ik-probe] pelvis jitter: max step=%.4fm offset=%s" % [
+			_pelvis_step_max, _foot_ik.pelvis_offset()])
 		get_tree().quit(0)
 
 
@@ -135,6 +144,10 @@ func _hide_ui() -> void:
 func _sample_drift() -> void:
 	if _foot_ik == null:
 		return
+	if _elapsed > MEASURE_FROM:
+		_pelvis_step_max = maxf(_pelvis_step_max,
+			_foot_ik.pelvis_offset().distance_to(_last_pelvis))
+	_last_pelvis = _foot_ik.pelvis_offset()
 	for side: int in 2:
 		var pos: Vector3 = _foot_ik.foot_world_pos(side)
 		if _foot_ik.foot_weight(side) > 0.9:

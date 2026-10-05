@@ -66,8 +66,12 @@ const HIPS_BONE: StringName = &"Hips"
 ## skims the value, and every re-plant re-pins the foot where it currently is —
 ## which is no pin at all. Measured clearances while sprinting run 0.06–0.13 m
 ## in stance and 0.2–0.4 m in swing, so the thresholds sit in those gaps.
-@export var plant_enter: float = 0.11
-@export var plant_exit: float = 0.22
+## Measured stance-phase clearance runs 0.06-0.13 m on this rig, so an enter
+## threshold of 0.11 sat *inside* that band: the flag chattered, the weight
+## never finished fading in, and the correction never reached full strength.
+## The band has to sit above the stance measurements, not inside them.
+@export var plant_enter: float = 0.17
+@export var plant_exit: float = 0.28
 ## After this long standing still the foot is handed back to the clip, so a
 ## character that stops does not keep correcting a pose the animation owns.
 @export var plant_max_time: float = 0.45
@@ -75,7 +79,7 @@ const HIPS_BONE: StringName = &"Hips"
 ## pop. This has to be slower than a stride: at 12/s the weight only reached
 ## 0.4 within a stance phase, so the foot was corrected by less than half of
 ## what it needed and still slid.
-@export var blend_speed: float = 4.0
+@export var blend_speed: float = 3.0
 ## Skeletons farther than this from the camera stop per-frame IK, like the
 ## stance's distance gate.
 @export var active_range: float = 45.0
@@ -83,6 +87,11 @@ const HIPS_BONE: StringName = &"Hips"
 ## shortfall on this rig is ~0.2 m; the cap is there so a bad frame cannot
 ## drop the figure through the floor.
 @export var max_pelvis_drop: float = 0.3
+## How fast the pelvis offset eases toward its goal (per second). The shortfall
+## this reacts to rises and falls with every stride; without easing, the hips
+## twitch in sympathy — reported in play as the legs snapping forward and
+## jerking about three seconds into a run.
+@export var pelvis_smoothing: float = 7.0
 
 var _skeleton: Skeleton3D = null
 var _model: Node3D = null
@@ -103,6 +112,10 @@ var _grounded: Array[bool] = [false, false]
 var _ik_error: Array[float] = [0.0, 0.0]
 ## (thigh length, shin length, hip→target distance) from the last solve.
 var _last_reach: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
+## The pelvis offset currently in effect, and the one written last frame (so it
+## can be taken back before recomputing). Both are world vectors.
+var _pelvis_current: Vector3 = Vector3.ZERO
+var _pelvis_applied: Vector3 = Vector3.ZERO
 ## bone name -> the global basis this component last wrote, for the chain solve.
 var _applied_global: Dictionary = {}
 
@@ -133,7 +146,7 @@ func _process(delta: float) -> void:
 	if not _near_camera():
 		set_process(false)
 		return
-	_pelvis_prepare()
+	_pelvis_prepare(delta)
 	for i: int in SIDES.size():
 		_process_foot(i, delta)
 
@@ -147,9 +160,18 @@ func _process(delta: float) -> void:
 ## across frames. That is also why the correction is a per-frame recompute and
 ## not a stored baseline: the clip owns the hips, this component only leans on
 ## them.
-func _pelvis_prepare() -> void:
+func _pelvis_prepare(delta: float) -> void:
+	# Undo the previous frame's compensation *first*. Recomputing against the
+	# pose the clips just wrote is the whole point: writing our offset on top of
+	# whatever the bone happens to hold means that on any frame the clips leave
+	# the hips alone, the compensation is applied twice — hips that sink and
+	# twitch as the stride breathes.
+	if _pelvis_applied.length_squared() > 0.0:
+		_drop_pelvis(-_pelvis_applied.normalized(), _pelvis_applied.length())
+		_pelvis_applied = Vector3.ZERO
+	if _skeleton == null:
+		return
 	var worst: float = 0.0
-	var direction: Vector3 = Vector3.DOWN
 	for side: int in SIDES.size():
 		if _weight[side] <= 0.001:
 			continue
@@ -167,9 +189,27 @@ func _pelvis_prepare() -> void:
 		var gap: float = to_target.length() - (l1 + l2)
 		if gap > worst:
 			worst = gap
-			direction = to_target.normalized()
+	# Direction: **straight down in the model's own frame**, not "toward the
+	# worst foot". The shortfall exists because the leg is shorter than the hip
+	# is high, so down is the whole correction; taking the direction from
+	# whichever foot happens to be worst made it flip between the two legs
+	# stride by stride, and the smoothed offset then walked an arc — the pelvis
+	# twitch reported in play (legs snapping forward, jerking seconds into a
+	# run). A stable direction is worth more here than a geometrically exact
+	# one.
+	var direction: Vector3 = -_model.global_transform.basis.y.normalized()
+	var want: Vector3 = Vector3.ZERO
 	if worst > 0.0:
-		_drop_pelvis(direction, minf(worst, max_pelvis_drop))
+		want = direction * minf(worst, max_pelvis_drop)
+	# Ease toward the goal. The shortfall breathes with the stride — the hips
+	# rise and fall, the feet plant and lift, and the worst-foot identity swaps
+	# sides — so a raw per-frame value wrote that breathing straight into the
+	# pelvis as a twitch. Which foot is "worst" no longer decides the direction
+	# frame to frame either: the offset itself is the state, and it is smoothed.
+	_pelvis_current = _pelvis_current.lerp(want, 1.0 - exp(-pelvis_smoothing * delta))
+	if _pelvis_current.length_squared() > 0.0:
+		_drop_pelvis(_pelvis_current.normalized(), _pelvis_current.length())
+		_pelvis_applied = _pelvis_current
 
 
 ## Move the hips toward `direction` by `amount`, expressed in the hips' own
@@ -380,6 +420,13 @@ func is_planted(side: int) -> bool:
 ## you can see the numbers.
 func last_reach(side: int) -> Vector3:
 	return _last_reach[side] if side >= 0 and side < _last_reach.size() else Vector3.ZERO
+
+
+## The pelvis offset currently in effect (world space). Its per-frame change is
+## the twitch measurement: a value that jitters frame to frame is a pelvis that
+## jitters, whatever the feet are doing.
+func pelvis_offset() -> Vector3:
+	return _pelvis_current
 
 
 ## Diagnostics for the walk probe: how high the foot sits over the ground, and
