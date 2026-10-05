@@ -26,6 +26,8 @@ var _jumped: bool = false
 var _shot_taken: bool = false
 var _wheel_shot: bool = false
 var _fp_shot: bool = false
+var _fp_run_shot: bool = false
+var _wall_shot: bool = false
 var _run_frames: int = 0
 var _worst_hips_jump: float = 0.0
 
@@ -160,7 +162,31 @@ func _process(delta: float) -> void:
 			await get_tree().process_frame
 			var fp_shot := get_viewport().get_texture().get_image()
 			fp_shot.save_png("data/screenshots/first_person_down.png")
-	if _elapsed >= 10.5:
+	# First person *while sprinting*: the eye has to stay at the face, not behind
+	# the neck the run cycle leans forward.
+	if not _fp_run_shot and _elapsed > 10.4:
+		_fp_run_shot = true
+		Input.action_press(&"move_forward")
+		Input.action_press(&"sprint")
+		await get_tree().create_timer(1.4).timeout
+		var run_shot := get_viewport().get_texture().get_image()
+		run_shot.save_png("data/screenshots/first_person_run.png")
+	# First person right up against a wall: the forward step must be cut short
+	# rather than push the camera through the wall (the room is 8 m on a side,
+	# so its north wall sits at z = -14 for the room centred on (-24, 0, -18)).
+	if not _wall_shot and _elapsed > 11.6:
+		_wall_shot = true
+		Input.action_release(&"move_forward")
+		Input.action_release(&"sprint")
+		_player.global_position = Vector3(-24.0, 1.0, -13.6)
+		_player.rotation.y = 0.0
+		if _player.camera_rig != null:
+			_player.camera_rig._yaw = 0.0
+			_player.camera_rig._pitch = 0.0
+		await get_tree().create_timer(0.5).timeout
+		var wall_shot := get_viewport().get_texture().get_image()
+		wall_shot.save_png("data/screenshots/first_person_wall.png")
+	if _elapsed >= 13.5:
 		print("[walk-probe] summary: run_frames=%d worst_hijump=%.4f" % [
 			_run_frames, _worst_hips_jump])
 		get_tree().quit(0)

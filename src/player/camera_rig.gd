@@ -188,10 +188,9 @@ func _process(delta: float) -> void:
 	# of the near plane slicing the torso open.
 	var right: Vector3 = global_transform.basis.x
 	var forward: Vector3 = -global_transform.basis.z
-	var eye_forward: float = FIRST_PERSON_FORWARD if _first_person else 0.0
 	var desired: Vector3 = target.global_position \
 		+ Vector3.UP * pivot_height + right * _pivot_offset.x \
-		+ forward * eye_forward
+		+ forward * _eye_forward()
 	global_position = global_position.lerp(desired, clampf(follow_lerp * delta, 0.0, 1.0))
 
 
@@ -310,11 +309,41 @@ const FP_HIDDEN_MESH_PARTS: PackedStringArray = [
 ## are on the face, not on the spine: with the camera left on the axis, looking
 ## down puts the near plane *through* the torso — you see an interior rather than
 ## your own chest. A hand's width forward lands the view where a person's does:
-## above the chest, looking down at it.
-const FIRST_PERSON_FORWARD: float = 0.14
+## above the chest, looking down at it. Measured in play rather than guessed: at
+## 0.14 the camera still sat close enough to the chest that the near plane would
+## clip into it at some angles, so the offset was widened again.
+const FIRST_PERSON_FORWARD: float = 0.24
+## The same, at full sprint: the run cycle leans the torso (and the neck with
+## it) forward, so a fixed offset leaves the eye behind the neck — "you see the
+## back of your own neck while running". Sliding the eye forward with speed
+## keeps it at the face the body is carrying.
+const FIRST_PERSON_FORWARD_RUN: float = 0.46
+## Speed at which the running offset is reached (the sprint speed).
+const FIRST_PERSON_FORWARD_REF_SPEED: float = 8.6
+## Kept clear of anything the forward step would otherwise touch (m).
+const FORWARD_MARGIN: float = 0.06
+
+## The layer that *only* the first-person camera hides. The figure's head meshes
+## are tagged with it, and stay on the default layer as well, so every other
+## observer keeps seeing them: the third-person view, photo mode — and, when
+## multiplayer arrives, other players' cameras (each will need its own such
+## layer once it has a first-person view of its own; one local player means one
+## layer today).
+const FP_HEAD_LAYER: int = 20
 
 
 func _apply_first_person_view(on: bool) -> void:
+	# Hiding is a property of *this view*, achieved by camera culling rather than
+	# by making meshes invisible: `visible = false` hides the head from every
+	# renderer — the third-person view after switching back, photo mode, and
+	# other players — which is not what "first person" means. Tagging the head
+	# meshes with `FP_HEAD_LAYER` and cutting that layer from this camera leaves
+	# every other observer untouched.
+	var cam: Camera3D = null
+	if _spring_arm != null:
+		cam = _spring_arm.get_node_or_null("Camera3D") as Camera3D
+	if cam != null:
+		cam.set_cull_mask_value(FP_HEAD_LAYER, not on)
 	if _model == null or not is_instance_valid(_model):
 		return
 	for node: Node in _model.find_children("*", "MeshInstance3D", true, false):
@@ -322,8 +351,45 @@ func _apply_first_person_view(on: bool) -> void:
 		var lower := String(mesh.name).to_lower()
 		for part: String in FP_HIDDEN_MESH_PARTS:
 			if part in lower:
-				mesh.visible = not on
+				# Permanent and idempotent: the tag is what lets the camera hide
+				# it, and re-tagging on the next toggle must not double up.
+				mesh.set_layer_mask_value(FP_HEAD_LAYER, true)
 				break
+
+
+## The first-person eye offset for this frame: fixed while standing, stretched
+## forward as the figure speeds up (see `FIRST_PERSON_FORWARD_RUN`), and
+## **shortened when geometry is in the way** — a fixed offset walks the camera
+## into walls, which is the "the picture clips through the world" that shows up
+## the moment the player stands close to anything.
+func _eye_forward() -> float:
+	if not _first_person:
+		return 0.0
+	var body_speed: float = 0.0
+	if target is Player:
+		body_speed = (target as Player).speed
+	var t: float = clampf(body_speed / FIRST_PERSON_FORWARD_REF_SPEED, 0.0, 1.0)
+	var wanted: float = lerpf(FIRST_PERSON_FORWARD, FIRST_PERSON_FORWARD_RUN, t)
+	return minf(wanted, _clearance_ahead(wanted))
+
+
+## How far the eye may step forward before it would touch geometry, clamped at
+## zero. The eye stays inside the character's own capsule either way; this is
+## about the *world* it walks up to.
+func _clearance_ahead(wanted: float) -> float:
+	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	if space == null:
+		return wanted
+	var from: Vector3 = global_position
+	var to: Vector3 = from + (-global_transform.basis.z) * (wanted + FORWARD_MARGIN)
+	var query := PhysicsRayQueryParameters3D.create(from, to, 1)
+	if target is CollisionObject3D:
+		query.exclude = [(target as CollisionObject3D).get_rid()]
+	var hit: Dictionary = space.intersect_ray(query)
+	if hit.is_empty():
+		return wanted
+	var distance: float = from.distance_to(hit.get("position", from))
+	return maxf(distance - FORWARD_MARGIN, 0.0)
 
 
 ## The wardrobe view: third person, from the front, the character held left of the
@@ -388,7 +454,6 @@ func _apply_now() -> void:
 	if target != null and is_instance_valid(target):
 		var right: Vector3 = global_transform.basis.x
 		var forward: Vector3 = -global_transform.basis.z
-		var eye_forward: float = FIRST_PERSON_FORWARD if _first_person else 0.0
 		global_position = target.global_position \
 			+ Vector3.UP * pivot_height + right * _pivot_offset.x \
-			+ forward * eye_forward
+			+ forward * _eye_forward()

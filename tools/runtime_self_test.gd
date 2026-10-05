@@ -50,7 +50,7 @@ func _ready() -> void:
 	_run_section("scripted mod bridges", 7, _check_scripted_bridges)
 	_run_section("map sources and blueprints", 14, _check_map_sources_and_blueprints)
 	_run_section("map catalogue", 23, _check_map_catalog)
-	_run_section("camera and wardrobe wiring", 31, _check_camera_and_wardrobe)
+	_run_section("camera and wardrobe wiring", 33, _check_camera_and_wardrobe)
 	_run_section("model clips sampler", 16, _check_model_clips)
 	_run_section("guided tour", 10, _check_demo_tour)
 	_run_section("tool wheel", 3, _check_tool_wheel)
@@ -1790,6 +1790,12 @@ func _check_camera_and_wardrobe() -> void:
 	var arm2 := SpringArm3D.new()
 	arm2.name = "SpringArm3D"
 	rig2.add_child(arm2)
+	# The rig reaches for the arm's camera child when applying first person, so
+	# the test needs one — the visible-layer trick is the camera's, and the
+	# lookup is by name.
+	var cam2 := Camera3D.new()
+	cam2.name = "Camera3D"
+	arm2.add_child(cam2)
 	var target2 := Node3D.new()
 	# A bare Node3D has no look_input_enabled property at all — the rig must
 	# treat a missing property as enabled (only an explicit false turns it off).
@@ -1818,9 +1824,22 @@ func _check_camera_and_wardrobe() -> void:
 	free_cam.free()
 	rig2.set_first_person(true)
 	_expect(model.visible, "first person must keep the figure visible so you can see yourself")
+	# Hiding is view-scoped: the head meshes keep rendering for every other
+	# observer (third person, photo mode), and only *this* camera culls them —
+	# which is what stops a photo taken from the third-person view from
+	# losing its head.
+	const HEAD_BIT: int = 1 << (CameraRig.FP_HEAD_LAYER - 1)
 	_expect(
-		not head_mesh.visible and not hair_mesh.visible,
-		"first person must hide the meshes the camera sits inside"
+		cam2.cull_mask & HEAD_BIT == 0,
+		"first person must cull the head layer from its own camera"
+	)
+	_expect(
+		head_mesh.layers & HEAD_BIT != 0 and hair_mesh.layers & HEAD_BIT != 0,
+		"the head meshes must carry the layer the first-person camera hides"
+	)
+	_expect(
+		head_mesh.visible and hair_mesh.visible,
+		"other views must still see the head — hiding must not be global"
 	)
 	_expect(body_mesh.visible, "first person must keep the body visible")
 	rig2.set_first_person(false)
