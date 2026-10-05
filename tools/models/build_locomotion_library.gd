@@ -25,10 +25,20 @@ extends SceneTree
 const SOURCE := "res://vendor/anim/ShooterLib.res"
 const OUT := "res://assets/animations/locomotion.res"
 const FIGURE := "res://assets/characters/base_female.vrm"
-const CLIPS: PackedStringArray = ["walk", "idle", "run_067"]
-## The author rig's Hips-height floor per clip, measured by probing the track
-## keys (`vendor` probe in docs/local/akane_akayama.md §11).
-const AUTHOR_HIPS_MIN := {"walk": 0.929, "idle": 0.982, "run_067": 0.901}
+## Output name → source clip. The output side is deliberately semantic (`run`),
+## so swapping which source clip provides a gait is a one-line change here and
+## nothing at runtime moves.
+##
+## `run` used to be `run_067`, which is a *root-motion* clip: its first and last
+## keys differ by 3.6 m, so looping it snaps the pose (and the pelvis) back to
+## the start every 0.58 s — the sprint "moves, then flashes back" report.
+## `sneak-run-s` is the same length and closes perfectly (0.000 m), at the cost
+## of a lower, crouched run silhouette — the closest true loop the library has.
+const CLIP_SOURCES: Dictionary = {
+	"walk": "walk",
+	"idle": "idle",
+	"run": "sneak-run-s",
+}
 
 
 func _init() -> void:
@@ -50,15 +60,18 @@ func _init() -> void:
 		skeleton_name, skeleton.get_bone_count(), hips_rest])
 
 	var library := AnimationLibrary.new()
-	for clip_name: String in CLIPS:
-		if not source.has_animation(clip_name):
-			push_warning("clip missing in source: " + clip_name)
+	for output_name: String in CLIP_SOURCES:
+		var source_name: String = CLIP_SOURCES[output_name]
+		if not source.has_animation(source_name):
+			push_warning("clip missing in source: " + source_name)
 			continue
-		var clip := _retarget(source.get_animation(clip_name), skeleton,
-			skeleton_name, hips_rest, float(AUTHOR_HIPS_MIN[clip_name]))
+		var source_clip := source.get_animation(source_name)
+		var clip := _retarget(source_clip, skeleton, skeleton_name, hips_rest,
+			_hips_min_y(source_clip))
 		clip.loop_mode = Animation.LOOP_LINEAR
-		library.add_animation(clip_name, clip)
-		print("[loco] %s: %d tracks kept, looped" % [clip_name, clip.get_track_count()])
+		library.add_animation(output_name, clip)
+		print("[loco] %s (from %s): %d tracks kept, looped" % [
+			output_name, source_name, clip.get_track_count()])
 
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(
 		OUT.get_base_dir()))
@@ -66,6 +79,22 @@ func _init() -> void:
 	print("[loco] saved %s (exit %d)" % [OUT, error])
 	figure.free()
 	quit(0)
+
+
+## The clip's lowest Hips height, measured from its own keys rather than kept as
+## a hand-tuned constant per clip: the re-anchor below needs it, and a constant
+## silently goes stale the moment the source clip is swapped.
+func _hips_min_y(clip: Animation) -> float:
+	var lowest := INF
+	for track: int in clip.get_track_count():
+		if clip.track_get_type(track) != Animation.TYPE_POSITION_3D:
+			continue
+		if String(clip.track_get_path(track)).get_slice(":", 1) != "Hips":
+			continue
+		for key: int in clip.track_get_key_count(track):
+			var v: Vector3 = clip.track_get_key_value(track, key)
+			lowest = minf(lowest, v.y)
+	return lowest if lowest < INF else 0.0
 
 
 func _retarget(source: Animation, skeleton: Skeleton3D, skeleton_name: String,

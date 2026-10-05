@@ -1899,7 +1899,7 @@ func _check_model_clips() -> void:
 	run.track_insert_key(run_track, 0.0, Quaternion(Vector3.UP, 2.0))
 	run.track_insert_key(run_track, 0.25, Quaternion(Vector3.UP, 3.0))
 	run.track_insert_key(run_track, 0.5, Quaternion(Vector3.UP, 2.0))
-	lib.add_animation(&"run_067", run)
+	lib.add_animation(&"run", run)
 	clips.library_override = lib
 	clips.setup(model)
 	add_child(model)
@@ -1932,7 +1932,7 @@ func _check_model_clips() -> void:
 	for i: int in 12:
 		clips._decide_gear(1.0 / 30.0, 9.0)  # sprint
 	_expect(
-		clips._running and clips._current_clip == lib.get_animation(&"run_067"),
+		clips._running and clips._current_clip == lib.get_animation(&"run"),
 		"sprint speed must select the run clip"
 	)
 	for i: int in 4:

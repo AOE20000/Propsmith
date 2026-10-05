@@ -6,7 +6,7 @@ class_name ModelClips
 ##
 ## The clips come from `assets/animations/locomotion.res` (built by
 ## `tools/models/build_locomotion_library.gd` from catprisbrey's open
-## ShooterLib, CC-BY 4.0): `walk`, `idle` and `run_067`, retargeted onto our
+## ShooterLib, CC-BY 4.0): `walk`, `idle` and `run`, retargeted onto our
 ## skeleton's own node and bone names at build time, with the author rig's
 ## Hips-height re-anchored to ours.
 ##
@@ -35,7 +35,11 @@ class_name ModelClips
 ## Library path and the clip names inside it (built by the tool script).
 const LIBRARY_PATH: String = "res://assets/animations/locomotion.res"
 const WALK_CLIP: StringName = &"walk"
-const RUN_CLIP: StringName = &"run_067"
+## The run gear's clip. Built by `build_locomotion_library` from `sneak-run-s`
+## — a *true loop* (first and last keys identical), unlike the root-motion
+## clip this slot previously held, whose 3.6 m first/last key mismatch snapped
+## the pose back on every wrap.
+const RUN_CLIP: StringName = &"run"
 ## The ground speed the walk clip was authored for (m/s). Playback speed
 ## divides the measured speed by this, so faster movement plays the cycle
 ## proportionally faster instead of moonwalking at a fixed cadence.
