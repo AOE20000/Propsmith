@@ -162,6 +162,12 @@ func _register_core_services(failures: Array[String]) -> void:
 		Services.register(&"tool_belt", belt)
 		# In the tree so the belt can listen for its switch and undo keys.
 		add_child(belt)
+	if not Services.has(&"demo_tour"):
+		var tour := DemoTour.new()
+		tour.name = "DemoTour"
+		Services.register(&"demo_tour", tour)
+		# In the tree: it polls the goal checks and owns the stop triggers.
+		add_child(tour)
 	if not Services.has(&"tool_gun"):
 		var gun := ToolGun.new()
 		Services.register(&"tool_gun", gun)

@@ -29,6 +29,22 @@ const WATER_LEVEL: float = -0.12
 
 const WATER_SHADER: Shader = preload("res://assets/shaders/water.gdshader")
 
+## Where the guided-tour stops stand. The tour service owns what each stop
+## means and how it is judged; the map owns its ground plan, so the
+## coordinates live here — the same split as the decor zones above. Laid out
+## along the natural walk: spawn outpost → path → pond → rooms → corners.
+const TOUR_STOPS: Dictionary = {
+	&"welcome": Vector3(0.0, 1.0, 7.0),
+	&"scenery": Vector3(-5.0, 1.0, 22.0),
+	&"wardrobe": Vector3(8.0, 1.0, -8.0),
+	&"citizens": Vector3(-14.0, 1.0, 6.0),
+	&"props": Vector3(13.0, 1.0, 10.0),
+	&"workshop": Vector3(20.0, 1.0, -16.0),
+	&"vehicles": Vector3(0.0, 1.0, -26.0),
+	&"photo": Vector3(0.0, 1.0, 56.0),
+	&"exit": Vector3(-30.0, 1.0, -30.0),
+}
+
 ## The lawn's sound. CC0 recordings from BigSoundBank — see
 ## `assets/audio/LICENSE_SOURCES.md` for provenance and what was done to them.
 ## Loading a `.ogg` rather than an `.mp3` is deliberate: MP3 encoder padding breaks
@@ -85,6 +101,12 @@ func build(world_root: Node3D, seed_value: int) -> bool:
 	_build_ambience(world_root)
 
 	ModHost.notify_world_generate(world_root)
+
+	# The guided tour's stops: the map says where they stand (above), the tour
+	# service says what they mean. Absent service (a bare probe) is fine.
+	var tour := Services.get_as(&"demo_tour", &"DemoTour") as DemoTour
+	if tour != null:
+		tour.declare_builtin_stops(TOUR_STOPS)
 
 	progress.call("生成人流", 0.95)
 	_build_crowd(world_root, seed_value)

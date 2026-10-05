@@ -43,6 +43,7 @@ func model() -> Node3D:
 func set_option(option_id: String, value: Variant) -> void:
 	_state.record(option_id, value)
 	apply_current()
+	Events.appearance_edited.emit()
 
 
 ## Whole-state swap for the panel's randomize / reset buttons; the previous
@@ -52,6 +53,7 @@ func replace_state(state: CharacterState) -> void:
 		return
 	_state = state
 	apply_current()
+	Events.appearance_edited.emit()
 
 
 ## Re-drive the whole state into the model. Missing model → state is kept and

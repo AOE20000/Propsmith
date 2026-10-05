@@ -35,6 +35,10 @@ var render_styles: Dictionary = {}
 ## built on a 1.9 GB dataset the repo does not contain is the shape this slot exists
 ## for. Registered with a **selector** id — see `add_map_source`.
 var map_sources: Dictionary = {}
+## Guided-tour stops: id -> {display_name, hint, requirement, position,
+## checker, radius, owner}. Materialised by the tour service after world
+## generation, so a stop's trigger volume is built by the tour, not the mod.
+var tour_stops: Dictionary = {}
 
 
 func _init(owner_mod_id: StringName) -> void:
@@ -200,6 +204,34 @@ func add_player_model(model_id: StringName, display_name: String, factory: Calla
 	}, "player model", "factory")
 
 
+## Register a guided-tour stop: a hint card with a demonstration check, placed
+## at a world position. `checker` is a Callable returning bool — the tour polls
+## it; it must be cheap (it runs a few times a second while unsatisfied).
+##
+## The tour materialises the stop (trigger volume included) once the world
+## exists, so a mod contributes data, not scene nodes, and its stop appears in
+## the same progress list as the built-in ones.
+func add_tour_stop(
+	stop_id: StringName,
+	display_name: String,
+	hint: String,
+	requirement: String,
+	position: Vector3,
+	checker: Callable,
+	radius: float = 4.5,
+) -> bool:
+	return _register_delivering(tour_stops, stop_id, {
+		"id": stop_id,
+		"display_name": display_name,
+		"hint": hint,
+		"requirement": requirement,
+		"position": position,
+		"radius": radius,
+		"checker": checker,
+		"owner": _mod_id,
+	}, "tour stop", "checker")
+
+
 ## Register a render style — a way of drawing the frame, offered next to the
 ## built-in 写实 and 3渲2 in the style switch.
 ##
@@ -305,6 +337,7 @@ func _registry_by_name(registry_name: String) -> Dictionary:
 		"tool": return tools
 		"npc": return npc_factories
 		"player model": return player_models
+		"tour stop": return tour_stops
 		"render style": return render_styles
 	return {}
 

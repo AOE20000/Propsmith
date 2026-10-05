@@ -52,6 +52,7 @@ func _ready() -> void:
 	_run_section("map catalogue", 23, _check_map_catalog)
 	_run_section("camera and wardrobe wiring", 31, _check_camera_and_wardrobe)
 	_run_section("model clips sampler", 16, _check_model_clips)
+	_run_section("guided tour", 10, _check_demo_tour)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -2130,3 +2131,50 @@ func _expect(condition: bool, message: String) -> void:
 	_checks += 1
 	if not condition:
 		_failures.append(message)
+
+
+## The guided tour's spine: stops register (duplicates refused), an arrival stop
+## lights on the poll while a checked one waits for its check, the mode flips,
+## and every completion is a decision — so replaying the record restores the
+## progress, which is exactly what a save load does.
+func _check_demo_tour() -> void:
+	var tour := DemoTour.new()
+	add_child(tour)
+	var reached: Array[bool] = [false]
+	_expect(
+		tour.register_stop(&"alpha", "甲", "提示", "要求", Vector3.ZERO, Callable(), 4.0),
+		"a stop must register"
+	)
+	_expect(
+		not tour.register_stop(&"alpha", "重复", "", "", Vector3.ZERO, Callable()),
+		"a duplicate stop id must be refused"
+	)
+	_expect(
+		tour.register_stop(&"beta", "乙", "", "", Vector3.ZERO,
+			func() -> bool: return reached[0], 4.0),
+		"a checked stop must register"
+	)
+	_expect(tour.stop_count() == 2, "both stops must be present")
+	_expect(
+		tour.completed_count() == 0 and not tour.is_completed(&"alpha"),
+		"nothing is complete before it is demonstrated"
+	)
+	# A player is needed for the poll to run; an empty Node3D is enough (only
+	# the null check and, for arrival stops, a position are used).
+	var dummy := Node3D.new()
+	add_child(dummy)
+	tour._player = dummy
+	tour._poll_timer = 0.0
+	tour._process(0.01)
+	_expect(tour.is_completed(&"alpha"), "an arrival stop must light on the poll")
+	_expect(not tour.is_completed(&"beta"), "a checked stop must wait for its check")
+	reached[0] = true
+	tour._poll_timer = 0.0
+	tour._process(0.01)
+	_expect(tour.is_completed(&"beta"), "the stop must light once its check passes")
+	tour.set_mode(DemoTour.Mode.SANDBOX)
+	_expect(tour.mode == DemoTour.Mode.SANDBOX, "the mode must be settable")
+	DecisionLog.apply_record({
+		"kind": "tour_step", "payload": {"step": "gamma"}, "v": 1, "seq": 0, "ts": 0,
+	})
+	_expect(tour.is_completed(&"gamma"), "a replayed step record must restore progress")

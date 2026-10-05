@@ -127,6 +127,7 @@ func _capture(file_name: String, directory: String) -> String:
 		return ""
 	print("[photo] saved %s" % path)
 	Events.notify("已保存 %s" % file, Events.NotifyLevel.SUCCESS)
+	Events.photo_saved.emit(path)
 	return path
 
 

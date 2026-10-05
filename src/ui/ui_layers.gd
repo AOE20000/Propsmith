@@ -27,6 +27,10 @@ const HUD: int = 10
 ## The pause menu: the lowest of the modal surfaces, so any panel that opens *from*
 ## it (none yet) would sit above without renumbering.
 const PAUSE_MENU: int = 20
+## The guided tour's hint card and progress badge: above the HUD (whose corner it
+## shares), below the spawn wheel and the wardrobe — the tour never covers a panel
+## the player deliberately opened.
+const TOUR: int = 35
 ## The prop spawn wheel: modal while held, but it does not cover the whole screen.
 const SPAWN_MENU: int = 40
 ## The wardrobe. Sits above the spawn wheel because both can be open during an

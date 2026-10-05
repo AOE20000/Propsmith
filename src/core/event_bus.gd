@@ -73,6 +73,13 @@ signal prop_removed(prop_id: StringName)
 signal prop_frozen(prop: Node, frozen: bool)
 signal hand_tool_changed(tool_id: StringName)
 
+## Player-facing module activity that other modules want to observe without
+## reaching into them: the wardrobe reporting an edit (the appearance
+## controller owns the state, so this fires on any panel change), and photo
+## mode reporting a saved frame. Both are broadcast-only.
+signal appearance_edited()
+signal photo_saved(path: String)
+
 enum NotifyLevel { INFO, SUCCESS, WARNING }
 
 
