@@ -73,15 +73,27 @@ func _set_open(open: bool) -> void:
 		_rebuild_tools()
 
 
+## The aimed hit. The source of the ray follows the mouse mode: captured means
+## the crosshair (the camera's forward), free means the *pointer* — the panel
+## runs with a visible cursor, and picking by crosshair there was a trap: the
+## cursor moved but the ray did not, so every click landed on whatever the
+## camera happened to centre on and a two-shot tool could never choose its
+## second anchor. The reported workaround — close the panel, walk and turn,
+## reopen — is exactly what that forced.
 func _aim_hit() -> Dictionary:
 	var camera: Camera3D = get_viewport().get_camera_3d()
 	if camera == null:
 		return {}
-	var query := PhysicsRayQueryParameters3D.create(
-		camera.global_position,
-		camera.global_position - camera.global_transform.basis.z * 60.0,
-		1,
-	)
+	var from: Vector3
+	var direction: Vector3
+	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		from = camera.global_position
+		direction = -camera.global_transform.basis.z
+	else:
+		var screen: Vector2 = get_viewport().get_mouse_position()
+		from = camera.project_ray_origin(screen)
+		direction = camera.project_ray_normal(screen)
+	var query := PhysicsRayQueryParameters3D.create(from, from + direction * 60.0, 1)
 	return camera.get_world_3d().direct_space_state.intersect_ray(query)
 
 

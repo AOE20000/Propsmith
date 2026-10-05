@@ -107,7 +107,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _fire() -> void:
 	var tool := current_tool()
 	if tool == null:
-		Events.notify("先用滚轮或 C 选择一个工具", Events.NotifyLevel.WARNING)
+		Events.notify("先用滚轮选择一个工具", Events.NotifyLevel.WARNING)
 		return
 	var hit := _aim_hit()
 	if hit.is_empty():
@@ -115,16 +115,24 @@ func _fire() -> void:
 	tool.on_primary(hit)
 
 
-## The aimed hit dictionary, or empty when nothing in range was hit.
+## The aimed hit dictionary, or empty when nothing in range was hit. The ray
+## starts at the crosshair while the mouse is captured and at the *pointer*
+## when it is free — the building panel keeps the cursor visible, and a pick
+## there has to follow where the player points.
 func _aim_hit() -> Dictionary:
 	var camera: Camera3D = get_viewport().get_camera_3d()
 	if camera == null:
 		return {}
-	var query := PhysicsRayQueryParameters3D.create(
-		camera.global_position,
-		camera.global_position - camera.global_transform.basis.z * AIM_RANGE,
-		1,
-	)
+	var from: Vector3
+	var direction: Vector3
+	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		from = camera.global_position
+		direction = -camera.global_transform.basis.z
+	else:
+		var screen: Vector2 = get_viewport().get_mouse_position()
+		from = camera.project_ray_origin(screen)
+		direction = camera.project_ray_normal(screen)
+	var query := PhysicsRayQueryParameters3D.create(from, from + direction * AIM_RANGE, 1)
 	var hit: Dictionary = camera.get_world_3d().direct_space_state.intersect_ray(query)
 	return hit
 

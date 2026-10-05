@@ -63,7 +63,7 @@ const BUILT_IN: Dictionary = {
 	},
 	&"workshop": {
 		"name": "工坊",
-		"hint": "数字键切换工具：焊接、绳索、上色。把两个箱子焊在一起。",
+		"hint": "按 3 拿起工具枪，滚轮选择焊接或绳索；先点一个道具，再点另一个。",
 		"requirement": "创建至少一条约束",
 	},
 	&"vehicles": {
