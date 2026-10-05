@@ -45,6 +45,9 @@ func _ready() -> void:
 	# Detached from the parent's transform: this node places itself in world space
 	# from the camera, and inheriting the director's transform would double it.
 	top_level = true
+	# Hand-placed every frame from the camera transform; physics interpolation
+	# would tear it off the camera it is meant to hug.
+	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 	# Frustum culling judges from the mesh's own bounds while this mesh is placed

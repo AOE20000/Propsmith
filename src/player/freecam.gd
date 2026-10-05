@@ -52,6 +52,10 @@ func _ready() -> void:
 	# rendering the frame.
 	current = false
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# The free camera writes its own position every tick; engine-side physics
+	# interpolation would fight that (it interpolates nodes the physics engine
+	# moves, and this one is hand-flown).
+	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	Events.game_mode_changed.connect(_on_game_mode_changed)
 
 

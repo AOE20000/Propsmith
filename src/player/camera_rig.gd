@@ -87,6 +87,12 @@ func _ready() -> void:
 	# a camera, so running under a menu costs nothing; the view keys below yield
 	# while the wardrobe owns the framing.
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# The rig already smooths its own position every rendered frame (the follow
+	# lerp below); letting the engine interpolate it again would double-smooth
+	# and lag the camera behind the interpolated character. Physics
+	# interpolation (project setting) is for things the physics engine moves —
+	# the character, props, citizens — not for a node driven by hand.
+	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	_spring_arm = get_node_or_null("SpringArm3D") as SpringArm3D
 	if _spring_arm != null:
 		_pivot = _spring_arm.get_parent() as Node3D
