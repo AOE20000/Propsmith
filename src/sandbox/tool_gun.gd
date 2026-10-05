@@ -22,6 +22,13 @@ var _mod_count_at_build: int = -1
 func _ready() -> void:
 	_rebuild_tools()
 	Events.mods_loaded.connect(func(_ids: PackedStringArray) -> void: _rebuild_tools())
+	# The gun owns its picker (same pattern as the tour's HUD): hold Tab to
+	# choose a tool from a radial menu. It reads this roster live, so mod tools
+	# appear in it without either file knowing about the other.
+	var wheel := ToolWheel.new()
+	wheel.name = "ToolWheel"
+	wheel.bind(self)
+	add_child(wheel)
 
 
 ## The held tool, or null when nothing is selected.

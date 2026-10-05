@@ -24,6 +24,7 @@ var _sprint_started: bool = false
 var _stopped: bool = false
 var _jumped: bool = false
 var _shot_taken: bool = false
+var _wheel_shot: bool = false
 var _run_frames: int = 0
 var _worst_hips_jump: float = 0.0
 
@@ -129,7 +130,22 @@ func _process(delta: float) -> void:
 		print("[walk-probe] --- jump pressed at t=%.2f ---" % _elapsed)
 	if _jumped and _elapsed >= 7.58:
 		Input.action_release(&"jump")
-	if _elapsed >= 9.5:
+	# One frame with the tool wheel held open: hold the gun, open the picker,
+	# point at a sector, and photograph it.
+	if not _wheel_shot and _elapsed > 9.0:
+		_wheel_shot = true
+		var belt := Services.get_service(&"tool_belt") as ToolBelt
+		if belt != null:
+			belt.switch_to(&"toolgun")
+		var wheel := get_tree().root.find_child("ToolWheel", true, false) as ToolWheel
+		if wheel != null:
+			wheel._open_wheel()
+			Input.warp_mouse(wheel.viewport_centre() + Vector2(90.0, -120.0))
+			await get_tree().process_frame
+			await get_tree().process_frame
+			var wheel_shot := get_viewport().get_texture().get_image()
+			wheel_shot.save_png("data/screenshots/tool_wheel.png")
+	if _elapsed >= 10.0:
 		print("[walk-probe] summary: run_frames=%d worst_hijump=%.4f" % [
 			_run_frames, _worst_hips_jump])
 		get_tree().quit(0)

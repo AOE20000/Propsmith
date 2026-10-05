@@ -33,6 +33,10 @@ const PAUSE_MENU: int = 20
 const TOUR: int = 35
 ## The prop spawn wheel: modal while held, but it does not cover the whole screen.
 const SPAWN_MENU: int = 40
+## The tool picker wheel (hold Tab). Same family as the spawn wheel — modal
+## while held, partial screen — and above it so the two never tie if both are
+## somehow up.
+const TOOL_WHEEL: int = 42
 ## The wardrobe. Sits above the spawn wheel because both can be open during an
 ## edit, and the wardrobe is the one that owns the mouse.
 const CHARACTER_PANEL: int = 45

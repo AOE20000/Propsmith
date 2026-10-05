@@ -53,6 +53,7 @@ func _ready() -> void:
 	_run_section("camera and wardrobe wiring", 31, _check_camera_and_wardrobe)
 	_run_section("model clips sampler", 16, _check_model_clips)
 	_run_section("guided tour", 10, _check_demo_tour)
+	_run_section("tool wheel", 3, _check_tool_wheel)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -2180,3 +2181,20 @@ func _check_demo_tour() -> void:
 		"kind": "tour_step", "payload": {"step": "gamma"}, "v": 1, "seq": 0, "ts": 0,
 	})
 	_expect(tour.is_completed(&"gamma"), "a replayed step record must restore progress")
+
+
+## The radial picker's geometry: sector 0 sits at the top, the rest run
+## clockwise, and the centre is a dead zone (releasing there commits nothing).
+func _check_tool_wheel() -> void:
+	_expect(
+		ToolWheel.index_for_offset(Vector2(0.0, -120.0), 4) == 0,
+		"the top of the wheel must be sector 0"
+	)
+	_expect(
+		ToolWheel.index_for_offset(Vector2(120.0, 0.0), 4) == 1,
+		"sectors must run clockwise from the top"
+	)
+	_expect(
+		ToolWheel.index_for_offset(Vector2(0.0, 12.0), 4) == -1,
+		"the centre must be a dead zone"
+	)
