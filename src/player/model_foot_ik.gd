@@ -75,18 +75,21 @@ const HIPS_BONE: StringName = &"Hips"
 ## After this long standing still the foot is handed back to the clip, so a
 ## character that stops does not keep correcting a pose the animation owns.
 @export var plant_max_time: float = 0.45
-## How fast the correction fades in and out (per second) — a hard switch would
-## pop. This has to be slower than a stride: at 12/s the weight only reached
-## 0.4 within a stance phase, so the foot was corrected by less than half of
-## what it needed and still slid.
-@export var blend_speed: float = 3.0
+## How fast the correction fades in (per second). This has to be *faster* than
+## a stride, not slower: a stance phase on this rig lasts about 0.1 s, so at
+## 3/s the weight never left 0.25 and the foot was corrected by a quarter of
+## what it needed. 9/s reaches full strength inside a stance; a hard switch
+## would pop, this is as close to "immediate" as smooth can get.
+@export var blend_speed: float = 9.0
 ## Skeletons farther than this from the camera stop per-frame IK, like the
 ## stance's distance gate.
 @export var active_range: float = 45.0
-## Ceiling on how far the pelvis may be pulled down in one frame (m). The real
-## shortfall on this rig is ~0.2 m; the cap is there so a bad frame cannot
-## drop the figure through the floor.
-@export var max_pelvis_drop: float = 0.3
+## Ceiling on the pelvis drop (m). The real shortfall here is ~0.2 m — this
+## figure's legs are shorter than its hips are high — but applying all of it
+## moves the *whole body*: reported in play as the character lurching toward
+## the frame edge and back. Take a fraction, let the reach clamp absorb the
+## rest as a slightly straighter knee.
+@export var max_pelvis_drop: float = 0.12
 ## How fast the pelvis offset eases toward its goal (per second). The shortfall
 ## this reacts to rises and falls with every stride; without easing, the hips
 ## twitch in sympathy — reported in play as the legs snapping forward and
@@ -206,7 +209,13 @@ func _pelvis_prepare(delta: float) -> void:
 	# sides — so a raw per-frame value wrote that breathing straight into the
 	# pelvis as a twitch. Which foot is "worst" no longer decides the direction
 	# frame to frame either: the offset itself is the state, and it is smoothed.
-	_pelvis_current = _pelvis_current.lerp(want, 1.0 - exp(-pelvis_smoothing * delta))
+	# Ease in briskly, ease out slowly. The stance phase is short, so the drop
+	# has to arrive during it; but cancelling it the instant the stance ends
+	# snapped the figure back to centre (playtested as a flash back to the
+	# middle of the frame), so leaving takes a third of the rate.
+	var rising: bool = want.length_squared() > _pelvis_current.length_squared()
+	var rate: float = pelvis_smoothing if rising else pelvis_smoothing * 0.3
+	_pelvis_current = _pelvis_current.lerp(want, 1.0 - exp(-rate * delta))
 	if _pelvis_current.length_squared() > 0.0:
 		_drop_pelvis(_pelvis_current.normalized(), _pelvis_current.length())
 		_pelvis_applied = _pelvis_current
