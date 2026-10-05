@@ -44,6 +44,15 @@ const RUN_CLIP: StringName = &"run"
 ## frame; `fall` is a true loop. Both come from the same build as the rest.
 const AIR_UP_CLIP: StringName = &"jump"
 const AIR_DOWN_CLIP: StringName = &"fall"
+## Quiet instantaneous-velocity ticks (at 60 Hz) that end a fall. Small
+## because the landing should feel immediate; the anti-flicker duty belongs to
+## the smoothed speed, not to this count.
+const LAND_QUIET_TICKS: int = 3
+## Seconds after touchdown during which a still-negative *smoothed* vertical
+## speed must not be read as a new fall — the smoothing that protects the
+## thresholds also lags the ground's abrupt absorption by about this long.
+## Rising (a real jump) is exempt, so bounce-jumping still works.
+const LAND_COOLDOWN: float = 0.25
 ## The ground speed the walk clip was authored for (m/s). Playback speed
 ## divides the measured speed by this, so faster movement plays the cycle
 ## proportionally faster instead of moonwalking at a fixed cadence.
@@ -77,7 +86,12 @@ const AIR_DOWN_CLIP: StringName = &"fall"
 @export var fall_threshold: float = -2.0
 ## Vertical speed above which a falling figure, already airborne, counts as
 ## having landed (the ground swallowed its descent).
-@export var land_threshold: float = -0.5
+@export var land_threshold: float = -0.3
+## Seconds for one clip's pose to cross-fade into the next when clips are
+## switched mid-air (the leap hands over to the fall loop). The switch itself
+## is instant; without this fade it is a single-frame pose snap — the
+## one-frame stutter the jump was reported with.
+@export var cross_blend: float = 0.1
 ## Library injection for tests and probes: when set, it replaces the resource
 ## at `LIBRARY_PATH` (which needs an import pass a headless test may not run).
 var library_override: AnimationLibrary = null
@@ -89,6 +103,15 @@ var _stance: ModelStance = null
 var _current_clip: Animation = null
 ## Track index → skeleton bone index, resolved once per started clip.
 var _track_bones: PackedInt32Array = PackedInt32Array()
+## Track index → bone name, cached alongside: the cross-fade looks a bone's
+## snapshot up by name every sampled frame, and slicing the track path there
+## would be per-frame string work.
+var _track_names: PackedStringArray = PackedStringArray()
+## Cross-fade state: the pose the current clip blends from, its elapsed time,
+## and whether a fade is in progress.
+var _cross_active: bool = false
+var _cross_t: float = 0.0
+var _cross_from: Dictionary = {}
 ## The union of every bone the locomotion clips touch — the set that must be
 ## restored when the clips stop, so a figure doesn't idle in mid-stride.
 var _touched_bones: PackedStringArray = []
@@ -108,6 +131,11 @@ var _air_phase: int = 0
 ## Whether the current airborne stretch has ever measured a real descent —
 ## the gate that lets "zero vertical speed" mean *landed* rather than *apex*.
 var _fell_far_enough: bool = false
+## Consecutive ticks whose instantaneous vertical speed has been quiet —
+## counted instead of trusting the smoothed value for the landing judgement.
+var _still_ticks: int = 0
+## Seconds left of the post-landing window that suppresses false re-falls.
+var _land_cooldown: float = 0.0
 ## Smoothed vertical speed (m/s) — see the note in `_decide_gear`.
 var _v_speed: float = 0.0
 ## Whether `_last_position` refers to a real previous tick yet.
@@ -171,7 +199,7 @@ func _process(delta: float) -> void:
 		var forced_clip: Animation = _current_clip
 		if forced_clip != null:
 			_time = fmod(_time + delta, forced_clip.length)
-			_apply_sampled_pose(forced_clip, _time)
+			_apply_sampled_pose(forced_clip, _time, delta)
 		return
 	# The first tick after `setup` has no meaningful previous position — the
 	# model may have been assembled outside the tree, or simply be somewhere
@@ -212,6 +240,17 @@ func _decide_gear(
 	# 0 and the full descent — enough to flicker the airborne state between
 	# falling and landed every other frame.
 	_v_speed = lerpf(_v_speed, vertical_speed, minf(1.0, delta * speed_lerp))
+	# Landing is judged from the *instantaneous* descent, counted across a few
+	# ticks: the smoothed value lags a real landing by half a second (its time
+	# constant) while the raw one alternates every physics tick. A few quiet
+	# ticks in a row, after a descent that actually happened, is the ground —
+	# see `_resolve_air_phase`. Counted only while airborne, so time spent on
+	# the ground cannot pre-load the count.
+	if _air_phase != 0 and absf(vertical_speed) < absf(land_threshold):
+		_still_ticks += 1
+	else:
+		_still_ticks = 0
+	_land_cooldown = maxf(0.0, _land_cooldown - delta)
 
 	# --- Airborne takes over completely: movement clips are for the ground ---
 	var air_phase := _resolve_air_phase(_v_speed)
@@ -254,7 +293,7 @@ func _decide_gear(
 			_time + delta * clampf(_speed / authored, 0.6, 2.4),
 			_current_clip.length
 		)
-		_apply_sampled_pose(_current_clip, _time)
+		_apply_sampled_pose(_current_clip, _time, delta)
 	elif not walking and _walking:
 		_begin_stop_blend()
 		_walking = false
@@ -270,19 +309,23 @@ func _decide_gear(
 ## and a fall phase entered that way must not be dragged back to "rising" by a
 ## still-positive velocity, nor be mistaken for a landing at the apex (where
 ## the speed is zero in either direction). Hence: falling persists until a
-## **real** descent — one that reached `fall_threshold` — has been swallowed
-## by the ground.
+## **real** descent — one that reached `fall_threshold` — has been followed by
+## a few quiet ticks (`_still_ticks`), which is the ground absorbing it.
 func _resolve_air_phase(vertical_speed: float) -> int:
 	var falling_deeply := vertical_speed < fall_threshold
 	if falling_deeply:
 		_fell_far_enough = true
 	if _air_phase == 2:
-		if not _fell_far_enough or vertical_speed < land_threshold:
+		if not _fell_far_enough or _still_ticks < LAND_QUIET_TICKS:
 			return 2
 		return 0
 	if vertical_speed > rise_threshold:
 		return 1
 	if falling_deeply:
+		# Fresh off a landing the smoothed speed is still deep in the red; a
+		# real jump (positive) is exempt so bounce-jumping keeps working.
+		if _land_cooldown > 0.0:
+			return 0
 		return 2
 	if _air_phase == 1:
 		return 1
@@ -300,7 +343,9 @@ func _enter_air(delta: float, phase: int) -> void:
 		_air_phase = phase
 		if phase == 1:
 			_fell_far_enough = false
-		_start_clip(AIR_UP_CLIP if phase == 1 else AIR_DOWN_CLIP)
+		# Cross-faded: entering the air from a walk (or switching phases) must
+		# not snap the pose.
+		_start_clip(AIR_UP_CLIP if phase == 1 else AIR_DOWN_CLIP, false, true)
 	_advance_air_pose(delta)
 
 
@@ -312,16 +357,21 @@ func _advance_air_pose(delta: float) -> void:
 		# second: holding its last frame leaves the figure frozen for the tail
 		# of the ascent, which is exactly the "stutter" the jump reads as.
 		# Hand over to the fall loop the moment the action finishes — mid-air
-		# the pose change is invisible; the frozen tail was not.
+		# the pose change is invisible; the frozen tail was not. The hand-over
+		# cross-fades, so not even the switch itself is a one-frame snap.
 		_time += delta
 		if _time >= _current_clip.length:
 			_air_phase = 2
-			_start_clip(AIR_DOWN_CLIP)
+			_start_clip(AIR_DOWN_CLIP, false, true)
 			_advance_air_pose(delta)
 			return
 	else:
-		_time = fmod(_time + delta, _current_clip.length)
-	_apply_sampled_pose(_current_clip, _time)
+		# The fall cycle plays faster the faster the figure is actually
+		# dropping: at the fixed rate a slow descent drifts through the loop,
+		# reading as "the landing takes forever" next to the snappy leap.
+		var rate := clampf(absf(_v_speed) / 4.0, 0.9, 2.2)
+		_time = fmod(_time + delta * rate, _current_clip.length)
+	_apply_sampled_pose(_current_clip, _time, delta)
 
 
 ## Landing: blend whatever the fall left on the bones into the standing stance
@@ -329,6 +379,8 @@ func _advance_air_pose(delta: float) -> void:
 func _leave_air() -> void:
 	_air_phase = 0
 	_fell_far_enough = false
+	_still_ticks = 0
+	_land_cooldown = LAND_COOLDOWN
 	_begin_stop_blend()
 
 
@@ -404,10 +456,27 @@ func _write_stand_target() -> void:
 		_stance.reapply()
 
 
-func _start_clip(clip_name: StringName, keep_phase: bool = false) -> void:
+func _start_clip(
+	clip_name: StringName, keep_phase: bool = false, cross_fade: bool = false
+) -> void:
 	if _library == null or not _library.has_animation(clip_name):
 		return
 	var next: Animation = _library.get_animation(clip_name)
+	# A cross-faded switch snapshots the pose being left behind; the sampler
+	# then blends every bone from it toward the new clip's values.
+	if cross_fade and _skeleton != null and not _touched_bones.is_empty():
+		_cross_from.clear()
+		for bone_name: String in _touched_bones:
+			var index := _skeleton.find_bone(bone_name)
+			if index < 0:
+				continue
+			_cross_from[bone_name] = {
+				"rot": _skeleton.get_bone_pose_rotation(index),
+				"pos": _skeleton.get_bone_pose_position(index),
+				"scale": _skeleton.get_bone_pose_scale(index),
+			}
+		_cross_active = true
+		_cross_t = 0.0
 	if keep_phase and _current_clip != null and _current_clip.length > 0.0:
 		# Carry the cycle phase across the gear switch: walking and running
 		# loops differ in length, but keeping the *ratio* means the stride
@@ -425,30 +494,50 @@ func _start_clip(clip_name: StringName, keep_phase: bool = false) -> void:
 ## Manual sampling: the whole point of this component. The per-type
 ## `track_interpolate` reads the blended keyframe value, `set_bone_pose_*`
 ## writes it — both measured to work where the mixer's own application does not.
-func _apply_sampled_pose(clip: Animation, time: float) -> void:
+## When a cross-fade is in progress the sampled value is blended from the
+## snapshot first, by channel type (slerp for rotations, lerp for the rest).
+func _apply_sampled_pose(clip: Animation, time: float, delta: float = 0.0) -> void:
+	var weight := -1.0
+	if _cross_active:
+		_cross_t += delta
+		var w := clampf(_cross_t / cross_blend, 0.0, 1.0)
+		weight = w * w * (3.0 - 2.0 * w)
+		if w >= 1.0:
+			_cross_active = false
 	for track: int in clip.get_track_count():
 		var bone := _track_bones[track]
 		if bone < 0:
 			continue
+		var bone_name := _track_names[track]
 		match clip.track_get_type(track):
 			Animation.TYPE_ROTATION_3D:
-				_skeleton.set_bone_pose_rotation(
-					bone, clip.rotation_track_interpolate(track, time))
+				var rot: Quaternion = clip.rotation_track_interpolate(track, time)
+				if weight >= 0.0 and _cross_from.has(bone_name):
+					rot = (_cross_from[bone_name]["rot"] as Quaternion).slerp(rot, weight)
+				_skeleton.set_bone_pose_rotation(bone, rot)
 			Animation.TYPE_POSITION_3D:
-				_skeleton.set_bone_pose_position(
-					bone, clip.position_track_interpolate(track, time))
+				var pos: Vector3 = clip.position_track_interpolate(track, time)
+				if weight >= 0.0 and _cross_from.has(bone_name):
+					pos = (_cross_from[bone_name]["pos"] as Vector3).lerp(pos, weight)
+				_skeleton.set_bone_pose_position(bone, pos)
 			Animation.TYPE_SCALE_3D:
-				_skeleton.set_bone_pose_scale(
-					bone, clip.scale_track_interpolate(track, time))
+				var scl: Vector3 = clip.scale_track_interpolate(track, time)
+				if weight >= 0.0 and _cross_from.has(bone_name):
+					scl = (_cross_from[bone_name]["scale"] as Vector3).lerp(scl, weight)
+				_skeleton.set_bone_pose_scale(bone, scl)
 
 
-## Resolve each track's bone name once per started clip: `find_bone` walks the
-## whole bone list, which must not ride on every frame.
+## Resolve each track's bone name and index once per started clip: `find_bone`
+## walks the whole bone list and the name is needed per sampled frame by the
+## cross-fade, so neither belongs in the inner loop.
 func _resolve_track_bones(clip: Animation) -> void:
 	_track_bones = PackedInt32Array()
+	_track_names = PackedStringArray()
 	_track_bones.resize(clip.get_track_count())
+	_track_names.resize(clip.get_track_count())
 	for track: int in clip.get_track_count():
 		var bone_name := String(clip.track_get_path(track)).get_slice(":", 1)
+		_track_names[track] = bone_name
 		_track_bones[track] = _skeleton.find_bone(bone_name)
 
 

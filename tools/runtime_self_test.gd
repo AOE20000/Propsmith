@@ -51,7 +51,7 @@ func _ready() -> void:
 	_run_section("map sources and blueprints", 14, _check_map_sources_and_blueprints)
 	_run_section("map catalogue", 23, _check_map_catalog)
 	_run_section("camera and wardrobe wiring", 31, _check_camera_and_wardrobe)
-	_run_section("model clips sampler", 13, _check_model_clips)
+	_run_section("model clips sampler", 16, _check_model_clips)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -1988,12 +1988,24 @@ func _check_model_clips() -> void:
 		clips._air_phase == 2 and clips._current_clip == lib.get_animation(&"fall"),
 		"descending must keep the fall clip"
 	)
-	for i: int in 10:
+	for i: int in 4:
 		clips._decide_gear(1.0 / 30.0, 0.0, 0.0)
 	_expect(
 		clips._air_phase == 0 and clips._blend_active,
 		"landing must blend back into the stance"
 	)
+	# A landing must not be undone by the smoothed speed still reading negative.
+	clips._decide_gear(1.0 / 30.0, 0.0, -5.0)
+	_expect(clips._air_phase == 0, "the landing cooldown must hold after touchdown")
+
+	# Cross-fade machinery: a mid-air clip switch snapshots the pose and blends
+	# toward the new clip over its window — without it the switch is the
+	# one-frame pose snap the jump was reported with.
+	clips._start_clip(&"fall", false, true)
+	_expect(clips._cross_active, "a cross-faded switch must start a fade")
+	for i: int in 5:
+		clips._apply_sampled_pose(clips._current_clip, 0.0, 1.0 / 30.0)
+	_expect(not clips._cross_active, "the cross-fade must finish within its window")
 
 	clips.queue_free()
 	model.queue_free()
