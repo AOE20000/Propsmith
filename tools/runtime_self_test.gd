@@ -51,7 +51,7 @@ func _ready() -> void:
 	_run_section("map sources and blueprints", 14, _check_map_sources_and_blueprints)
 	_run_section("map catalogue", 23, _check_map_catalog)
 	_run_section("camera and wardrobe wiring", 31, _check_camera_and_wardrobe)
-	_run_section("model clips sampler", 12, _check_model_clips)
+	_run_section("model clips sampler", 13, _check_model_clips)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -1974,11 +1974,19 @@ func _check_model_clips() -> void:
 		clips._air_phase == 1 and clips._current_clip == lib.get_animation(&"jump"),
 		"rising must play the jump clip"
 	)
+	# The leap action is shorter than the rise: once it finishes, the fall loop
+	# must take over — holding its last frame is the "frozen mid-jump" report.
+	for i: int in 32:
+		clips._decide_gear(1.0 / 30.0, 0.0, 5.0)
+	_expect(
+		clips._air_phase == 2 and clips._current_clip == lib.get_animation(&"fall"),
+		"a finished leap action must hand over to the fall loop"
+	)
 	for i: int in 8:
 		clips._decide_gear(1.0 / 30.0, 0.0, -5.0)
 	_expect(
 		clips._air_phase == 2 and clips._current_clip == lib.get_animation(&"fall"),
-		"falling must play the fall clip"
+		"descending must keep the fall clip"
 	)
 	for i: int in 10:
 		clips._decide_gear(1.0 / 30.0, 0.0, 0.0)

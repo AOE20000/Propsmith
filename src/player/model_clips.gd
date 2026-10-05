@@ -105,6 +105,9 @@ var _blend_t: float = 0.0
 var _blend_from: Dictionary = {}
 ## 0 grounded, 1 rising (jump action), 2 falling (fall loop).
 var _air_phase: int = 0
+## Whether the current airborne stretch has ever measured a real descent —
+## the gate that lets "zero vertical speed" mean *landed* rather than *apex*.
+var _fell_far_enough: bool = false
 ## Smoothed vertical speed (m/s) — see the note in `_decide_gear`.
 var _v_speed: float = 0.0
 ## Whether `_last_position` refers to a real previous tick yet.
@@ -260,19 +263,29 @@ func _decide_gear(
 		_advance_stop_blend(delta)
 
 
-## Airborne phase from measured vertical speed, with hold rules so the apex
-## does not read as a landing: while rising, any speed down to the fall
-## threshold keeps "rising" (a jump hangs at the top); while falling, only a
-## grounding speed — the descent absorbed by the floor — ends it.
+## Airborne phase from measured vertical speed.
+##
+## The hold rules matter more than the thresholds: a leap's *action* clip is
+## much shorter than its rise, so it hands over to the fall loop mid-ascent —
+## and a fall phase entered that way must not be dragged back to "rising" by a
+## still-positive velocity, nor be mistaken for a landing at the apex (where
+## the speed is zero in either direction). Hence: falling persists until a
+## **real** descent — one that reached `fall_threshold` — has been swallowed
+## by the ground.
 func _resolve_air_phase(vertical_speed: float) -> int:
+	var falling_deeply := vertical_speed < fall_threshold
+	if falling_deeply:
+		_fell_far_enough = true
+	if _air_phase == 2:
+		if not _fell_far_enough or vertical_speed < land_threshold:
+			return 2
+		return 0
 	if vertical_speed > rise_threshold:
 		return 1
-	if vertical_speed < fall_threshold:
+	if falling_deeply:
 		return 2
-	if _air_phase == 1 and vertical_speed > fall_threshold:
+	if _air_phase == 1:
 		return 1
-	if _air_phase == 2 and vertical_speed < land_threshold:
-		return 2
 	return 0
 
 
@@ -285,6 +298,8 @@ func _enter_air(delta: float, phase: int) -> void:
 	_running = false
 	if _air_phase != phase:
 		_air_phase = phase
+		if phase == 1:
+			_fell_far_enough = false
 		_start_clip(AIR_UP_CLIP if phase == 1 else AIR_DOWN_CLIP)
 	_advance_air_pose(delta)
 
@@ -293,8 +308,17 @@ func _advance_air_pose(delta: float) -> void:
 	if _current_clip == null:
 		return
 	if _air_phase == 1:
-		# One-shot: advance then hold the final frame.
-		_time = minf(_time + delta, _current_clip.length)
+		# The leap is a 0.21 s action while the rise lasts about half a
+		# second: holding its last frame leaves the figure frozen for the tail
+		# of the ascent, which is exactly the "stutter" the jump reads as.
+		# Hand over to the fall loop the moment the action finishes — mid-air
+		# the pose change is invisible; the frozen tail was not.
+		_time += delta
+		if _time >= _current_clip.length:
+			_air_phase = 2
+			_start_clip(AIR_DOWN_CLIP)
+			_advance_air_pose(delta)
+			return
 	else:
 		_time = fmod(_time + delta, _current_clip.length)
 	_apply_sampled_pose(_current_clip, _time)
@@ -304,6 +328,7 @@ func _advance_air_pose(delta: float) -> void:
 ## — the same transition the stop uses, which is exactly the right shape here.
 func _leave_air() -> void:
 	_air_phase = 0
+	_fell_far_enough = false
 	_begin_stop_blend()
 
 
