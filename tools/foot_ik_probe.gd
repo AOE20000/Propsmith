@@ -36,6 +36,15 @@ var _plant_max: float = 0.0
 ## jerking a few seconds in, which is this number spiking.
 var _last_pelvis: Vector3 = Vector3.ZERO
 var _pelvis_step_max: float = 0.0
+## How often the plant flag flips. A foot that re-plants every few frames resets
+## its pin to wherever it currently is — which is no pin at all, and is the
+## leading suspect for the drift that survives an otherwise correct solve.
+var _switches: Array[int] = [0, 0]
+var _last_planted: Array[bool] = [false, false]
+## Drift sampled only when the correction is at (nearly) full strength, to tell
+## "not enough correction applied" apart from "correction does not work".
+var _drift_full: Array[float] = [0.0, 0.0]
+var _full_frames: Array[int] = [0, 0]
 
 
 func _ready() -> void:
@@ -119,6 +128,10 @@ func _process(delta: float) -> void:
 			_plant_frames, _plant_sum / float(maxi(_plant_frames, 1)), _plant_max])
 		print("[foot-ik-probe] pelvis jitter: max step=%.4fm offset=%s" % [
 			_pelvis_step_max, _foot_ik.pelvis_offset()])
+		print("[foot-ik-probe] plant switches: L=%d R=%d" % [_switches[0], _switches[1]])
+		print("[foot-ik-probe] drift at full weight: L=%.4fm (%d frames) R=%.4fm (%d frames)" % [
+			_drift_full[0] / float(maxi(_full_frames[0], 1)), _full_frames[0],
+			_drift_full[1] / float(maxi(_full_frames[1], 1)), _full_frames[1]])
 		get_tree().quit(0)
 
 
@@ -153,11 +166,19 @@ func _sample_drift() -> void:
 	_last_pelvis = _foot_ik.pelvis_offset()
 	for side: int in 2:
 		var pos: Vector3 = _foot_ik.foot_world_pos(side)
-		if _foot_ik.foot_weight(side) > 0.9:
+		var planted: bool = _foot_ik.is_planted(side)
+		var weight: float = _foot_ik.foot_weight(side)
+		if planted != _last_planted[side]:
+			_switches[side] += 1
+			_last_planted[side] = planted
+		if weight > 0.9 and _elapsed > MEASURE_FROM:
 			var step: float = pos.distance_to(_last_ankle[side])
 			_plant_frames += 1
 			_plant_sum += step
 			_plant_max = maxf(_plant_max, step)
+			if weight > 0.95:
+				_full_frames[side] += 1
+				_drift_full[side] += step
 		_last_ankle[side] = pos
 
 

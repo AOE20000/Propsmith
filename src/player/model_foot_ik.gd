@@ -20,14 +20,29 @@ class_name ModelFootIK
 ##   0.4 inside a stance phase, so the foot was corrected by less than half of
 ##   what it needed. At 4/s the error fell from 0.66 m to 0.18 m.
 ##
-## **What is left**: with the weight at 1.0 the foot still travels ~0.30 m per
-## frame — the correction is being applied and the foot does not go where the
-## solve says. So the remaining fault is in `_aim`'s pose arithmetic, not in the
-## angles that feed it: writing `pose = parent_global⁻¹ · correction · current`
-## is not producing the global rotation this file assumes. That is a *one-bone*
-## question with a one-bone test — write a known rotation on a single bone,
-## read the global basis back, compare — and it should be settled by a
-## self-test rather than by more end-to-end probing. Do that first.
+## **Where it stands after the measurements** (this is the honest end state):
+##
+##   * The solve is *correct*: with the IK actually running, the goal it computes
+##     sits ~0.8 cm from where the ankle ends up, and the angles it asks for
+##     (thigh -0.38, shin -0.82 rad) are the angles a bent knee needs.
+##   * `_aim`'s pose arithmetic is *correct*, proven by a single-bone unit test
+##     at full, half and zero weight with a rotated parent.
+##   * The pelvis compensation is stable: 0.010 m worst frame, offset (0,-0.12,0).
+##   * And yet a foot at **full** weight still travels **0.18 m per frame** — not
+##     "not enough correction", but "the correction does not land". The plant
+##     flag re-arms 26 times in 8 s (about once per stride phase), which resets
+##     the pin each time and is part of it; but the decisive number is the
+##     full-weight drift.
+##
+## Since the angles, the goal and the write path are each verified correct, the
+## remaining fault is in the **chain**: the shin's solve reads the thigh's
+## parent basis from `_applied_global`, and a two-bone chain whose second joint
+## is right in isolation can still be wrong when the first joint's *global* basis
+## is cached rather than re-read. That is the next thing to test — again on a
+## single bone, with a parent that the same frame has just moved.
+##
+## Not attached to the game, by design: a 0.18 m/frame lurch reads far worse
+## than the 0.30 m/frame slide it was meant to remove.
 ##
 ## Also worth knowing on this rig:
 ##   * Bone length is the distance between adjacent bone origins. The rest
