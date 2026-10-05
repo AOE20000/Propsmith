@@ -21,6 +21,14 @@ var _cam: Camera3D = null
 var _elapsed: float = 0.0
 var _shots: int = 0
 var _running: bool = false
+## True when this probe created the component (and so may remove it on exit).
+var _owned: bool = false
+## Planted-phase drift: how far a foot the IK fully owns travels per frame. This
+## is the acceptance number for the whole feature.
+var _last_ankle: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
+var _plant_frames: int = 0
+var _plant_sum: float = 0.0
+var _plant_max: float = 0.0
 
 
 func _ready() -> void:
@@ -41,7 +49,6 @@ func _on_world_ready(_world: Node3D) -> void:
 		print("[foot-ik-probe] no player found")
 		get_tree().quit(1)
 		return
-	# The component is not wired into the game; this probe owns it.
 	var model: Node3D = _player.get_node_or_null("PlayerModel") as Node3D
 	if model == null:
 		for node: Node in _player.find_children("*", "Node3D", true, false):
@@ -53,10 +60,15 @@ func _on_world_ready(_world: Node3D) -> void:
 		print("[foot-ik-probe] no model with a skeleton")
 		get_tree().quit(1)
 		return
-	_foot_ik = ModelFootIK.new()
-	_foot_ik.name = "FootIK"
-	model.add_child(_foot_ik)
-	_foot_ik.setup(model)
+	# Reuse the attached component when the game has one; build it only if not,
+	# so this probe measures the shipping behaviour either way.
+	_foot_ik = model.find_child("FootIK", true, false) as ModelFootIK
+	if _foot_ik == null:
+		_foot_ik = ModelFootIK.new()
+		_foot_ik.name = "FootIK"
+		model.add_child(_foot_ik)
+		_foot_ik.setup(model)
+		_owned = true
 	_foot_ik.set_process(false)
 	_cam = Camera3D.new()
 	add_child(_cam)
@@ -70,6 +82,7 @@ func _process(delta: float) -> void:
 		return
 	_elapsed += delta
 	_frame_camera()
+	_sample_drift()
 	if _elapsed > 1.0 and not _running:
 		_running = true
 		Input.action_press(&"move_forward")
@@ -92,6 +105,8 @@ func _process(delta: float) -> void:
 	if _elapsed >= RUN_TIME:
 		Input.action_release(&"move_forward")
 		Input.action_release(&"sprint")
+		print("[foot-ik-probe] planted drift: frames=%d mean=%.4fm max=%.4fm" % [
+			_plant_frames, _plant_sum / float(maxi(_plant_frames, 1)), _plant_max])
 		get_tree().quit(0)
 
 
@@ -107,11 +122,27 @@ func _frame_camera() -> void:
 
 
 ## The tour's start card sits exactly where the legs are; every CanvasLayer
-## goes away so the frame is world and figure only.
+## goes away so the frame is world and figure only. They hang off the root,
+## not off the viewport's children — the earlier version only found some of them.
 func _hide_ui() -> void:
-	for child: Node in get_viewport().get_children():
+	for child: Node in get_tree().root.get_children():
 		if child is CanvasLayer:
 			(child as CanvasLayer).visible = false
+
+
+## Sample how far a fully-owned foot moves per frame. Anything above a
+## millimetre or two is the slide this component exists to remove.
+func _sample_drift() -> void:
+	if _foot_ik == null:
+		return
+	for side: int in 2:
+		var pos: Vector3 = _foot_ik.foot_world_pos(side)
+		if _foot_ik.foot_weight(side) > 0.9:
+			var step: float = pos.distance_to(_last_ankle[side])
+			_plant_frames += 1
+			_plant_sum += step
+			_plant_max = maxf(_plant_max, step)
+		_last_ankle[side] = pos
 
 
 func _shoot(name: String) -> void:

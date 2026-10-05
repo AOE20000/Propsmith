@@ -2,29 +2,45 @@ extends Node
 class_name ModelFootIK
 ## Plants the feet instead of letting the clip slide them.
 ##
-## **NOT WIRED UP — one known defect left.** Progress, so the next iteration
-## does not repeat it:
+## **NOT WIRED UP — one fault left, and it is not the maths of the angles.**
+## Progress, so the next iteration does not repeat it:
 ##
-## * Solved and *photographically verified*: the bend direction. The first
-##   build rotated about the character's right axis and the picture showed a
-##   backwards knee — thigh straight down, shin folded behind. Flipping the
-##   bend normal (`-basis.x`) puts the knee back where a knee belongs. This is
-##   what the visual probe (`tools/foot_ik_probe.tscn`) bought: the same
-##   sprint, same camera, one frame with the IK off and one with it on.
-## * Measured and understood: the leg straightens because the goal is out of
-##   reach. Chain length (origin-to-origin, the only correct measure on this
-##   rig — rest Y axes all read 1.0 because Godot stores rest rotations
-##   without scale) is thigh 0.333 + shin 0.391 = 0.724 m, while the hip sits
-##   0.93 m from a planted ankle. The reach clamp then pins the leg at full
-##   extension. The fix is the standard one this component lacks: **pelvis
-##   compensation** — when the goal is out of reach, drop the hips by the
-##   shortfall instead of straightening the knee. Until that exists, attaching
-##   this would give every character a stiff-legged run.
+## * Solved and *photographically verified*: the bend direction. The first build
+##   rotated about the character's right axis and the picture showed a backwards
+##   knee — thigh straight down, shin folded behind. Flipping the bend normal
+##   (`-basis.x`) puts the knee back where a knee belongs. This is what the
+##   visual probe (`tools/foot_ik_probe.tscn`) bought: the same sprint, same
+##   camera, one frame with the IK off and one with it on.
+## * Solved: the stiff leg. The chain is 0.724 m while the hip sits ~0.93 m from
+##   a planted ankle, so the reach clamp pinned every leg at full extension.
+##   **Pelvis compensation** (`_pelvis_prepare`) now pulls the hips toward the
+##   goal by the shortfall — the standard remedy — and the measured goal distance
+##   drops from 0.93 m to 0.65 m, inside the reach.
+## * Solved: the fade was faster than a stride. At 12/s the weight only reached
+##   0.4 inside a stance phase, so the foot was corrected by less than half of
+##   what it needed. At 4/s the error fell from 0.66 m to 0.18 m.
 ##
-## Kept and still true: the law-of-cosines hip angle is only the right rotation
-## when the leg is already straight; an animated leg needs its current
-## direction swung onto the wanted one, thigh then shin, each measured after
-## the previous is placed.
+## **What is left**: with the weight at 1.0 the foot still travels ~0.30 m per
+## frame — the correction is being applied and the foot does not go where the
+## solve says. So the remaining fault is in `_aim`'s pose arithmetic, not in the
+## angles that feed it: writing `pose = parent_global⁻¹ · correction · current`
+## is not producing the global rotation this file assumes. That is a *one-bone*
+## question with a one-bone test — write a known rotation on a single bone,
+## read the global basis back, compare — and it should be settled by a
+## self-test rather than by more end-to-end probing. Do that first.
+##
+## Also worth knowing on this rig:
+##   * Bone length is the distance between adjacent bone origins. The rest
+##     transform's Y axis is **not** it — Godot stores rest rotations without
+##     scale, so `get_bone_global_rest(x).basis.y.length()` reads 1.0 for every
+##     bone.
+##   * The law-of-cosines hip angle is only the right rotation when the leg is
+##     already straight; an animated leg needs its current direction swung onto
+##     the wanted one, thigh then shin, each measured after the previous lands.
+##
+## Kept and still useful: the measurement harness (planted drift, solve error,
+## chain lengths, ground clearance — all per side), the hysteresis phase test,
+## and the visual probe that made the two solved items visible.
 
 ## The VRM 1.0 humanoid names, which the importer normalises to (the same
 ## convention `ModelStance` uses for the arms).
@@ -36,6 +52,9 @@ const SIDES: Array[String] = ["Left", "Right"]
 ## without this a foot resting flat on the ground reads as *hovering* by its own
 ## ankle height and never gets planted.
 const ANKLE_HEIGHT: float = 0.085
+## The pelvis bone — the one bone this component is allowed to move for its own
+## reasons (see `_pelvis_prepare`).
+const HIPS_BONE: StringName = &"Hips"
 
 ## How far below the foot a ground ray reaches, and how far above its start it
 ## begins (the foot is often slightly inside the ground on a slope).
@@ -53,11 +72,17 @@ const ANKLE_HEIGHT: float = 0.085
 ## character that stops does not keep correcting a pose the animation owns.
 @export var plant_max_time: float = 0.45
 ## How fast the correction fades in and out (per second) — a hard switch would
-## pop.
-@export var blend_speed: float = 12.0
+## pop. This has to be slower than a stride: at 12/s the weight only reached
+## 0.4 within a stance phase, so the foot was corrected by less than half of
+## what it needed and still slid.
+@export var blend_speed: float = 4.0
 ## Skeletons farther than this from the camera stop per-frame IK, like the
 ## stance's distance gate.
 @export var active_range: float = 45.0
+## Ceiling on how far the pelvis may be pulled down in one frame (m). The real
+## shortfall on this rig is ~0.2 m; the cap is there so a bad frame cannot
+## drop the figure through the floor.
+@export var max_pelvis_drop: float = 0.3
 
 var _skeleton: Skeleton3D = null
 var _model: Node3D = null
@@ -108,8 +133,62 @@ func _process(delta: float) -> void:
 	if not _near_camera():
 		set_process(false)
 		return
+	_pelvis_prepare()
 	for i: int in SIDES.size():
 		_process_foot(i, delta)
+
+
+## Drop the pelvis once per frame by the **worst** shortfall among the feet the
+## IK currently owns, so the two legs cannot compound their compensation.
+##
+## This runs after the locomotion clips — the component is the last child of the
+## model, so its `_process` is last — which matters: it reads the hip the clip
+## just posed and offsets it, rather than accumulating an offset of its own
+## across frames. That is also why the correction is a per-frame recompute and
+## not a stored baseline: the clip owns the hips, this component only leans on
+## them.
+func _pelvis_prepare() -> void:
+	var worst: float = 0.0
+	var direction: Vector3 = Vector3.DOWN
+	for side: int in SIDES.size():
+		if _weight[side] <= 0.001:
+			continue
+		var chain: Dictionary = _chains[side]
+		var upper: int = int(chain.get("upper", -1))
+		var lower: int = int(chain.get("lower", -1))
+		var foot: int = int(chain.get("foot", -1))
+		if upper < 0 or lower < 0 or foot < 0:
+			continue
+		var l1: float = _rest_length(upper, lower)
+		var l2: float = _rest_length(lower, foot)
+		if l1 <= 0.0 or l2 <= 0.0:
+			continue
+		var to_target: Vector3 = _plant_pos[side] - _bone_origin(upper)
+		var gap: float = to_target.length() - (l1 + l2)
+		if gap > worst:
+			worst = gap
+			direction = to_target.normalized()
+	if worst > 0.0:
+		_drop_pelvis(direction, minf(worst, max_pelvis_drop))
+
+
+## Move the hips toward `direction` by `amount`, expressed in the hips' own
+## parent space. Returns the world-space move so a caller can keep solving
+## against the hip's new position.
+func _drop_pelvis(direction: Vector3, amount: float) -> Vector3:
+	var hips: int = _skeleton.find_bone(HIPS_BONE)
+	if hips < 0 or amount <= 0.0:
+		return Vector3.ZERO
+	var parent: int = _skeleton.get_bone_parent(hips)
+	var parent_global: Basis = Basis.IDENTITY
+	if parent >= 0:
+		parent_global = _skeleton.get_bone_global_pose(parent).basis
+	var world_offset: Vector3 = direction * amount
+	var pose := _skeleton.get_bone_pose(hips)
+	_skeleton.set_bone_pose_position(
+		hips, pose.origin + parent_global.inverse() * world_offset)
+	_applied_global[HIPS_BONE] = parent_global * _skeleton.get_bone_pose(hips).basis
+	return world_offset
 
 
 func _near_camera() -> bool:
@@ -187,10 +266,12 @@ func _solve(side: int, target: Vector3, weight: float) -> void:
 	var to_target: Vector3 = target - hip
 	if to_target.length() < 0.001:
 		return
+	# The pelvis has already been dropped this frame (`_pelvis_prepare`), so the
+	# hip here is the compensated one and the goal is back inside the reach.
+	_last_reach[side] = Vector3(l1, l2, to_target.length())
 	# Clamp the goal into the chain's reach so the two swings stay consistent
 	# instead of asking for a length the leg does not have.
 	var reach: float = clampf(to_target.length(), absf(l1 - l2) + 0.001, l1 + l2 - 0.001)
-	_last_reach[side] = Vector3(l1, l2, to_target.length())
 	var goal: Vector3 = hip + to_target.normalized() * reach
 	# The knee folds in a fixed plane so the legs always bend the same way
 	# without the rig's rest axes leaking in. The sign matters and is not
