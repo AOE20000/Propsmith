@@ -22,6 +22,7 @@ var _next_log: float = 0.0
 var _armed: bool = false
 var _sprint_started: bool = false
 var _stopped: bool = false
+var _jumped: bool = false
 var _run_frames: int = 0
 var _worst_hips_jump: float = 0.0
 
@@ -96,11 +97,16 @@ func _process(delta: float) -> void:
 	# Log every frame for the first 3 s (the gear change and the first wraps
 	# are in there), four times a second after that, and *every* frame during
 	# the stop blend — the whole point is its shape over those few frames.
-	if _elapsed <= 3.0 or _elapsed >= _next_log or _clips._blend_active:
+	if _elapsed <= 3.0 or _elapsed >= _next_log or _clips._blend_active \
+			or _clips._air_phase != 0:
 		if _elapsed > 3.0:
 			_next_log = _elapsed + 0.25
 		var gear := "idle"
-		if _clips._blend_active:
+		if _clips._air_phase == 1:
+			gear = "AIRUP"
+		elif _clips._air_phase == 2:
+			gear = "AIRDN"
+		elif _clips._blend_active:
 			gear = "STOP"
 		elif _clips._running:
 			gear = "RUN "
@@ -115,7 +121,14 @@ func _process(delta: float) -> void:
 		Input.action_release(&"move_forward")
 		Input.action_release(&"sprint")
 		print("[walk-probe] --- keys released at t=%.2f, watching the stop ---" % _elapsed)
-	if _elapsed >= 8.0:
+	# A standing jump, to exercise the airborne clips end to end.
+	if _elapsed >= 7.5 and not _jumped:
+		_jumped = true
+		Input.action_press(&"jump")
+		print("[walk-probe] --- jump pressed at t=%.2f ---" % _elapsed)
+	if _jumped and _elapsed >= 7.58:
+		Input.action_release(&"jump")
+	if _elapsed >= 9.5:
 		print("[walk-probe] summary: run_frames=%d worst_hijump=%.4f" % [
 			_run_frames, _worst_hips_jump])
 		get_tree().quit(0)

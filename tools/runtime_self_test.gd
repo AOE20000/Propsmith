@@ -51,7 +51,7 @@ func _ready() -> void:
 	_run_section("map sources and blueprints", 14, _check_map_sources_and_blueprints)
 	_run_section("map catalogue", 23, _check_map_catalog)
 	_run_section("camera and wardrobe wiring", 31, _check_camera_and_wardrobe)
-	_run_section("model clips sampler", 9, _check_model_clips)
+	_run_section("model clips sampler", 12, _check_model_clips)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -1891,6 +1891,8 @@ func _check_model_clips() -> void:
 	# actually switch back to WALK_CLIP — a library without it fails the
 	# switch silently (has_animation is false) and the run clip lingers.
 	lib.add_animation(&"walk", anim)
+	lib.add_animation(&"jump", anim)
+	lib.add_animation(&"fall", anim)
 	var run := Animation.new()
 	run.length = 0.5
 	run.loop_mode = Animation.LOOP_LINEAR
@@ -1961,6 +1963,29 @@ func _check_model_clips() -> void:
 	for i: int in 8:
 		clips._decide_gear(1.0 / 30.0, 0.0)
 	_expect(not clips._blend_active, "the stop blend must finish within its window")
+
+	# Airborne: rising selects the jump action, falling the fall loop, and
+	# landing blends the pose back into the stance. Vertical speed is smoothed
+	# like the horizontal one, so each phase transition is fed for a handful of
+	# ticks rather than a single one.
+	for i: int in 5:
+		clips._decide_gear(1.0 / 30.0, 0.0, 5.0)
+	_expect(
+		clips._air_phase == 1 and clips._current_clip == lib.get_animation(&"jump"),
+		"rising must play the jump clip"
+	)
+	for i: int in 8:
+		clips._decide_gear(1.0 / 30.0, 0.0, -5.0)
+	_expect(
+		clips._air_phase == 2 and clips._current_clip == lib.get_animation(&"fall"),
+		"falling must play the fall clip"
+	)
+	for i: int in 10:
+		clips._decide_gear(1.0 / 30.0, 0.0, 0.0)
+	_expect(
+		clips._air_phase == 0 and clips._blend_active,
+		"landing must blend back into the stance"
+	)
 
 	clips.queue_free()
 	model.queue_free()

@@ -38,6 +38,10 @@ const CLIP_SOURCES: Dictionary = {
 	"walk": "walk",
 	"idle": "idle",
 	"run": "sneak-run-s",
+	# Airborne: `jump` is a 0.21 s action (leap and tuck) played once and held
+	# at its last frame; `fall` is a true loop (first/last keys identical).
+	"jump": "jump",
+	"fall": "fall",
 }
 
 

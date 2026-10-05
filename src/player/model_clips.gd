@@ -40,6 +40,10 @@ const WALK_CLIP: StringName = &"walk"
 ## clip this slot previously held, whose 3.6 m first/last key mismatch snapped
 ## the pose back on every wrap.
 const RUN_CLIP: StringName = &"run"
+## Airborne clips: `jump` is a one-shot action (leap and tuck) held on its last
+## frame; `fall` is a true loop. Both come from the same build as the rest.
+const AIR_UP_CLIP: StringName = &"jump"
+const AIR_DOWN_CLIP: StringName = &"fall"
 ## The ground speed the walk clip was authored for (m/s). Playback speed
 ## divides the measured speed by this, so faster movement plays the cycle
 ## proportionally faster instead of moonwalking at a fixed cadence.
@@ -63,6 +67,17 @@ const RUN_CLIP: StringName = &"run"
 ## when the figure stops. Short enough to feel like deceleration, long enough
 ## that no single frame carries the whole pose change.
 @export var stop_blend: float = 0.18
+## Measured vertical speed (m/s) above which the figure counts as leaping,
+## and below which it counts as falling. The band between them is the apex —
+## with the hold rules in `_decide_gear` a jump does not flicker through
+## "landed" while hanging at the top of its arc. Values are compared against
+## the *smoothed* vertical speed, which reads roughly half a physics-tick
+## alternating signal (see the note in `_decide_gear`).
+@export var rise_threshold: float = 1.5
+@export var fall_threshold: float = -2.0
+## Vertical speed above which a falling figure, already airborne, counts as
+## having landed (the ground swallowed its descent).
+@export var land_threshold: float = -0.5
 ## Library injection for tests and probes: when set, it replaces the resource
 ## at `LIBRARY_PATH` (which needs an import pass a headless test may not run).
 var library_override: AnimationLibrary = null
@@ -88,6 +103,12 @@ var _gear_time: float = 0.0
 var _blend_active: bool = false
 var _blend_t: float = 0.0
 var _blend_from: Dictionary = {}
+## 0 grounded, 1 rising (jump action), 2 falling (fall loop).
+var _air_phase: int = 0
+## Smoothed vertical speed (m/s) — see the note in `_decide_gear`.
+var _v_speed: float = 0.0
+## Whether `_last_position` refers to a real previous tick yet.
+var _position_anchored: bool = false
 var _time: float = 0.0
 var _forced: StringName = &""
 
@@ -108,9 +129,10 @@ func setup(model: Node3D) -> void:
 		_library = load(LIBRARY_PATH) as AnimationLibrary
 	if _library != null:
 		_touched_bones = _collect_bones(_library)
-	# A model attached while its agent is still outside the tree (boot order)
-	# has no meaningful world position yet — the first _process re-anchors.
-	_last_position = model.global_position if model.is_inside_tree() else Vector3.ZERO
+	# The first in-tree tick anchors the speed measurement against a real
+	# previous position (see `_position_anchored`); re-setup starts over.
+	_last_position = Vector3.ZERO
+	_position_anchored = false
 
 
 ## The union of every bone the locomotion clips touch — the set that must be
@@ -148,19 +170,55 @@ func _process(delta: float) -> void:
 			_time = fmod(_time + delta, forced_clip.length)
 			_apply_sampled_pose(forced_clip, _time)
 		return
+	# The first tick after `setup` has no meaningful previous position — the
+	# model may have been assembled outside the tree, or simply be somewhere
+	# else by the time it enters one. Measuring against the zero vector would
+	# read as a huge leap (and briefly select the jump clip); anchor instead.
+	if not _position_anchored:
+		_position_anchored = true
+		_last_position = _model.global_position
+		return
 	var displacement := _model.global_position - _last_position
 	_last_position = _model.global_position
+	# Vertical speed is sampled before the horizontal part is flattened: it is
+	# all this component needs to know about the physics body's airborne state,
+	# which keeps it usable by any figure (players, citizens, probes) without
+	# reaching into whoever is moving them.
+	var vertical_speed := displacement.y / maxf(delta, 1e-4)
 	displacement.y = 0.0
 	var speed := displacement.length() / maxf(delta, 1e-4)
-	_decide_gear(delta, speed)
+	_decide_gear(delta, speed, vertical_speed)
 
 
 ## The whole locomotion brain, as a pure function of measured speed — walking
-## state machine, gear hysteresis, clip time and pose sampling in one place.
-## Isolated from `_process` so tests can drive it with exact speeds instead of
-## fighting the engine's own ticks over the same accumulator.
-func _decide_gear(delta: float, measured_speed: float) -> void:
+## state machine, airborne state machine, gear hysteresis, clip time and pose
+## sampling in one place. Isolated from `_process` so tests can drive it with
+## exact speeds instead of fighting the engine's own ticks over the same
+## accumulator.
+##
+## `vertical_speed` is the measured vertical velocity in m/s; the airborne
+## decision uses it in preference to asking the physics body, so a citizen
+## animated by the same component behaves identically without wiring.
+func _decide_gear(
+	delta: float, measured_speed: float, vertical_speed: float = 0.0
+) -> void:
 	_speed = lerpf(_speed, measured_speed, minf(1.0, delta * speed_lerp))
+	# The vertical reading gets the same smoothing as the horizontal one, and
+	# for a sharper reason: between two physics ticks a falling body reports
+	# zero displacement, so raw per-frame vertical speed alternates between
+	# 0 and the full descent — enough to flicker the airborne state between
+	# falling and landed every other frame.
+	_v_speed = lerpf(_v_speed, vertical_speed, minf(1.0, delta * speed_lerp))
+
+	# --- Airborne takes over completely: movement clips are for the ground ---
+	var air_phase := _resolve_air_phase(_v_speed)
+	if air_phase != 0:
+		_enter_air(delta, air_phase)
+		return
+	if _air_phase != 0:
+		_leave_air()
+		return
+
 	var walking := _speed > walk_threshold
 	if walking and not _walking:
 		# Walking again cancels any stop blend in progress: the pose continues
@@ -200,6 +258,53 @@ func _decide_gear(delta: float, measured_speed: float) -> void:
 		_running = false
 	elif not walking and not _walking:
 		_advance_stop_blend(delta)
+
+
+## Airborne phase from measured vertical speed, with hold rules so the apex
+## does not read as a landing: while rising, any speed down to the fall
+## threshold keeps "rising" (a jump hangs at the top); while falling, only a
+## grounding speed — the descent absorbed by the floor — ends it.
+func _resolve_air_phase(vertical_speed: float) -> int:
+	if vertical_speed > rise_threshold:
+		return 1
+	if vertical_speed < fall_threshold:
+		return 2
+	if _air_phase == 1 and vertical_speed > fall_threshold:
+		return 1
+	if _air_phase == 2 and vertical_speed < land_threshold:
+		return 2
+	return 0
+
+
+## Airborne: cancel any ground transition and switch/advance the air clip.
+## Rising plays the jump action once and holds its last frame (the tuck);
+## falling loops the fall cycle.
+func _enter_air(delta: float, phase: int) -> void:
+	_blend_active = false
+	_walking = false
+	_running = false
+	if _air_phase != phase:
+		_air_phase = phase
+		_start_clip(AIR_UP_CLIP if phase == 1 else AIR_DOWN_CLIP)
+	_advance_air_pose(delta)
+
+
+func _advance_air_pose(delta: float) -> void:
+	if _current_clip == null:
+		return
+	if _air_phase == 1:
+		# One-shot: advance then hold the final frame.
+		_time = minf(_time + delta, _current_clip.length)
+	else:
+		_time = fmod(_time + delta, _current_clip.length)
+	_apply_sampled_pose(_current_clip, _time)
+
+
+## Landing: blend whatever the fall left on the bones into the standing stance
+## — the same transition the stop uses, which is exactly the right shape here.
+func _leave_air() -> void:
+	_air_phase = 0
+	_begin_stop_blend()
 
 
 ## Snapshot the moving pose and start blending it into the standing stance.
