@@ -54,6 +54,7 @@ func _ready() -> void:
 	_run_section("model clips sampler", 16, _check_model_clips)
 	_run_section("guided tour", 10, _check_demo_tour)
 	_run_section("tool wheel", 3, _check_tool_wheel)
+	_run_section("foot IK", 3, _check_foot_ik)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -2216,4 +2217,19 @@ func _check_tool_wheel() -> void:
 	_expect(
 		ToolWheel.index_for_offset(Vector2(0.0, 12.0), 4) == -1,
 		"the centre must be a dead zone"
+	)
+
+
+## The two-bone solve behind the foot IK: a straight leg bends nothing, a folded
+## one bends a lot, and a target past full reach is clamped rather than flipping
+## the knee.
+func _check_foot_ik() -> void:
+	var straight: Vector2 = ModelFootIK.two_bone_angles(1.0, 1.0, 1.9999)
+	_expect(straight.y < 0.05, "a straight leg must not bend the knee")
+	var folded: Vector2 = ModelFootIK.two_bone_angles(1.0, 1.0, 1.0)
+	_expect(folded.y > 1.5, "a folded leg must bend the knee")
+	var beyond: Vector2 = ModelFootIK.two_bone_angles(1.0, 1.0, 9.0)
+	_expect(
+		beyond.y < 0.05 and not is_nan(beyond.x),
+		"an unreachable target must clamp, never flip"
 	)
