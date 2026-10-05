@@ -56,6 +56,7 @@ func _ready() -> void:
 	_run_section("tool wheel", 3, _check_tool_wheel)
 	_run_section("foot IK", 3, _check_foot_ik)
 	_run_section("foot IK aim arithmetic", 3, _check_aim_arithmetic)
+	_run_section("spring bones", 8, _check_spring_bones)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -2284,3 +2285,79 @@ func _check_aim_arithmetic() -> void:
 	ik._aim(child, axis, angle, 0.0)
 	after = skel.get_bone_global_pose(child).basis
 	_expect(after.is_equal_approx(before), "a zero weight must leave the pose alone")
+
+
+## The spring-bone chains: collection, rest behaviour, gravity response, the
+## follow-through lag, convergence, and the angle clamp. The rig's chain runs
+## straight up (+y) with one bone per meter, so expected world positions are
+## hand-computable; the sideways-gravity case tilts the *rig node* to prove
+## the chain anchor is read through a rotated parent — the same frame the
+## foot IK got wrong by caching it.
+func _check_spring_bones() -> void:
+	var rig := Node3D.new()
+	rig.name = "SpringRig"
+	add_child(rig)
+	var skel := Skeleton3D.new()
+	rig.add_child(skel)
+	var trunk: int = skel.add_bone("trunk")
+	skel.set_bone_rest(trunk, Transform3D(Basis(), Vector3.ZERO))
+	var a: int = skel.add_bone("spring_a")
+	skel.set_bone_parent(a, trunk)
+	skel.set_bone_rest(a, Transform3D(Basis(), Vector3(0.0, 1.0, 0.0)))
+	var b: int = skel.add_bone("spring_b")
+	skel.set_bone_parent(b, a)
+	skel.set_bone_rest(b, Transform3D(Basis(), Vector3(0.0, 1.0, 0.0)))
+	var c: int = skel.add_bone("spring_c")
+	skel.set_bone_parent(c, b)
+	skel.set_bone_rest(c, Transform3D(Basis(), Vector3(0.0, 1.0, 0.0)))
+	skel.reset_bone_poses()
+	var spring := ModelSpringBones.new()
+	spring.root_bones = PackedStringArray(["spring_a"])
+	spring.gravity_power = 0.0
+	spring.setup(rig)
+	spring.set_process(false)
+	_expect(spring._joints.size() == 3
+		and skel.get_bone_name(spring._joints[0].bone) == "spring_a",
+		"the chain collects the root and every descendant in order")
+	_expect(spring._joints[-1].rest_length > 0.9,
+		"a leaf joint extrapolates its tail from the parent-to-bone direction")
+	# Zero gravity, no motion: the points sit exactly on the rest tails.
+	spring.reset_points()
+	spring.advance(1.0 / 60.0)
+	var tip: ModelSpringBones.Joint = spring._joints[-1]
+	_expect(tip.point.distance_to(Vector3(0.0, 4.0, 0.0)) < 0.0001,
+		"at rest with no gravity the tail holds its rest position")
+	# Gravity is radial for an up-running chain, so tilt the rig: now gravity
+	# has a tangential component and the tail must sag below its rest height.
+	rig.rotation.x = PI / 2.0
+	spring.gravity_power = 2.0
+	spring.reset_points()
+	for i: int in 120:
+		spring.advance(1.0 / 60.0)
+	_expect(tip.point.y < -0.02,
+		"a chain laid sideways to gravity sags below its rest height")
+	# Back to the plain rig for the motion tests.
+	rig.rotation = Vector3.ZERO
+	spring.gravity_power = 0.0
+	spring.reset_points()
+	rig.position.z += 1.0
+	spring.advance(1.0 / 60.0)
+	var lag: float = tip.point.distance_to(Vector3(0.0, 4.0, 1.0))
+	_expect(lag > 0.3,
+		"a one-meter step leaves the tail visibly behind (lag=%.2f)" % lag)
+	for i: int in 120:
+		spring.advance(1.0 / 60.0)
+	_expect(tip.point.distance_to(Vector3(0.0, 4.0, 1.0)) < 0.01,
+		"the tail converges onto its rest position after the figure stops")
+	# A teleport must hit the angle clamp and stop there — not fold through.
+	# Measured on the FIRST chain bone: its aim depends on its own clamp
+	# alone, because its parent sits outside the chain and carries no spring
+	# rotation; the tip would inherit every ancestor's swing (whip effect).
+	rig.position.z += 10.0
+	spring.advance(1.0 / 60.0)
+	var angle: float = (skel.get_bone_pose_rotation(a) * Vector3(0.0, 1.0, 0.0)) \
+		.angle_to(Vector3(0.0, 1.0, 0.0))
+	_expect(angle <= deg_to_rad(spring.max_degrees) + 0.01,
+		"the teleport swing stops at the clamp")
+	_expect(angle > deg_to_rad(spring.max_degrees - 5.0),
+		"the clamp actually did work (angle=%.1f deg)" % rad_to_deg(angle))

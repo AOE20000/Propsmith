@@ -32,16 +32,29 @@ const STANCE_IGNORED_BONES: PackedStringArray = ["eye"]
 
 
 ## Attach the full stack in the canonical order (stance → shape keys →
-## locomotion clips → head aim → lean). Order matters for tree position, which
-## decides per-frame write order: `ModelHeadAim` composes on the head's pose and
-## `ModelLean` on the chest's, so both must run *after* whoever wrote those
-## poses (the clips, or the stance).
+## locomotion clips → head aim → lean → spring bones). Order matters for tree
+## position, which decides per-frame write order: `ModelHeadAim` composes on
+## the head's pose and `ModelLean` on the chest's, so both must run *after*
+## whoever wrote those poses (the clips, or the stance). `ModelSpringBones`
+## reads the head's finished global pose as its chain anchor, so it goes last.
 static func attach_all(model: Node3D) -> void:
 	attach_stance_if_unanimated(model)
 	attach_blend_shapes(model)
 	attach_locomotion(model)
 	attach_head_aim(model)
 	attach_lean(model)
+	attach_spring_bones(model)
+
+
+## Sway chains (the ahoge, later hair/skirt runs the model may grow): one
+## Verlet point per joint, simulated last so it anchors on the pose the
+## components above it just wrote. A model without the configured chain bones
+## stays exactly as it was.
+static func attach_spring_bones(model: Node3D) -> void:
+	var component := ModelSpringBones.new()
+	component.name = "SpringBones"
+	model.add_child(component)
+	component.setup(model)
 
 
 ## Speed-and-steering lean, composed on the chest pose the clips just wrote.
