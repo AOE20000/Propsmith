@@ -118,6 +118,18 @@ func _ready() -> void:
 	DecisionLog.register_applier(STEP_KIND, _apply_step)
 	DecisionLog.register_applier(MODE_KIND, _apply_mode)
 	_connect_sources()
+	# The tour owns its own face (the same pattern as photo mode): a card, a
+	# badge and the one-time start choice, on their own layer.
+	var hud := TourHUD.new()
+	hud.name = "TourHUD"
+	hud.bind(self)
+	add_child(hud)
+
+
+## Whether a player exists yet — the start choice waits for one, and the poll
+## needs one.
+func has_player() -> bool:
+	return _player != null
 
 
 func _connect_sources() -> void:
@@ -193,16 +205,15 @@ func set_mode(new_mode: Mode) -> void:
 	mode_changed.emit(new_mode)
 
 
-## Decide on first spawn: a save that already carries progress (or an explicit
-## choice) goes straight to sandbox; a fresh world starts in tour mode.
+## Decide on first spawn. A save that already carries progress is a returning
+## player: straight to the sandbox rhythm, no card. A fresh world *stays*
+## UNSET — the HUD's start card asks, and the player's answer (Enter to follow
+## the tour, Esc to build) is what records a mode.
 func _resolve_initial_mode() -> void:
 	if mode != Mode.UNSET:
 		return
 	if not _satisfied.is_empty():
 		set_mode(Mode.SANDBOX)
-	else:
-		mode = Mode.TOUR
-		mode_changed.emit(mode)
 
 
 static func mode_to_string(value: int) -> String:
@@ -238,7 +249,9 @@ func active_stop() -> TourStop:
 # --- Judging --------------------------------------------------------------
 
 func _process(delta: float) -> void:
-	if _player == null or _stops.is_empty():
+	# UNSET means the start card is still open: nothing is judged until the
+	# player has answered it.
+	if _player == null or _stops.is_empty() or mode == Mode.UNSET:
 		return
 	_poll_timer -= delta
 	if _poll_timer > 0.0:

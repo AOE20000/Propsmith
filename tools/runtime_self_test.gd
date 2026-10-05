@@ -2160,10 +2160,12 @@ func _check_demo_tour() -> void:
 		"nothing is complete before it is demonstrated"
 	)
 	# A player is needed for the poll to run; an empty Node3D is enough (only
-	# the null check and, for arrival stops, a position are used).
+	# the null check and, for arrival stops, a position are used). The mode
+	# must be settled too: nothing is judged while the start card is open.
 	var dummy := Node3D.new()
 	add_child(dummy)
 	tour._player = dummy
+	tour.set_mode(DemoTour.Mode.TOUR)
 	tour._poll_timer = 0.0
 	tour._process(0.01)
 	_expect(tour.is_completed(&"alpha"), "an arrival stop must light on the poll")

@@ -23,6 +23,7 @@ var _armed: bool = false
 var _sprint_started: bool = false
 var _stopped: bool = false
 var _jumped: bool = false
+var _shot_taken: bool = false
 var _run_frames: int = 0
 var _worst_hips_jump: float = 0.0
 
@@ -132,3 +133,9 @@ func _process(delta: float) -> void:
 		print("[walk-probe] summary: run_frames=%d worst_hijump=%.4f" % [
 			_run_frames, _worst_hips_jump])
 		get_tree().quit(0)
+	# One startup frame: the tour's first-run choice card should be in it.
+	if not _shot_taken and _elapsed > 0.15:
+		_shot_taken = true
+		var shot := get_viewport().get_texture().get_image()
+		DirAccess.make_dir_recursive_absolute("data/screenshots")
+		shot.save_png("data/screenshots/tour_choice.png")
