@@ -32,6 +32,11 @@ var _local_b: Vector3 = Vector3.ZERO
 ## Ends are stored as body-local offsets, so the rope tracks props that move,
 ## spin, or get frozen mid-air.
 func bind_ends(a: Node3D, local_a: Vector3, b: Node3D, local_b: Vector3) -> void:
+	# The bar's transform is written by hand every rendered frame
+	# (`_update_bar`), so the engine's physics interpolation must not also
+	# interpolate it — the two writers fight and the rope visibly jitters
+	# between its ends.
+	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	_a = a
 	_local_a = local_a
 	_b = b

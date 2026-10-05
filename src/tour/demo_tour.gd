@@ -58,7 +58,7 @@ const BUILT_IN: Dictionary = {
 	},
 	&"props": {
 		"name": "道具场",
-		"hint": "Q 打开生成菜单放置一个箱子。鼠标左键抓取，F 冻结。",
+		"hint": "Q 打开生成菜单放置一个箱子。鼠标左键抓取，右键冻结或解冻。",
 		"requirement": "生成并冻结各一次",
 	},
 	&"workshop": {

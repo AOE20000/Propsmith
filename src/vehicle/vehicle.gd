@@ -24,10 +24,18 @@ class_name Vehicle
 ## Force applied at the wheels at full throttle. Named `max_`-something because
 ## `VehicleBody3D.engine_force` is the *applied* value and is written every physics
 ## step — keeping one name for both is how a drivetrain ends up self-multiplying
-## itself down to zero. The prototype used 1000.0 for a much lighter chassis; this
-## is tuned against `mass` in `VehicleScene`.
-@export var max_engine_force: float = 2400.0
-@export var reverse_force: float = 900.0
+## itself down to zero.
+##
+## Tuned against `mass` (1100 in `VehicleScene`): 7000 gives roughly 6 m/s², so
+## reaching the 26 m/s cap takes a few seconds. The previous 2400 was a 2 m/s²
+## crawl — "the car is far too slow" in play.
+##
+## The sign is negated where it is applied: measured on this build, a positive
+## `engine_force` drives the body along its local **+Z**, i.e. backwards for a
+## model whose nose is on -Z (the third-party reports of the same behaviour are
+## what the `-throttle` below answers).
+@export var max_engine_force: float = 7000.0
+@export var reverse_force: float = 2600.0
 @export var brake_force: float = 90.0
 ## Above this forward speed the throttle is cut, which is what stops the car
 ## accelerating forever on a downhill.
@@ -167,7 +175,7 @@ func _drive(delta: float) -> void:
 			engine_force = 0.0
 			brake = brake_force * throttle
 		elif forward_speed < max_speed:
-			engine_force = throttle * max_engine_force
+			engine_force = -throttle * max_engine_force
 			brake = 0.0
 		else:
 			engine_force = 0.0
@@ -177,7 +185,7 @@ func _drive(delta: float) -> void:
 			engine_force = 0.0
 			brake = brake_force * -throttle
 		elif forward_speed > -max_speed * 0.45:
-			engine_force = throttle * reverse_force
+			engine_force = -throttle * reverse_force
 			brake = 0.0
 		else:
 			engine_force = 0.0
