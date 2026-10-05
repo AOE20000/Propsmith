@@ -119,6 +119,9 @@ var _last_reach: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 ## can be taken back before recomputing). Both are world vectors.
 var _pelvis_current: Vector3 = Vector3.ZERO
 var _pelvis_applied: Vector3 = Vector3.ZERO
+## (thigh angle, shin angle) the last solve asked for, and the goal it aimed at.
+var _last_angles: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]
+var _last_goal: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 ## bone name -> the global basis this component last wrote, for the chain solve.
 var _applied_global: Dictionary = {}
 
@@ -149,6 +152,14 @@ func _process(delta: float) -> void:
 	if not _near_camera():
 		set_process(false)
 		return
+	# The parent-basis cache is **per frame**. Within one frame the chain needs
+	# it — the shin's solve reads the thigh this same frame just placed — but
+	# across frames it is a lie: the hips are re-posed by the locomotion clip
+	# every tick, so a remembered hip rotation is last frame's, and every
+	# correction computed against it lands in the wrong direction. That is what
+	# the single-bone unit test cannot see (it clears the cache) and what the
+	# end-to-end numbers show as 10-30 cm of error and a 0.87 m lurch.
+	_applied_global.clear()
 	_pelvis_prepare(delta)
 	for i: int in SIDES.size():
 		_process_foot(i, delta)
@@ -331,12 +342,16 @@ func _solve(side: int, target: Vector3, weight: float) -> void:
 	if absf(bend_normal.dot(to_target.normalized())) > 0.99:
 		bend_normal = _model.global_transform.basis.z.normalized()
 	var thigh_dir: Vector3 = (_bone_origin(lower) - hip).normalized()
-	_aim(upper, bend_normal,
-		thigh_dir.signed_angle_to((goal - hip).normalized(), bend_normal), weight)
+	var thigh_angle: float = thigh_dir.signed_angle_to(
+		(goal - hip).normalized(), bend_normal)
+	_aim(upper, bend_normal, thigh_angle, weight)
 	var knee_after: Vector3 = _bone_origin(lower)
 	var shin_dir: Vector3 = (_bone_origin(foot) - knee_after).normalized()
-	_aim(lower, bend_normal,
-		shin_dir.signed_angle_to((goal - knee_after).normalized(), bend_normal), weight)
+	var shin_angle: float = shin_dir.signed_angle_to(
+		(goal - knee_after).normalized(), bend_normal)
+	_aim(lower, bend_normal, shin_angle, weight)
+	_last_angles[side] = Vector2(thigh_angle, shin_angle)
+	_last_goal[side] = goal
 
 
 ## Rotate one bone by `angle` about `axis`, blended in by `weight`, using the
@@ -436,6 +451,17 @@ func last_reach(side: int) -> Vector3:
 ## jitters, whatever the feet are doing.
 func pelvis_offset() -> Vector3:
 	return _pelvis_current
+
+
+## The angles the last solve asked for — a near-zero pair means the goal is
+## already where the leg is, i.e. nothing to correct, which is a different
+## problem from a correction that fails to apply.
+func last_angles(side: int) -> Vector2:
+	return _last_angles[side] if side >= 0 and side < _last_angles.size() else Vector2.ZERO
+
+
+func last_goal(side: int) -> Vector3:
+	return _last_goal[side] if side >= 0 and side < _last_goal.size() else Vector3.ZERO
 
 
 ## Diagnostics for the walk probe: how high the foot sits over the ground, and

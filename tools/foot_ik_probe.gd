@@ -105,6 +105,9 @@ func _process(delta: float) -> void:
 		print("[foot-ik-probe] shot=%d ik=%s planted=%s w=%.2f err=%.3f" % [
 			_shots, ik_on, _foot_ik.is_planted(0), _foot_ik.foot_weight(0),
 			_foot_ik.ik_error(0)])
+		var angles: Vector2 = _foot_ik.last_angles(0)
+		print("[foot-ik-probe]   angles thigh=%.3f shin=%.3f goal=%s ankle=%s" % [
+			angles.x, angles.y, _foot_ik.last_goal(0), _foot_ik.foot_world_pos(0)])
 		var chain: Vector3 = _foot_ik.last_reach(0)
 		print("[foot-ik-probe]   chain thigh=%.3f shin=%.3f goal=%.3f (sum=%.3f)" % [
 			chain.x, chain.y, chain.z, chain.x + chain.y])

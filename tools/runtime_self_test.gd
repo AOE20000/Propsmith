@@ -55,6 +55,7 @@ func _ready() -> void:
 	_run_section("guided tour", 10, _check_demo_tour)
 	_run_section("tool wheel", 3, _check_tool_wheel)
 	_run_section("foot IK", 3, _check_foot_ik)
+	_run_section("foot IK aim arithmetic", 3, _check_aim_arithmetic)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -2233,3 +2234,53 @@ func _check_foot_ik() -> void:
 		beyond.y < 0.05 and not is_nan(beyond.x),
 		"an unreachable target must clamp, never flip"
 	)
+
+
+## `_aim`'s pose arithmetic, tested on a single bone — the smallest question
+## that can be wrong. Write a known rotation, read the global basis back, and
+## compare: `pose = parent_global⁻¹ · correction · current` must produce
+## `correction · current` in world space. Every end-to-end number so far
+## (10-30 cm of error, an 0.87 m single-frame lurch) is consistent with this
+## one line being wrong, and nothing here needs a world, a clip or a camera.
+func _check_aim_arithmetic() -> void:
+	var skel := Skeleton3D.new()
+	skel.name = "AimProbeSkeleton"
+	add_child(skel)
+	var root: int = skel.add_bone("root")
+	var child: int = skel.add_bone("child")
+	skel.set_bone_parent(child, root)
+	# The parent carries a rotation on purpose. The real chain's parent is the
+	# pelvis, which both the clips and this component move every frame; an
+	# identity parent would let a wrong parent-space conversion sail through.
+	skel.set_bone_rest(root, Transform3D(
+		Basis(Quaternion(Vector3.UP, 1.1)), Vector3.ZERO))
+	skel.set_bone_rest(child, Transform3D(Basis(), Vector3(0.0, 1.0, 0.0)))
+	skel.reset_bone_poses()
+	var ik := ModelFootIK.new()
+	add_child(ik)
+	ik._skeleton = skel
+	var axis := Vector3(0.0, 1.0, 0.0)
+	var angle := 0.7
+	var before: Basis = skel.get_bone_global_pose(child).basis
+	ik._aim(child, axis, angle, 1.0)
+	var after: Basis = skel.get_bone_global_pose(child).basis
+	var expected: Basis = Basis(Quaternion(axis, angle)) * before
+	_expect(
+		after.is_equal_approx(expected),
+		"_aim must apply a world-space rotation to the bone's global basis"
+	)
+	# Half weight must land halfway, or the fade-in is not a fade.
+	skel.reset_bone_poses()
+	ik._applied_global.clear()
+	before = skel.get_bone_global_pose(child).basis
+	ik._aim(child, axis, angle, 0.5)
+	after = skel.get_bone_global_pose(child).basis
+	var half: Basis = Basis(Quaternion(axis, angle * 0.5)) * before
+	_expect(after.is_equal_approx(half), "a half weight must rotate by half the angle")
+	# Zero weight must be a no-op — the clip keeps the pose.
+	skel.reset_bone_poses()
+	ik._applied_global.clear()
+	before = skel.get_bone_global_pose(child).basis
+	ik._aim(child, axis, angle, 0.0)
+	after = skel.get_bone_global_pose(child).basis
+	_expect(after.is_equal_approx(before), "a zero weight must leave the pose alone")
