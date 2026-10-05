@@ -1962,10 +1962,10 @@ func _check_model_clips() -> void:
 		"sprint speed must select the run clip"
 	)
 	for i: int in 4:
-		clips._decide_gear(1.0 / 30.0, 5.0)  # below the threshold
+		clips._decide_gear(1.0 / 30.0, 2.0)  # below the threshold
 	_expect(clips._running, "the run gear must hold through the hysteresis window")
 	for i: int in 12:
-		clips._decide_gear(1.0 / 30.0, 5.0)
+		clips._decide_gear(1.0 / 30.0, 2.0)
 	var clip_label: String = "walk" if clips._current_clip == lib.get_animation(&"walk") else "other"
 	_expect(
 		not clips._running and clips._current_clip == lib.get_animation(&"walk"),

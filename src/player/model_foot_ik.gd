@@ -47,14 +47,15 @@ class_name ModelFootIK
 ##
 ##   * sprint (run gear, 8.6 m/s): held-pin drift 0.010 m/frame mean —
 ##     12% of body speed, was 78-80%; solve landing error 0.019 m in reach.
-##   * walk (walk gear, 5.2 m/s): held-pin drift 0.013 m/frame — 26% of
-##     body speed, with a persistent ~0.10 m clamp gap. Known limitation:
-##     the walk clip was authored at 1.3 m/s and its playback cap (2.4×)
-##     tops out at 3.12 m/s of cadence, so at 5.2 m/s the clip slides by
-##     design, pins go stale within ~0.1 s, and the release keeps handing
-##     them back. The IK still beats the clip's own 40%-of-body slide; the
-##     clean fix is `ModelClips.run_threshold` (a game-feel call, not this
-##     component's).
+##   * walk (5.2 m/s): held-pin drift 0.013 m/frame — 26% of body speed,
+##     with a persistent ~0.10 m clamp gap. Root cause was the gear choice,
+##     not the IK: the walk clip was authored at 1.3 m/s and its playback
+##     cap (2.4×) tops out at 3.12 m/s of cadence, so at 5.2 m/s the clip
+##     slid by design and pins went stale within ~0.1 s. Fixed 2026-10-05:
+##     `ModelClips.run_threshold` 6.5 → 3.0 (inside the band where both
+##     clips play pace-exact, above the crouch speed), so the walk speed now
+##     rides the run clip at 1.53× with no clip slide at all — the walk
+##     bucket should read as noise. The sprint keeps its small 5% cap.
 ##
 ## Also worth knowing on this rig:
 ##   * Bone length is the distance between adjacent bone origins. The rest

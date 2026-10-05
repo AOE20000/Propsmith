@@ -18,10 +18,11 @@ const RUN_TIME: float = 8.0
 ## while shaders compile, and their huge deltas swamp any jitter measurement.
 const MEASURE_FROM: float = 2.0
 
-## `FOOT_IK_SPRINT=0` walks instead — the IK's design condition (the walk clip
-## keeps the hips near the rest height, so the pins stay reachable; the sprint
-## clip raises them past what the pelvis drop can absorb). Sprint stays the
-## default so the historical runs stay comparable.
+## `FOOT_IK_SPRINT=0` walks instead — the IK's design condition. Since the
+## gear-threshold fix (2026-10-05, `ModelClips.run_threshold` 6.5 → 3.0) the
+## walk speed rides the *run* clip too, pace-exact at 1.53×; the mode stays
+## as the lower-speed working condition of the same gear, and sprint remains
+## the default so the historical runs stay comparable.
 var _sprint: bool = OS.get_environment("FOOT_IK_SPRINT") != "0"
 
 var _player: Node3D = null
