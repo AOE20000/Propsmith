@@ -21,6 +21,7 @@ var _elapsed: float = 0.0
 var _next_log: float = 0.0
 var _armed: bool = false
 var _sprint_started: bool = false
+var _stopped: bool = false
 var _run_frames: int = 0
 var _worst_hips_jump: float = 0.0
 
@@ -93,17 +94,28 @@ func _process(delta: float) -> void:
 		_worst_hips_jump = maxf(_worst_hips_jump, hips_jump)
 
 	# Log every frame for the first 3 s (the gear change and the first wraps
-	# are in there), then four times a second.
-	if _elapsed <= 3.0 or _elapsed >= _next_log:
+	# are in there), four times a second after that, and *every* frame during
+	# the stop blend — the whole point is its shape over those few frames.
+	if _elapsed <= 3.0 or _elapsed >= _next_log or _clips._blend_active:
 		if _elapsed > 3.0:
 			_next_log = _elapsed + 0.25
+		var gear := "idle"
+		if _clips._blend_active:
+			gear = "STOP"
+		elif _clips._running:
+			gear = "RUN "
+		elif _clips._walking:
+			gear = "walk"
 		print("[walk-probe] t=%.2f %s dpos=%.4f drend=%.4f hijump=%.4f pv=%.2f rig=%.3f step=%.4f" % [
-			_elapsed, "RUN " if _clips._running else "walk",
+			_elapsed, gear,
 			delta_pos, render_delta, hips_jump, _player.velocity.length(),
 			rig_dist, pose_step])
-	if _elapsed >= 6.0:
-		print("[walk-probe] summary: run_frames=%d worst_hijump=%.4f" % [
-			_run_frames, _worst_hips_jump])
+	if _elapsed >= 6.0 and not _stopped:
+		_stopped = true
 		Input.action_release(&"move_forward")
 		Input.action_release(&"sprint")
+		print("[walk-probe] --- keys released at t=%.2f, watching the stop ---" % _elapsed)
+	if _elapsed >= 8.0:
+		print("[walk-probe] summary: run_frames=%d worst_hijump=%.4f" % [
+			_run_frames, _worst_hips_jump])
 		get_tree().quit(0)

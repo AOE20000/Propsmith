@@ -51,7 +51,7 @@ func _ready() -> void:
 	_run_section("map sources and blueprints", 14, _check_map_sources_and_blueprints)
 	_run_section("map catalogue", 23, _check_map_catalog)
 	_run_section("camera and wardrobe wiring", 31, _check_camera_and_wardrobe)
-	_run_section("model clips sampler", 7, _check_model_clips)
+	_run_section("model clips sampler", 9, _check_model_clips)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
 	_run_section("map decor and look presets", 35, _check_decor_and_presets)
@@ -1947,6 +1947,20 @@ func _check_model_clips() -> void:
 			clips._running, clip_label, clips._speed, clips._gear_time,
 		]
 	)
+
+	# Stop transition: releasing the keys must blend the pose into the stance
+	# over several frames — the old exit snapped every bone to rest in one
+	# frame, which reads as brakes slamming. Feed zero until the walk state
+	# releases (the blend window itself is shorter than that deceleration, so
+	# a fixed frame count would race it).
+	for i: int in 60:
+		if not clips._walking:
+			break
+		clips._decide_gear(1.0 / 30.0, 0.0)
+	_expect(clips._blend_active, "stopping must begin a pose blend, not a snap")
+	for i: int in 8:
+		clips._decide_gear(1.0 / 30.0, 0.0)
+	_expect(not clips._blend_active, "the stop blend must finish within its window")
 
 	clips.queue_free()
 	model.queue_free()

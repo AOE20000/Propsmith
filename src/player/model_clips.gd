@@ -59,6 +59,10 @@ const RUN_CLIP: StringName = &"run"
 @export var walk_threshold: float = 0.25
 ## How quickly playback speed follows measured speed (per second).
 @export var speed_lerp: float = 6.0
+## Seconds for the pose to blend from the moving clip into the standing stance
+## when the figure stops. Short enough to feel like deceleration, long enough
+## that no single frame carries the whole pose change.
+@export var stop_blend: float = 0.18
 ## Library injection for tests and probes: when set, it replaces the resource
 ## at `LIBRARY_PATH` (which needs an import pass a headless test may not run).
 var library_override: AnimationLibrary = null
@@ -79,6 +83,11 @@ var _walking: bool = false
 var _running: bool = false
 ## Seconds the current gear has held — the hysteresis budget for switching.
 var _gear_time: float = 0.0
+## Stop-transition state: the snapshot the pose blends from, its elapsed time,
+## and whether a blend is in progress.
+var _blend_active: bool = false
+var _blend_t: float = 0.0
+var _blend_from: Dictionary = {}
 var _time: float = 0.0
 var _forced: StringName = &""
 
@@ -154,6 +163,10 @@ func _decide_gear(delta: float, measured_speed: float) -> void:
 	_speed = lerpf(_speed, measured_speed, minf(1.0, delta * speed_lerp))
 	var walking := _speed > walk_threshold
 	if walking and not _walking:
+		# Walking again cancels any stop blend in progress: the pose continues
+		# from wherever the blend had reached, which is exactly what a human
+		# does when they change their mind mid-deceleration.
+		_blend_active = false
 		_start_clip(WALK_CLIP)
 		_walking = true
 		_running = false
@@ -182,9 +195,83 @@ func _decide_gear(delta: float, measured_speed: float) -> void:
 		)
 		_apply_sampled_pose(_current_clip, _time)
 	elif not walking and _walking:
-		_stop_clip()
+		_begin_stop_blend()
 		_walking = false
 		_running = false
+	elif not walking and not _walking:
+		_advance_stop_blend(delta)
+
+
+## Snapshot the moving pose and start blending it into the standing stance.
+##
+## The old exit was `_stop_clip()`: every touched bone snapped to rest inside
+## one frame — from a full stride to a statue, the "brakes slam" look. The
+## snapshot is the clip's last pose; the blend target is rest put through the
+## stance's arm aims, recomputed each blended frame by `_write_stand_target`.
+##
+## The stance's own processing stays muted for the duration (its breathing
+## writes would fight the blend); it is handed the pose back when the blend
+## finishes.
+func _begin_stop_blend() -> void:
+	if _skeleton == null or _touched_bones.is_empty():
+		_stop_clip()
+		return
+	_blend_from.clear()
+	for bone_name: String in _touched_bones:
+		var index := _skeleton.find_bone(bone_name)
+		if index < 0:
+			continue
+		_blend_from[bone_name] = {
+			"rot": _skeleton.get_bone_pose_rotation(index),
+			"pos": _skeleton.get_bone_pose_position(index),
+			"scale": _skeleton.get_bone_pose_scale(index),
+		}
+	_blend_active = true
+	_blend_t = 0.0
+	_current_clip = null
+
+
+## One blended frame of the stop transition: write the standing target, then
+## slerp every touched bone from the snapshot toward it. Smoothstep weight so
+## both the start and the end of the deceleration ease — a linear ramp reads
+## as a mechanical snap at the endpoints.
+func _advance_stop_blend(delta: float) -> void:
+	if not _blend_active:
+		return
+	_blend_t += delta
+	var weight := clampf(_blend_t / stop_blend, 0.0, 1.0)
+	var eased := weight * weight * (3.0 - 2.0 * weight)
+	_write_stand_target()
+	for bone_name: String in _touched_bones:
+		var index := _skeleton.find_bone(bone_name)
+		if index < 0 or not _blend_from.has(bone_name):
+			continue
+		var from: Dictionary = _blend_from[bone_name]
+		_skeleton.set_bone_pose_rotation(index, (from["rot"] as Quaternion).slerp(
+			_skeleton.get_bone_pose_rotation(index), eased))
+		_skeleton.set_bone_pose_position(index, (from["pos"] as Vector3).lerp(
+			_skeleton.get_bone_pose_position(index), eased))
+		_skeleton.set_bone_pose_scale(index, (from["scale"] as Vector3).lerp(
+			_skeleton.get_bone_pose_scale(index), eased))
+	if weight >= 1.0:
+		_blend_active = false
+		if _stance != null:
+			_stance.set_process(true)
+
+
+## The blend's target: rest for every touched bone, then the stance's arm aims
+## written over it. Idempotent, so calling it once per blended frame is safe.
+func _write_stand_target() -> void:
+	for bone_name: String in _touched_bones:
+		var index := _skeleton.find_bone(bone_name)
+		if index < 0:
+			continue
+		var rest := _skeleton.get_bone_rest(index)
+		_skeleton.set_bone_pose_rotation(index, rest.basis.get_rotation_quaternion())
+		_skeleton.set_bone_pose_position(index, rest.origin)
+		_skeleton.set_bone_pose_scale(index, rest.basis.get_scale())
+	if _stance != null:
+		_stance.reapply()
 
 
 func _start_clip(clip_name: StringName, keep_phase: bool = false) -> void:
