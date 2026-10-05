@@ -103,6 +103,12 @@ func _grab_or_release() -> void:
 
 
 func _release() -> void:
+	# Drop the grab-time collision exception with whoever is holding it, so the
+	# prop collides with that character again the moment it is let go.
+	if _held != null and is_instance_valid(_held):
+		var player: Node = get_tree().get_first_node_in_group(&"player")
+		if player is PhysicsBody3D:
+			_held.remove_collision_exception_with(player as PhysicsBody3D)
 	if _joint != null and is_instance_valid(_joint):
 		_joint.queue_free()
 	_joint = null
@@ -171,6 +177,15 @@ func _aimed_body() -> RigidBody3D:
 ## ancestor, which only exists once it is added.
 func _attach(target: RigidBody3D) -> void:
 	_held = target
+	# The hold length starts where the prop already is: grabbing a crate across
+	# the yard must not yank it to a fixed four metres — the anchor begins on
+	# the body and only follows the crosshair from there. The wheel still
+	# adjusts it afterwards.
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if camera != null:
+		_hold_distance = clampf(
+			camera.global_position.distance_to(target.global_position),
+			HOLD_DISTANCE_MIN, HOLD_DISTANCE_MAX)
 	_anchor.global_position = _held.global_position
 	_anchor.global_rotation = Vector3.ZERO
 	_joint = Generic6DOFJoint3D.new()
@@ -178,3 +193,9 @@ func _attach(target: RigidBody3D) -> void:
 	add_child(_joint)
 	_joint.node_a = _joint.get_path_to(_anchor)
 	_joint.node_b = _joint.get_path_to(_held)
+	# A held prop must not shove the player it is held by: the beam pulls the
+	# body, and without this the body pushes back through the character
+	# whenever the two get close.
+	var player: Node = get_tree().get_first_node_in_group(&"player")
+	if player is PhysicsBody3D:
+		_held.add_collision_exception_with(player as PhysicsBody3D)
