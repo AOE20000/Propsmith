@@ -62,15 +62,16 @@ class_name ModelFootIK
 ##
 ##   * sprint (run gear, 8.6 m/s): held-pin drift 0.010 m/frame mean —
 ##     12% of body speed, was 78-80%; solve landing error 0.019 m in reach.
-##   * walk (5.2 m/s): held-pin drift 0.013 m/frame — 26% of body speed,
-##     with a persistent ~0.10 m clamp gap. Root cause was the gear choice,
-##     not the IK: the walk clip was authored at 1.3 m/s and its playback
-##     cap (2.4×) tops out at 3.12 m/s of cadence, so at 5.2 m/s the clip
-##     slid by design and pins went stale within ~0.1 s. Fixed 2026-10-05:
-##     `ModelClips.run_threshold` 6.5 → 3.0 (inside the band where both
-##     clips play pace-exact, above the crouch speed), so the walk speed now
-##     rides the run clip at 1.53× with no clip slide at all — the walk
-##     bucket should read as noise. The sprint keeps its small 5% cap.
+##   * walk (5.2 m/s at the time): held-pin drift 0.013 m/frame — 26% of
+##     body speed, with a persistent ~0.10 m clamp gap. Root cause was the
+##     gear choice, not the IK: the walk clip was authored at 1.3 m/s and its
+##     playback cap (2.4×) tops out at 3.12 m/s of cadence, so at 5.2 m/s the
+##     clip slid by design and pins went stale within ~0.1 s. Fixed
+##     2026-10-05 (`ModelClips.run_threshold` 6.5 → 3.0, walk speed on the
+##     run clip) and superseded 2026-10-06: the walk speed itself came down
+##     to 3.0 m/s, so the walk clip plays honest (rate 2.31 — no clip slide,
+##     small strides) and the walk bucket should read as near-zero drift.
+##     The sprint keeps its small 5% cap.
 ##
 ## Also worth knowing on this rig:
 ##   * Bone length is the distance between adjacent bone origins. The rest
@@ -140,10 +141,11 @@ const KNEE_SIGN: float = -1.0
 ## The smoothing is what turns the alternating hit/miss samples of a gliding
 ## body into one monotonic decay the hysteresis can work with.
 @export var still_speed_lerp: float = 8.0
-## Seconds of stillness before the standstill release fires. Long enough to
-## ride out a one-frame speed dip, short enough that a stop does not read as
-## frozen.
-@export var still_delay: float = 0.15
+## Seconds of stillness before the standstill release fires. Short — the
+## latch plus the smoothed speed already ride out one-frame dips, and the
+## release wants to land near the stop blend's own window, not a third of a
+## second after it.
+@export var still_delay: float = 0.08
 ## Seconds the standstill restore takes per leg, from wherever the solve left
 ## it back to the rest pose — the same snapshot-plus-smoothstep the stop
 ## blend uses, because the failure it fixes is the same family: a pose left
@@ -240,6 +242,14 @@ var _planar_speed: float = 0.0
 var _still: bool = false
 var _restore_from: Array[Dictionary] = [{}, {}]
 var _restore_t: Array[float] = [0.0, 0.0]
+## Per side: the leg poses the restore wrote on its previous frame. The stop
+## blend may start writing the legs while a restore is still running (the
+## clip's smoothed speed crosses the walk threshold later than the standstill
+## gate) — without this record the restore would keep easing from its own
+## stale snapshot and yank the recovering legs backwards for a frame. If the
+## recorded poses no longer match what is on the bones, someone else owns the
+## legs and the restore stands down — the same ownership check the hips use.
+var _restore_last: Array[Dictionary] = [{}, {}]
 
 
 ## Bind to a model root. A model without VRM-named leg bones (a capsule, a mod
@@ -575,32 +585,57 @@ func _begin_restore(side: int) -> void:
 
 ## One blended frame of the restore: every chain bone eases from the snapshot
 ## toward its rest pose with the stop blend's smoothstep. Done means clear —
-## the empty dictionary is the "not restoring" flag.
+## the empty dictionary is the "not restoring" flag. Before writing, the
+## ownership check: if the bones no longer hold what the previous frame
+## wrote, the stop blend has taken the legs over and this restore stands
+## down instead of yanking them back to its own (older) trajectory.
 func _advance_restore(side: int, delta: float) -> void:
 	var chain: Dictionary = _chains[side]
+	if not _restore_last[side].is_empty():
+		for key: String in ["upper", "lower", "foot"]:
+			var index: int = int(chain.get(key, -1))
+			if index < 0 or not _restore_last[side].has(key):
+				continue
+			var last: Dictionary = _restore_last[side][key]
+			var moved: bool = not _skeleton.get_bone_pose_rotation(index) \
+				.is_equal_approx(last["rot"]) \
+				or not _skeleton.get_bone_pose_position(index) \
+				.is_equal_approx(last["pos"])
+			if moved:
+				_cancel_restore(side)
+				return
 	_restore_t[side] += delta
 	var weight := clampf(_restore_t[side] / still_restore_time, 0.0, 1.0)
 	var eased := weight * weight * (3.0 - 2.0 * weight)
+	var written: Dictionary = {}
 	for key: String in ["upper", "lower", "foot"]:
 		var index: int = int(chain.get(key, -1))
 		if index < 0 or not _restore_from[side].has(key):
 			continue
 		var rest := _skeleton.get_bone_rest(index)
 		var from: Dictionary = _restore_from[side][key]
-		_skeleton.set_bone_pose_rotation(index, (from["rot"] as Quaternion).slerp(
-			rest.basis.get_rotation_quaternion(), eased))
-		_skeleton.set_bone_pose_position(index, (from["pos"] as Vector3).lerp(
-			rest.origin, eased))
-		_skeleton.set_bone_pose_scale(index, (from["scale"] as Vector3).lerp(
-			rest.basis.get_scale(), eased))
+		var target_rot: Quaternion = (from["rot"] as Quaternion).slerp(
+			rest.basis.get_rotation_quaternion(), eased)
+		var target_pos: Vector3 = (from["pos"] as Vector3).lerp(
+			rest.origin, eased)
+		var target_scale: Vector3 = (from["scale"] as Vector3).lerp(
+			rest.basis.get_scale(), eased)
+		_skeleton.set_bone_pose_rotation(index, target_rot)
+		_skeleton.set_bone_pose_position(index, target_pos)
+		_skeleton.set_bone_pose_scale(index, target_scale)
+		written[key] = {"rot": target_rot, "pos": target_pos,
+			"scale": target_scale}
+	_restore_last[side] = written
 	if weight >= 1.0:
 		_restore_from[side] = {}
 		_restore_t[side] = 0.0
+		_restore_last[side] = {}
 
 
 func _cancel_restore(side: int) -> void:
 	_restore_from[side] = {}
 	_restore_t[side] = 0.0
+	_restore_last[side] = {}
 
 
 ## The two-bone solve: put the foot on `target`, with `weight` deciding how much

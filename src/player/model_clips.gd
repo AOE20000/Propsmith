@@ -60,16 +60,15 @@ const LAND_COOLDOWN: float = 0.25
 ## The same for the run clip. Sprint (8.6 m/s) maps to ~2.5× — the cap below
 ## keeps it inside the clip's believable stride.
 @export var run_authored_speed: float = 3.4
-## Speed above which the figure runs instead of walks (m/s). It must sit in
-## the band where **both** clips play pace-exact — playback rate unclamped:
-## the walk clip is exact up to 1.3 × 2.4 = 3.12 m/s, the run clip from
-## 3.4 × 0.6 = 2.04 m/s — and above the crouch speed (2.4) so a sneaking
-## figure keeps the walk cycle. 3.0 is inside all three bounds. The old 6.5
-## put the walk speed (5.2) on the walk clip, whose clamped cadence tops out
-## at 3.12 m/s — a built-in 40%-of-body slide the foot IK could only soften.
-## Above the threshold the walk speed rides the run clip at 1.53×: no clamp,
-## no slide; the sprint (8.6) keeps its small 5% playback-cap slip.
-@export var run_threshold: float = 3.0
+## Speed above which the figure runs instead of walks (m/s). The walk speed
+## (3.0) stays below it — a walking figure rides the walk clip at 2.31x,
+## honest pacing with small strides — and the sprint (8.6) crosses it. The
+## threshold sits just past the walk clip's honest ceiling (1.3 x 2.4 =
+## 3.12 m/s) so cruise never crosses it; only a sprint deceleration passes
+## through, and the 3.12-3.2 band there slides at most ~3%. The walk clip at
+## the old walk speed (5.2) could not keep up at any believable cadence —
+## that mismatch is what the gear threshold used to paper over.
+@export var run_threshold: float = 3.2
 ## Minimum seconds a walk/run gear holds before the other gear may take over —
 ## the same anti-flicker hysteresis the reference movement system calls
 ## RunToWalkTime: a measured speed hovering near the threshold must not flip

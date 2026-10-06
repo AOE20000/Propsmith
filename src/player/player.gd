@@ -27,7 +27,11 @@ const BODY_RADIUS: float = 0.35
 const EYE_HEIGHT: float = 1.38
 
 @export_group("Movement")
-@export var walk_speed: float = 5.2
+## Tuned to the walk clip's honest pacing: at 3.0 m/s the cycle plays at
+## 2.31x — inside its 2.4x cap, so the feet track the ground with no slide
+## and the stride stays small (see `ModelClips.run_threshold`). Fast travel
+## is what sprint is for.
+@export var walk_speed: float = 3.0
 @export var sprint_speed: float = 8.6
 @export var acceleration: float = 14.0
 @export var deceleration: float = 18.0
