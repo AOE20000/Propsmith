@@ -1,4 +1,4 @@
-extends SkeletonModifier3D
+extends Node
 class_name ModelFootIK
 ## Plants the feet instead of letting the clip slide them.
 ##
@@ -367,7 +367,13 @@ func setup(model: Node3D) -> void:
 	_release_t[1] = 0.0
 	_cancel_restore(0)
 	_cancel_restore(1)
-	active = true
+	solving = true
+	# The locomotion clips are plain nodes at the default priority, and this
+	# component has to land on the pose they just wrote — the leg solve composes
+	# onto those leg bones and the pelvis drop accumulates against those hips.
+	# As a modifier the ordering was the engine's; as a plain node it has to be
+	# stated, or a sibling added later would silently take the pose back.
+	process_priority = 100
 
 
 ## Read the ankle-to-sole distance off this model's geometry.
@@ -521,14 +527,32 @@ func _rest_length_at(side: int, from_segment: String, to_segment: String) -> flo
 	return _rest_length(a, b)
 
 
-## The engine entry point (2026-06 migration): a `SkeletonModifier3D` under the
-## figure's skeleton. The engine runs modifiers after the animation and in
-## child order, so the foot solve lands on the pose the clips wrote this frame
-## without depending on where the component happens to sit in the scene tree —
-## and `influence` is the engine's own blend weight rather than a hand-rolled
-## one. `_update` keeps the per-frame work drivable by the headless tests.
-func _process_modification() -> void:
-	_update(get_process_delta_time())
+## The per-frame entry, as an ordinary node's `_process`.
+##
+## This used to be a `SkeletonModifier3D` and run from `_process_modification`,
+## which was the right call for the *leg* solve: modifiers run after the
+## animation and in child order, so the solve composes onto the pose the clips
+## just wrote without depending on tree position, and `influence` was the
+## engine's own blend weight.
+##
+## It was the wrong call for this component as a whole, and the engine's own
+## design notes say why: the skeleton update "is a deferred call and is
+## performed only once per frame", and once the modification is applied to the
+## skin "the pose is **rolled back** to the temporarily stored pose". Measured:
+## a value written into the hips from `_process_modification` was gone by the
+## next frame, replaced by the locomotion clip's own — while this component's
+## `_hips_written` bookkeeping recorded the write as done. The pelvis drop is a
+## persistent change that has to survive against clips rewriting the hips
+## absolutely every tick, so a rolled-back write is not a rounding error, it is
+## the whole mechanism failing while every number here reports success.
+##
+## So the component is a plain node and the ordering is explicit instead:
+## `process_priority` puts it after the locomotion clips (which are plain nodes
+## too, at the default priority) so the solve lands on the pose they just wrote,
+## and the write persists. `_update` keeps the per-frame work drivable by the
+## headless tests, which call it directly.
+func _process(delta: float) -> void:
+	_update(delta)
 
 
 func _update(delta: float) -> void:
@@ -544,7 +568,7 @@ func _update(delta: float) -> void:
 		_sole_attempts += 1
 		_measure_sole_drop()
 	if not _near_camera():
-		active = false
+		solving = false
 		return
 	# The parent-basis cache is **per frame**. Within one frame the chain needs
 	# it — the shin's solve reads the thigh this same frame just placed — but
@@ -1186,6 +1210,12 @@ func _bone_tail(bone: int) -> Vector3:
 ## refused" — the distinction matters when reading a run where the figure
 ## visibly does not sink.
 var _pelvis_applied: float = 0.0
+## Whether the component is currently solving. False when the figure is beyond
+## `active_range`, which is the same cull `ModelStance` applies: a distant
+## citizen keeps walking (the body moves) at zero cost in bone writes.
+## Named `solving` rather than reusing a modifier's `active`, because this is a
+## plain node now and the meaning is its own: "the per-frame work is running".
+var solving: bool = false
 ## Bone-order reports already printed, keyed by the model the skeleton came from.
 ## A figure is assembled from several components that each run this check, and a
 ## crowd runs it once per citizen, so without this the warning repeats per

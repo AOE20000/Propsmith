@@ -277,8 +277,8 @@ func _report() -> void:
 		# Why did the foot IK contribute nothing? Three candidates, and they
 		# have different fixes: no camera in the viewport, the camera too far
 		# (the cull), or the component simply not mounted where expected.
-		print("[twitch-probe] foot IK: active=%s near_camera=%s" % [
-			str(_ik.active), str(_ik._near_camera())
+		print("[twitch-probe] foot IK: solving=%s near_camera=%s" % [
+			str(_ik.solving), str(_ik._near_camera())
 		])
 		var cam := _skel.get_viewport().get_camera_3d() as Camera3D
 		print("[twitch-probe] camera: %s" % (

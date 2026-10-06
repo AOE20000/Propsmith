@@ -140,13 +140,36 @@ static func attach_locomotion(model: Node3D) -> void:
 
 
 ## Foot planting, directly after the clips: it reads the leg pose the clip
-## just wrote and pins the ankles to the ground while the clip would slide
-## them. Attached unconditionally — a model without VRM-named leg bones (the
-## Configura body, a capsule) never plants, which makes this self-retiring the
-## same way the stance is.
+## Foot planting: the component reads the leg pose the clip just wrote and pins
+## the ankles where the clip would slide them. Attached unconditionally — a model
+## without VRM-named leg bones (the Configura body, a capsule) never plants,
+## which makes this self-retiring the same way the stance is.
+##
+## **Mounted as a plain node, not as a modifier** — deliberately, and the reason
+## is measured rather than preferred. The engine's skeleton-modifier design states
+## that the update "is a deferred call and is performed only once per frame" and
+## that when the modification is complete and applied to the skin "the pose is
+## **rolled back** to the temporarily stored pose". A probe that wrote a known
+## value into the hips from `_process_modification` and read it back on the next
+## frame found `1.2345` gone, replaced by the locomotion clip's own value; the
+## same write from an ordinary node survived.
+##
+## That matters because this component's pelvis compensation is a *persistent*
+## change to the hips, not a per-frame overlay: the drop has to accumulate
+## against the clip's hips, which are rewritten absolutely every tick. As a
+## modifier its write was discarded on every frame while its own `_hips_written`
+## bookkeeping recorded it as done — so the figure sank and recovered while every
+## number in the component reported success, and the playtest saw the two states
+## alternate.
+##
+## The two-bone leg solve is unaffected either way: it composes rotations onto
+## the pose in the order the chain requires and does not depend on its write
+## outliving the frame. It rides here as a plain node for the same reason its
+## sibling does — see `ModelSpringBones` for the note on what is *not* settled.
 static func attach_foot_ik(model: Node3D) -> void:
 	var component := ModelFootIK.new()
-	_mount_modifier(model, component, "FootIK")
+	component.name = "FootIK"
+	model.add_child(component)
 	component.setup(model)
 
 

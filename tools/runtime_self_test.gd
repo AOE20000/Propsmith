@@ -52,7 +52,7 @@ func _ready() -> void:
 	_run_section("map catalogue", 23, _check_map_catalog)
 	_run_section("camera and wardrobe wiring", 33, _check_camera_and_wardrobe)
 	_run_section("model clips sampler", 45, _check_model_clips)
-	_run_section("foot IK decision rules", 11, _check_foot_ik_rules)
+	_run_section("foot IK decision rules", 12, _check_foot_ik_rules)
 	_run_section("skeleton bone-order contract", 12, _check_skeleton_ordering)
 	_run_section("guided tour", 10, _check_demo_tour)
 	_run_section("tool wheel", 3, _check_tool_wheel)
@@ -2184,6 +2184,21 @@ func _check_foot_ik_rules() -> void:
 	_expect(ik._reach_held[0] == 0.0, "a fresh foot must have no release age")
 	# A rig with no skeleton never planted, so nothing should be mid-transition.
 	_expect(ik._pelvis_applied == 0.0, "with no skeleton the pelvis compensation moved nothing")
+	# The component must be a plain node, not a SkeletonModifier3D. The engine
+	# rolls a modifier's pose back once the modification has been applied to the
+	# skin, which discarded the pelvis drop on every frame while the component's
+	# own bookkeeping recorded the write as done — the figure sank and recovered
+	# while every number here reported success. A regression here would bring
+	# that back silently, so it is asserted rather than left to a comment.
+	#
+	# Checked by class name rather than with `is`: the compiler resolves
+	# `ik is SkeletonModifier3D` statically and rejects the comparison outright
+	# once the types are unrelated, which would take the whole self-test down
+	# with it instead of failing this one assertion.
+	_expect(
+		ik.get_class() != "SkeletonModifier3D",
+		"the foot IK must not be a SkeletonModifier3D: modifier writes are rolled back"
+	)
 
 	ik.queue_free()
 
