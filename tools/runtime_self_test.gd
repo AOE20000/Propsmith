@@ -1950,15 +1950,16 @@ func _check_model_clips() -> void:
 	)
 
 	# Gear selection: driving the brain with a sprint speed must select the run
-	# clip, and the gear must hold through the hysteresis window before walking
-	# returns — a speed hovering at the threshold must not flip the clip. The
-	# brain is a pure function of measured speed, so the test drives it
-	# directly instead of fighting the engine's own ticks over model position.
+	# clip (after the condition has held for the hysteresis window), and the
+	# gear must hold through that window before walking returns — a speed
+	# hovering at the threshold must not flip the clip. The brain is a pure
+	# function of measured speed, so the test drives it directly instead of
+	# fighting the engine's own ticks over model position.
 	clips._forced = &""
 	clips._walking = false
 	clips._running = false
 	clips._speed = 0.0
-	for i: int in 12:
+	for i: int in 20:
 		clips._decide_gear(1.0 / 30.0, 9.0)  # sprint
 	_expect(
 		clips._running and clips._current_clip == lib.get_animation(&"run"),
@@ -1972,8 +1973,8 @@ func _check_model_clips() -> void:
 	var clip_label: String = "walk" if clips._current_clip == lib.get_animation(&"walk") else "other"
 	_expect(
 		not clips._running and clips._current_clip == lib.get_animation(&"walk"),
-		"below the threshold the walk clip must return after the hold (running=%s clip=%s speed=%.2f gear_t=%.2f)" % [
-			clips._running, clip_label, clips._speed, clips._gear_time,
+		"below the threshold the walk clip must return after the hold (running=%s clip=%s speed=%.2f want_t=%.2f)" % [
+			clips._running, clip_label, clips._speed, clips._want_time,
 		]
 	)
 

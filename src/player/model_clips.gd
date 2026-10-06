@@ -69,10 +69,13 @@ const LAND_COOLDOWN: float = 0.25
 ## the old walk speed (5.2) could not keep up at any believable cadence —
 ## that mismatch is what the gear threshold used to paper over.
 @export var run_threshold: float = 3.2
-## Minimum seconds a walk/run gear holds before the other gear may take over —
-## the same anti-flicker hysteresis the reference movement system calls
-## RunToWalkTime: a measured speed hovering near the threshold must not flip
-## the clip every frame.
+## Minimum seconds the speed must stay on the other side of the threshold
+## before the gear follows. Time-in-gear is the wrong clock: a deceleration
+## to a standstill *passes through* the walk band in ~0.15 s, and a
+## time-in-gear gate (long since satisfied mid-run) flipped to the walk clip
+## there — a full-cadence walk flash in the middle of braking, read as a
+## twitch. A genuine slow-down to a walk cruise holds the condition and
+## switches; a pass-through does not.
 @export var gear_hold: float = 0.3
 ## Speed above which the figure counts as walking (m/s).
 @export var walk_threshold: float = 0.25
@@ -125,8 +128,9 @@ var _last_position: Vector3 = Vector3.ZERO
 var _speed: float = 0.0
 var _walking: bool = false
 var _running: bool = false
-## Seconds the current gear has held — the hysteresis budget for switching.
-var _gear_time: float = 0.0
+## Seconds the speed has continuously sat on the other side of the gear
+## threshold from the current gear — the hysteresis budget for switching.
+var _want_time: float = 0.0
 ## Stop-transition state: the snapshot the pose blends from, its elapsed time,
 ## and whether a blend is in progress.
 var _blend_active: bool = false
@@ -275,20 +279,25 @@ func _decide_gear(
 		_start_clip(WALK_CLIP, false, true)
 		_walking = true
 		_running = false
-		_gear_time = 0.0
+		_want_time = 0.0
 	if walking and _walking:
-		# Gear selection with hold-time hysteresis: the measured speed hovers
-		# around the threshold during acceleration, and without the hold the
-		# clip flips walk/run every frame (the reference system's
-		# RunToWalkTime, same reason). The switch cross-fades too: keeping the
-		# cycle phase aligns *which* stride moment plays next, but the two
-		# cycles' poses still differ, and a hard swap read as a hitch every
-		# time the figure crossed the gear threshold.
-		_gear_time += delta
+		# Gear selection with condition-hold hysteresis: the switch fires only
+		# after the speed has *stayed* on the other side of the threshold for
+		# `gear_hold` — a deceleration to a standstill passes through the walk
+		# band too briefly to count, so braking from a sprint keeps the run
+		# clip until the stop blend takes over (a full-cadence walk flash in
+		# the middle of braking read as a twitch). The switch cross-fades too:
+		# keeping the cycle phase aligns *which* stride moment plays next, but
+		# the two cycles' poses still differ, and a hard swap read as a hitch
+		# every time the figure crossed the gear threshold.
 		var want_run := _speed > run_threshold
-		if want_run != _running and _gear_time >= gear_hold:
+		if want_run != _running:
+			_want_time += delta
+		else:
+			_want_time = 0.0
+		if want_run != _running and _want_time >= gear_hold:
 			_running = want_run
-			_gear_time = 0.0
+			_want_time = 0.0
 			_start_clip(RUN_CLIP if _running else WALK_CLIP, true, true)
 		# A gear switch to a clip the library lacks (or any path that lost the
 		# current one) must not sample into null — fall back to the walk clip.
