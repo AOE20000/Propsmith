@@ -2408,7 +2408,7 @@ func _check_model_lean() -> void:
 	var lean := ModelLean.new()
 	add_child(lean)
 	lean.setup(rig)
-	lean._process(1.0 / 60.0)  # the anchor was taken in setup; a settling tick
+	lean._update(1.0 / 60.0)  # the anchor was taken in setup; a settling tick
 	var max_roll: float = deg_to_rad(lean.max_roll_degrees)
 	# A hard sustained turn (0.2 rad per tick = 12 rad/s) for 8 ticks: the
 	# roll must ease in behind the smoothed yaw rate. Measured on this exact
@@ -2417,7 +2417,7 @@ func _check_model_lean() -> void:
 	# 2026-10-06).
 	for i: int in 8:
 		rig.rotation.y += 0.2
-		lean._process(1.0 / 60.0)
+		lean._update(1.0 / 60.0)
 	_expect(absf(lean._roll) < max_roll * 0.5,
 		"a hard turn must ease the roll in, not snap it to the cap")
 	# When the turn stops the smoothed rate drains and the roll follows —
@@ -2425,18 +2425,18 @@ func _check_model_lean() -> void:
 	# turn-end value), so the decay window is a full second.
 	var rolled: float = lean._roll
 	for i: int in 60:
-		lean._process(1.0 / 60.0)
+		lean._update(1.0 / 60.0)
 	_expect(absf(lean._roll) < absf(rolled) * 0.5,
 		"after the turn ends the roll must decay, not hold")
 	# Forward motion builds the pitch over several ticks; stopping decays it.
 	for i: int in 40:
 		rig.rotation.y = 0.0
 		rig.position.z -= 0.09
-		lean._process(1.0 / 60.0)
+		lean._update(1.0 / 60.0)
 	var built: float = lean._pitch
 	_expect(built > deg_to_rad(1.0), "walking must build the forward pitch")
 	for i: int in 40:
-		lean._process(1.0 / 60.0)
+		lean._update(1.0 / 60.0)
 	_expect(lean._pitch < built * 0.4, "stopping must decay the pitch")
 
 

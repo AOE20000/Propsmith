@@ -1,4 +1,4 @@
-extends Node
+extends SkeletonModifier3D
 class_name ModelFootIK
 ## Plants the feet instead of letting the clip slide them.
 ##
@@ -290,14 +290,24 @@ func setup(model: Node3D) -> void:
 	_release_t[1] = 0.0
 	_cancel_restore(0)
 	_cancel_restore(1)
-	set_process(true)
+	active = true
 
 
-func _process(delta: float) -> void:
+## The engine entry point (2026-06 migration): a `SkeletonModifier3D` under the
+## figure's skeleton. The engine runs modifiers after the animation and in
+## child order, so the foot solve lands on the pose the clips wrote this frame
+## without depending on where the component happens to sit in the scene tree —
+## and `influence` is the engine's own blend weight rather than a hand-rolled
+## one. `_update` keeps the per-frame work drivable by the headless tests.
+func _process_modification() -> void:
+	_update(get_process_delta_time())
+
+
+func _update(delta: float) -> void:
 	if _skeleton == null or _model == null or not _model.is_inside_tree():
 		return
 	if not _near_camera():
-		set_process(false)
+		active = false
 		return
 	# The parent-basis cache is **per frame**. Within one frame the chain needs
 	# it — the shin's solve reads the thigh this same frame just placed — but

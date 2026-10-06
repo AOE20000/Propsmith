@@ -1,4 +1,4 @@
-extends Node
+extends SkeletonModifier3D
 class_name ModelLean
 ## Leans the torso with speed and steering — weight you can *see*, without a
 ## single new animation.
@@ -83,10 +83,18 @@ func setup(model: Node3D) -> void:
 	if _anchored:
 		_prev_pos = _model.global_position
 		_prev_yaw = _model.global_rotation.y
-	set_process(_chest >= 0)
+	active = _chest >= 0
 
 
-func _process(delta: float) -> void:
+## The engine entry point (2026-06 migration): a `SkeletonModifier3D` under the
+## figure's skeleton — the engine runs it after the animation, in chain order,
+## and owns the blend weight as `influence`. The work itself lives in `_update`
+## so the headless tests can drive it with an explicit delta.
+func _process_modification() -> void:
+	_update(get_process_delta_time())
+
+
+func _update(delta: float) -> void:
 	if _chest < 0 or _model == null or _skeleton == null:
 		return
 	if not _model.is_inside_tree():

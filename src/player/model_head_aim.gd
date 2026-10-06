@@ -1,4 +1,4 @@
-extends Node
+extends SkeletonModifier3D
 class_name ModelHeadAim
 ## Turns the head before the body does.
 ##
@@ -44,10 +44,18 @@ func setup(model: Node3D) -> void:
 	if _skeleton == null:
 		return
 	_head = _skeleton.find_bone("Head")
-	set_process(_head >= 0)
+	active = _head >= 0
 
 
-func _process(delta: float) -> void:
+## The engine entry point (2026-06 migration): a `SkeletonModifier3D` under the
+## figure's skeleton, so the head turn composes on the finished pose in chain
+## order instead of winning by tree position. `_update` keeps the work
+## drivable by the headless tests.
+func _process_modification() -> void:
+	_update(get_process_delta_time())
+
+
+func _update(delta: float) -> void:
 	if _head < 0 or _model == null or _skeleton == null:
 		return
 	if not _model.is_inside_tree():

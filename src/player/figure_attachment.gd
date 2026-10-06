@@ -32,13 +32,17 @@ const STANCE_IGNORED_BONES: PackedStringArray = ["eye"]
 
 
 ## Attach the full stack in the canonical order (stance → shape keys →
-## locomotion clips → foot IK → head aim → lean → spring bones). Order matters
-## for tree position, which decides per-frame write order: `ModelFootIK` reads
-## the leg poses the clips just wrote, so it sits directly after them and
-## before anything that leans on the finished figure. `ModelHeadAim` composes
-## on the head's pose and `ModelLean` on the chest's, so both must run *after*
-## whoever wrote those poses (the clips, or the stance). `ModelSpringBones`
-## reads the head's finished global pose as its chain anchor, so it goes last.
+## locomotion clips → foot IK → head aim → lean → spring bones).
+##
+## The first three are plain nodes on the model: they establish the base pose
+## in `_process`. The next three are **SkeletonModifier3Ds mounted on the
+## skeleton** (2026-06 migration) — the engine runs modifiers after the
+## animation and in child order, so the overlay chain (`ModelFootIK` reads
+## the leg poses the clips just wrote → `ModelHeadAim` composes on the head →
+## `ModelLean` on the chest) gets that order from the engine instead of from
+## tree position, and the write-order class of bugs (pop, back-kick, freeze)
+## stops depending on who happens to be a later sibling. `ModelSpringBones`
+## stays a node — see its own note.
 static func attach_all(model: Node3D) -> void:
 	attach_stance_if_unanimated(model)
 	attach_blend_shapes(model)
@@ -49,10 +53,32 @@ static func attach_all(model: Node3D) -> void:
 	attach_spring_bones(model)
 
 
+## Mount one overlay component on the figure's skeleton, where the engine will
+## run it as a modifier. Returns false when the model has no skeleton — the
+## component's own `setup` then no-ops, so a capsule or a mod model stays
+## exactly as it was.
+static func _mount_modifier(model: Node3D, component: Node, node_name: String) -> bool:
+	for candidate: Node in model.find_children("*", "Skeleton3D", true, false):
+		var skeleton := candidate as Skeleton3D
+		if skeleton == null:
+			continue
+		component.name = node_name
+		skeleton.add_child(component)
+		return true
+	return false
+
+
 ## Sway chains (the ahoge, later hair/skirt runs the model may grow): one
 ## Verlet point per joint, simulated last so it anchors on the pose the
 ## components above it just wrote. A model without the configured chain bones
 ## stays exactly as it was.
+##
+## Still a plain node on the model, **not** a modifier: measured in the
+## 2026-06 migration, its modifier writes were visible inside the modifier
+## pass but gone by the next frame, while the three modifiers below survived
+## that boundary. The mechanism is unresolved, so this one keeps the tree
+## behaviour it has always had rather than shipping a chain that may stand
+## still in-game. Revisit with a render-path probe.
 static func attach_spring_bones(model: Node3D) -> void:
 	var component := ModelSpringBones.new()
 	component.name = "SpringBones"
@@ -64,8 +90,7 @@ static func attach_spring_bones(model: Node3D) -> void:
 ## Zero new animation clips; a model without a chest bone simply does not lean.
 static func attach_lean(model: Node3D) -> void:
 	var component := ModelLean.new()
-	component.name = "Lean"
-	model.add_child(component)
+	_mount_modifier(model, component, "Lean")
 	component.setup(model)
 
 
@@ -121,8 +146,7 @@ static func attach_locomotion(model: Node3D) -> void:
 ## same way the stance is.
 static func attach_foot_ik(model: Node3D) -> void:
 	var component := ModelFootIK.new()
-	component.name = "FootIK"
-	model.add_child(component)
+	_mount_modifier(model, component, "FootIK")
 	component.setup(model)
 
 
@@ -132,8 +156,7 @@ static func attach_foot_ik(model: Node3D) -> void:
 ## on a figure with no head bone, or with no camera at its eye.
 static func attach_head_aim(model: Node3D) -> void:
 	var component := ModelHeadAim.new()
-	component.name = "HeadAim"
-	model.add_child(component)
+	_mount_modifier(model, component, "HeadAim")
 	component.setup(model)
 
 
