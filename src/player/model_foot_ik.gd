@@ -91,10 +91,23 @@ const UPPER: StringName = &"UpperLeg"
 const LOWER: StringName = &"LowerLeg"
 const FOOT: StringName = &"Foot"
 const SIDES: Array[String] = ["Left", "Right"]
-## How high the ankle sits above the sole. The plant test measures the ankle, so
-## without this a foot resting flat on the ground reads as *hovering* by its own
-## ankle height and never gets planted.
+## How high the ankle sits above the sole — the plant test measures the ankle,
+## so without this a foot resting flat on the ground reads as *hovering* by its
+## own ankle height and never gets planted.
+##
+## **This is a fallback, not a measurement.** `setup` reads the real distance
+## off the model's own geometry (`_measure_sole_drop`) and the plant test uses
+## that. The number here only applies to a model whose sole cannot be measured
+## — a capsule, a meshless rig — so that those behave exactly as they did
+## before. Do not tune it against a figure: on the shipped body the sole rides
+## ~0.25 m below the ankle, and this constant being 0.085 is what had the
+## planted figure sinking through the floor.
 const ANKLE_HEIGHT: float = 0.085
+## How far either side of the midline the sole search reaches, in metres. Wide
+## enough for a splayed foot or a boot, narrow enough that the other foot's
+## geometry cannot be mistaken for this one's. Half a foot's width on a
+## humanoid; wide enough to cover a boot, tight enough to stay on one side.
+const SOLE_HALF_WIDTH: float = 0.12
 ## The pelvis bone — the one bone this component is allowed to move for its own
 ## reasons (see `_pelvis_prepare`).
 const HIPS_BONE: StringName = &"Hips"
@@ -121,7 +134,7 @@ const KNEE_SIGN: float = -1.0
 ## threshold of 0.11 sat *inside* that band: the flag chattered, the weight
 ## never finished fading in, and the correction never reached full strength.
 ## The band has to sit above the stance measurements, not inside them.
-@export var plant_enter: float = 0.17
+@export var plant_enter: float = 0.13
 @export var plant_exit: float = 0.28
 ## After this long standing still the foot is handed back to the clip, so a
 ## character that stops does not keep correcting a pose the animation owns.
@@ -236,6 +249,23 @@ var _planted: Array[bool] = [false, false]
 var _plant_pos: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 var _plant_time: Array[float] = [0.0, 0.0]
 var _weight: Array[float] = [0.0, 0.0]
+## How far this model's sole sits below its ankle bones, read off the geometry
+## at setup. Seeded from `ANKLE_HEIGHT` so a model whose sole cannot be measured
+## behaves exactly as before; see `_measure_sole_drop` for why this cannot be a
+## constant (boots, bare feet and digitigrade legs all differ, and the shipped
+## figure's real value is roughly three times the old constant).
+var _sole_drop: float = ANKLE_HEIGHT
+## Whether the sole has been read off the geometry yet. Deferred past `setup`
+## because the model is not in the tree there, and a global transform read
+## before then is an identity — which silently measures the wrong thing.
+var _sole_measured: bool = false
+## How many times the deferred sole measurement has been attempted. Bounded so
+## an unmeasurable figure stops paying for the scan.
+var _sole_attempts: int = 0
+## Frames to keep retrying the sole measurement before accepting the fallback.
+## A handful covers a model attached a few frames after boot; a figure that
+## still cannot be measured after that has no mesh to measure.
+const SOLE_MEASURE_ATTEMPTS: int = 8
 ## Last measured foot height over the ground, per side (probe diagnostics).
 var _clearance: Array[float] = [0.0, 0.0]
 ## Whether the ground ray found anything at all, per side.
@@ -317,6 +347,13 @@ func setup(model: Node3D) -> void:
 			"lower": _skeleton.find_bone(StringName("%s%s" % [SIDES[i], LOWER])),
 			"foot": _skeleton.find_bone(StringName("%s%s" % [SIDES[i], FOOT])),
 		}
+	# How far the sole sits below the ankle, read off this model's own geometry
+	# — see `_measure_sole_drop`. Cannot happen here: `setup` runs before the
+	# model enters the tree (the project rule is that global transforms are not
+	# readable until then, and Godot returns an identity for them), and the
+	# measurement needs exactly those. It is deferred to the first update.
+	_sole_measured = false
+	_sole_attempts = 0
 	# Re-setup starts the standstill measurement over (the model may have been
 	# moved or rebuilt), and any restore in progress belongs to the old rig.
 	_pos_anchored = false
@@ -332,6 +369,157 @@ func setup(model: Node3D) -> void:
 	active = true
 
 
+## Read the ankle-to-sole distance off this model's geometry.
+##
+## `ANKLE_HEIGHT` used to be a fixed 0.085 m, and it is simply wrong for
+## anything but the figure it was tuned on. The clearance test subtracts it
+## from the ankle's height above the ground to decide whether the foot is
+## down, so an error in it moves every plant decision by that much: too small
+## and a planted foot's *geometry* hangs below the ground (measured on the
+## shipped figure — the ankle rides 0.303 m up while the constant said 0.085,
+## a 0.218 m discrepancy that read as the figure sinking through the floor),
+## too large and the foot floats above it.
+##
+## Measuring it instead of hardcoding it is what makes a mod model behave like
+## the built-in one: boots, bare feet and digitigrade legs all put the sole at
+## a different distance below the ankle, and none of them are this figure.
+##
+## The measurement is the skeleton-space AABB of the geometry weighted to each
+## foot, taken at setup. Two guards keep it honest:
+##   * Only meshes whose AABB overlaps that foot's own region count, so a coat
+##     hem or a weapon over the leg cannot pull the number down.
+##   * A model with nothing measurable (a capsule, a meshless rig) keeps
+##     `ANKLE_HEIGHT`, so behaviour there is exactly what it was before.
+func _measure_sole_drop() -> void:
+	var meshes := _measure_meshes()
+	if meshes.is_empty():
+		return
+	var drops: Array[float] = []
+	for side: int in SIDES.size():
+		var foot: int = int((_chains[side] as Dictionary).get("foot", -1))
+		if foot < 0:
+			continue
+		var ankle: Vector3 = _skeleton.get_bone_global_pose(foot).origin
+		# The largest drop any mesh reports for this side. Both readings live in
+		# one mesh's space at a time, so the subtraction is honest; comparing
+		# across meshes would not be, which is why the per-mesh `lowest` is
+		# reset rather than carried.
+		var drop: float = 0.0
+		var candidates: int = 0
+		for mesh: MeshInstance3D in meshes:
+			# Both spaces matter and mixing them is the trap: the mesh arrays are
+			# in the mesh's local space while the ankle bone is in skeleton
+			# space, and a mesh is a child of the skeleton, so the two differ by
+			# the bone's offset within that mesh. Transform the ankle once per
+			# mesh rather than once per vertex.
+			var to_mesh: Transform3D = mesh.global_transform.affine_inverse() \
+				* _skeleton.global_transform
+			var ankle_in_mesh: Vector3 = to_mesh * ankle
+			var lowest: float = INF
+			# Every surface: a figure is often split into separate meshes and
+			# surfaces for the body, the hair and the clothes, and the shoe may
+			# be any of them.
+			for surface: int in mesh.mesh.get_surface_count():
+				var arrays: Array = mesh.mesh.surface_get_arrays(surface)
+				if arrays.is_empty():
+					continue
+				var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+				# Only vertices beneath the ankle and on this side's half can be
+				# the sole: above it is the leg, across the midline is the other
+				# foot. `SOLE_HALF_WIDTH` is generous for that reason — it has to
+				# cover a splayed foot or a boot without reaching the other side.
+				for vertex: Vector3 in verts:
+					if vertex.y > ankle_in_mesh.y:
+						continue
+					candidates += 1
+					if side == 0 and vertex.x > ankle_in_mesh.x + SOLE_HALF_WIDTH:
+						continue
+					if side == 1 and vertex.x < ankle_in_mesh.x - SOLE_HALF_WIDTH:
+						continue
+					lowest = minf(lowest, vertex.y)
+			if is_finite(lowest):
+				drop = maxf(drop, ankle_in_mesh.y - lowest)
+		if _verbose_measurement:
+			print("[foot-ik] %s: %d candidates below the ankle across %d meshes, drop=%s"
+				% [SIDES[side], candidates, meshes.size(),
+					"none" if drop <= 0.0 else "%.4f" % drop])
+		if drop > 0.0:
+			drops.append(drop)
+	if drops.is_empty():
+		return
+	var total := 0.0
+	for value: float in drops:
+		total += value
+	var measured: float = total / float(drops.size())
+	# A sole below the ankle by less than a couple of centimetres, or by more
+	# than half a leg, means the sampling hit something other than a foot —
+	# a skirt, a shadow catcher, a mesh that does not follow the bones. Either
+	# way, keeping the constant beats planting on a wrong number.
+	var chain: float = maxf(_rest_length_at(0, UPPER, LOWER), 0.0)
+	if measured < 0.02 or (chain > 0.0 and measured > chain):
+		if _verbose_measurement:
+			print("[foot-ik] sole measurement %.4f m rejected (chain %.4f) — keeping %.4f"
+				% [measured, chain, _sole_drop])
+		return
+	_sole_drop = measured
+	_sole_measured = true
+	if _verbose_measurement:
+		print("[foot-ik] sole drop measured from geometry: %.4f m (fallback was %.4f)"
+			% [_sole_drop, ANKLE_HEIGHT])
+
+
+## Print the sole measurement and why it was kept or rejected. Off by default —
+## this runs once per model at setup and its value is already readable through
+## `sole_drop()`, so the only reason to turn it on is debugging a figure whose
+## feet do not meet the ground.
+@export var _verbose_measurement: bool = false
+
+
+func _mesh_instance() -> MeshInstance3D:
+	for candidate: Node in _model.find_children("*", "MeshInstance3D", true, false):
+		var mesh := candidate as MeshInstance3D
+		if mesh != null and mesh.get_aabb().size.length() > 0.001:
+			return mesh
+	return null
+
+
+## Every mesh worth measuring, largest first.
+##
+## The figure is not one mesh: the body, the hair, the clothes and the shoes
+## are often separate, and the *shoe* is the one that defines the sole. Taking
+## the first non-empty mesh in tree order (what this used to do) picks
+## whichever happens to be added first — on the shipped figure that is the
+## hair, which has no vertices beneath the ankle and so silently reported
+## "nothing measurable" for every attempt.
+##
+## Sorting by volume puts the body first, and the per-vertex filter then keeps
+## only what is under a foot, so a hair mesh contributes nothing and cannot
+## corrupt the reading.
+func _measure_meshes() -> Array[MeshInstance3D]:
+	var found: Array[MeshInstance3D] = []
+	for candidate: Node in _model.find_children("*", "MeshInstance3D", true, false):
+		var mesh := candidate as MeshInstance3D
+		if mesh == null or mesh.mesh == null:
+			continue
+		if mesh.get_aabb().size.length() <= 0.001:
+			continue
+		found.append(mesh)
+	found.sort_custom(func(a: MeshInstance3D, b: MeshInstance3D) -> bool:
+		return a.get_aabb().size.length_squared() > b.get_aabb().size.length_squared())
+	return found
+
+
+## Rest length between two bones of one chain, before any pose is applied.
+## Used by the sole measurement to sanity-check what it read.
+func _rest_length_at(side: int, from_segment: String, to_segment: String) -> float:
+	var chain: Dictionary = _chains[side]
+	var a: int = int(chain.get(from_segment, -1))
+	var b: int = int(chain.get(to_segment, -1))
+	if a < 0 or b < 0:
+		return 0.0
+	return _rest_length(a, b)
+
+
 ## The engine entry point (2026-06 migration): a `SkeletonModifier3D` under the
 ## figure's skeleton. The engine runs modifiers after the animation and in
 ## child order, so the foot solve lands on the pose the clips wrote this frame
@@ -345,6 +533,15 @@ func _process_modification() -> void:
 func _update(delta: float) -> void:
 	if _skeleton == null or _model == null or not _model.is_inside_tree():
 		return
+	# The sole offset is read here rather than in `setup` because it needs the
+	# model's real transforms, and those only exist once it is in the tree.
+	# Retried for a few frames, so a model added late (a citizen spawned a few
+	# frames after boot) still gets measured, but bounded: a figure with
+	# nothing measurable would otherwise pay the vertex scan on every frame
+	# forever, and the fallback is correct for it anyway.
+	if not _sole_measured and _sole_attempts < SOLE_MEASURE_ATTEMPTS:
+		_sole_attempts += 1
+		_measure_sole_drop()
 	if not _near_camera():
 		active = false
 		return
@@ -533,7 +730,7 @@ func _process_foot(side: int, delta: float, standstill: bool = false) -> void:
 	var ground: Variant = _ground_under(foot_pos)
 	var clearance: float = INF
 	if ground != null:
-		clearance = foot_pos.y - (ground as Vector3).y - ANKLE_HEIGHT
+		clearance = foot_pos.y - (ground as Vector3).y - _sole_drop
 	_clearance[side] = clearance
 	_grounded[side] = ground != null
 	# The reach hold ages every frame it is active, including the swing frames
@@ -576,7 +773,7 @@ func _process_foot(side: int, delta: float, standstill: bool = false) -> void:
 			# threshold forever, the plant flag chatters, and every re-plant
 			# re-pins the current position — which is the sliding this
 			# component exists to remove.
-			_plant_pos[side] = Vector3(foot_pos.x, (ground as Vector3).y + ANKLE_HEIGHT, foot_pos.z)
+			_plant_pos[side] = Vector3(foot_pos.x, (ground as Vector3).y + _sole_drop, foot_pos.z)
 			_plant_time[side] = 0.0
 		_plant_time[side] += delta
 		# The pin must stay within what the leg plus the pelvis drop can
@@ -991,6 +1188,14 @@ func _ground_under(from: Vector3) -> Variant:
 
 ## The current correction weight of one side — read by the walk probe to prove
 ## feet stay put instead of proving it with a screenshot.
+## The ankle-to-sole distance this component actually uses — measured off the
+## model at setup, or `ANKLE_HEIGHT` when the sole could not be read. The
+## probes read this to compare a plant decision against the geometry it was
+## made from.
+func sole_drop() -> float:
+	return _sole_drop
+
+
 func foot_weight(side: int) -> float:
 	return _weight[side] if side >= 0 and side < _weight.size() else 0.0
 

@@ -1,0 +1,241 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+D3D12 12_0 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050
+
+INFO ModLoader:Store: Applying options override with feature tag "editor".
+DEBUG ModLoader: Autoload order
+[
+  "ModLoaderStore",
+  "ModLoader",
+  "Services",
+  "Events",
+  "DecisionLog",
+  "GameState",
+  "ModHost",
+  "SaveSystem"
+]
+INFO ModLoader: game_install_directory: res://
+INFO ModLoader:UserProfile: No mod_ids inside "mod_list" for user profile "default" 
+DEBUG ModLoader: Found 0 mods at the following paths:
+	 - 
+SUCCESS ModLoader: DONE: Loaded 0 mod files into the virtual filesystem
+DEBUG ModLoader:UserProfile: Updated the mod lists of all user profiles
+DEBUG ModLoader:UserProfile: Updated the active state of all mods, based on the current user profile "default"
+SUCCESS ModLoader: DONE: Loaded all mod configs
+DEBUG ModLoader: mod data
+{}
+SUCCESS ModLoader: DONE: Completely finished loading mods
+SUCCESS ModLoader: DONE: Installed all script extensions
+SUCCESS ModLoader: DONE: Applied all scene extensions
+[mod:garage] 已注册载具：轻量越野车（更轻、马力更足、极速更高）
+[ModHost] loaded 车库：轻量越野车 (garage) v1.0.0
+[mod:lighthouse] 已注册：重击攻击、日志道具
+[ModHost] loaded 灯塔与风化石 (lighthouse) v2.0.0
+[ModHost] loaded 涩谷街区（PLATEAU） (plateau_city) v1.0.0
+[ModHost] loaded 基础玩家模型 (player_base) v1.0.0
+[mod:render_style_demo] 已注册画风：黄金时刻（数据式）、黑白电影（自带 shader）
+[ModHost] loaded 画风演示 (render_style_demo) v1.0.0
+[mod:tools_demo] 已注册：标记工具、发光球道具、卫兵 NPC
+[ModHost] loaded 工具演示 (tools_demo) v1.0.0
+[decision_log] journal replayed: 0 records (slot slot1)
+[mod:lighthouse] 世界已就绪，mod 内容已注入
+[boot] map build: 964 ms
+ERROR: Condition "!is_inside_tree()" is true. Returning: Transform3D()
+   at: get_global_transform (scene/3d/node_3d.cpp:649)
+   GDScript backtrace (most recent call first):
+       [0] setup (res://src/player/model_lean.gd:50)
+       [1] attach_lean (res://src/player/figure_attachment.gd:66)
+       [2] attach_all (res://src/player/figure_attachment.gd:45)
+       [3] _attach_appearance (res://src/player/player_scene.gd:84)
+       [4] build (res://src/player/player_scene.gd:42)
+       [5] _spawn_player (res://src/boot/startup.gd:243)
+       [6] _ready (res://src/boot/startup.gd:69)
+ERROR: Condition "!is_inside_tree()" is true. Returning: Transform3D()
+   at: get_global_transform (scene/3d/node_3d.cpp:649)
+   GDScript backtrace (most recent call first):
+       [0] setup (res://src/player/model_lean.gd:51)
+       [1] attach_lean (res://src/player/figure_attachment.gd:66)
+       [2] attach_all (res://src/player/figure_attachment.gd:45)
+       [3] _attach_appearance (res://src/player/player_scene.gd:84)
+       [4] build (res://src/player/player_scene.gd:42)
+       [5] _spawn_player (res://src/boot/startup.gd:243)
+       [6] _ready (res://src/boot/startup.gd:69)
+ERROR: Condition "!is_inside_tree()" is true. Returning: Transform3D()
+   at: get_global_transform (scene/3d/node_3d.cpp:649)
+   GDScript backtrace (most recent call first):
+       [0] _chain_parent_global (res://src/player/model_spring_bones.gd:182)
+       [1] reset_points (res://src/player/model_spring_bones.gd:162)
+       [2] setup (res://src/player/model_spring_bones.gd:114)
+       [3] attach_spring_bones (res://src/player/figure_attachment.gd:57)
+       [4] attach_all (res://src/player/figure_attachment.gd:46)
+       [5] _attach_appearance (res://src/player/player_scene.gd:84)
+       [6] build (res://src/player/player_scene.gd:42)
+       [7] _spawn_player (res://src/boot/startup.gd:243)
+       [8] _ready (res://src/boot/startup.gd:69)
+[foot-ik-probe] ready
+[boot] world ready: map=core:playground@1 mods=6
+[foot-ik-probe] OFF side=0 ankle=(-0.030, 0.231, -10.415) clearance=0.000
+[foot-ik-probe] OFF side=1 ankle=(0.041, 0.528, -9.885) clearance=0.000
+[foot-ik-probe] shot=0 ik=false planted=false w=0.00 err=0.000
+[foot-ik-probe]   angles thigh=0.000 shin=0.000 goal=(0.0, 0.0, 0.0) ankle=(-0.029558, 0.231476, -10.41547)
+[foot-ik-probe]   chain thigh=0.000 shin=0.000 goal=0.000 (sum=0.000)
+[foot-ik-probe] ON side=0 ankle=(-0.068, 0.466, -17.756) clearance=0.000
+[foot-ik-probe] ON side=1 ankle=(0.018, 0.186, -18.002) clearance=0.000
+[foot-ik-probe] shot=1 ik=true planted=false w=0.00 err=0.000
+[foot-ik-probe]   angles thigh=0.000 shin=0.000 goal=(0.0, 0.0, 0.0) ankle=(-0.067733, 0.465596, -17.75635)
+[foot-ik-probe]   chain thigh=0.000 shin=0.000 goal=0.000 (sum=0.000)
+[foot-ik-probe]   step side=0 0.361m dt=0.013s w=1.00 held=false clear=0.108 ik_err=0.101 d=0.839 reach=0.724 goal_gap=0.117
+[foot-ik-probe]   diag hips now=(0.0, 0.902074, 0.044724) base=(0.0, 0.902074, 0.044724) written=(0.0, 0.902074, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 0.765m dt=0.113s w=1.00 held=true clear=0.152 ik_err=0.170 d=0.894 reach=0.724 goal_gap=0.171
+[foot-ik-probe]   diag hips now=(0.0, 0.895741, 0.044724) base=(0.0, 0.905967, 0.044724) written=(0.0, 0.895741, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=1 0.962m dt=0.117s w=1.00 held=false clear=0.047 ik_err=0.043 d=0.774 reach=0.724 goal_gap=0.052
+[foot-ik-probe]   diag hips now=(0.0, 0.831617, 0.044724) base=(0.0, 0.901812, 0.044724) written=(0.0, 0.831617, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 1.026m dt=0.117s w=1.00 held=false clear=0.004 ik_err=0.005 d=0.741 reach=0.724 goal_gap=0.018
+[foot-ik-probe]   diag hips now=(0.0, 0.802174, 0.044724) base=(0.0, 0.900196, 0.044724) written=(0.0, 0.802174, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=1 1.227m dt=0.125s w=1.00 held=false clear=-0.014 ik_err=0.002 d=0.708 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.785466, 0.044724) base=(0.0, 0.895769, 0.044724) written=(0.0, 0.785466, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 1.198m dt=0.133s w=1.00 held=false clear=-0.015 ik_err=0.011 d=0.721 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.783199, 0.044724) base=(0.0, 0.899159, 0.044724) written=(0.0, 0.783199, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 0.908m dt=0.141s w=1.00 held=true clear=0.264 ik_err=0.900 d=1.567 reach=0.724 goal_gap=0.844
+[foot-ik-probe]   diag hips now=(0.0, 0.786226, 0.044724) base=(0.0, 0.90463, 0.044724) written=(0.0, 0.786226, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=1 1.129m dt=0.141s w=1.00 held=false clear=0.017 ik_err=0.015 d=0.747 reach=0.724 goal_gap=0.025
+[foot-ik-probe]   diag hips now=(0.0, 0.786226, 0.044724) base=(0.0, 0.90463, 0.044724) written=(0.0, 0.786226, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 1.086m dt=0.135s w=1.00 held=true clear=0.164 ik_err=1.957 d=2.651 reach=0.724 goal_gap=1.928
+[foot-ik-probe]   diag hips now=(0.0, 0.787428, 0.044724) base=(0.0, 0.906835, 0.044724) written=(0.0, 0.787428, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=1 0.937m dt=0.135s w=1.00 held=true clear=0.131 ik_err=0.949 d=1.622 reach=0.724 goal_gap=0.900
+[foot-ik-probe]   diag hips now=(0.0, 0.787428, 0.044724) base=(0.0, 0.906835, 0.044724) written=(0.0, 0.787428, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=1 0.710m dt=0.012s w=1.00 held=false clear=0.057 ik_err=0.028 d=0.702 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.81501, 0.044724) base=(0.0, 0.907239, 0.044724) written=(0.0, 0.81501, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=1 0.724m dt=0.113s w=1.00 held=true clear=0.020 ik_err=0.015 d=0.701 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.814441, 0.044724) base=(0.0, 0.906057, 0.044724) written=(0.0, 0.814441, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 1.722m dt=0.123s w=1.00 held=false clear=0.028 ik_err=0.022 d=0.691 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.800104, 0.044724) base=(0.0, 0.907269, 0.044724) written=(0.0, 0.800104, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=1 1.587m dt=0.117s w=1.00 held=false clear=0.014 ik_err=0.018 d=0.685 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.792696, 0.044724) base=(0.0, 0.907286, 0.044724) written=(0.0, 0.792696, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 1.559m dt=0.117s w=1.00 held=false clear=0.029 ik_err=0.023 d=0.678 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.789633, 0.044724) base=(0.0, 0.907244, 0.044724) written=(0.0, 0.789633, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe] OFF side=0 ankle=(-0.030, 0.105, -32.191) clearance=0.029
+[foot-ik-probe] OFF side=1 ankle=(0.041, 0.409, -31.672) clearance=0.324
+[foot-ik-probe] shot=2 ik=false planted=true w=1.00 err=0.023
+[foot-ik-probe]   angles thigh=-0.809 shin=1.469 goal=(-0.029629, 0.085, -31.19809) ankle=(-0.029735, 0.105114, -32.19066)
+[foot-ik-probe]   chain thigh=0.333 shin=0.391 goal=0.678 (sum=0.724)
+[foot-ik-probe]   step side=0 0.740m dt=0.133s w=1.00 held=true clear=0.029 ik_err=0.023 d=0.678 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.907182, 0.044724) base=(0.0, 0.907244, 0.044724) written=(0.0, 0.789633, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 1.599m dt=0.117s w=1.00 held=true clear=0.029 ik_err=0.023 d=0.678 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.907305, 0.044724) base=(0.0, 0.907244, 0.044724) written=(0.0, 0.789633, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 0.544m dt=0.117s w=1.00 held=true clear=0.029 ik_err=0.023 d=0.678 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.907262, 0.044724) base=(0.0, 0.907244, 0.044724) written=(0.0, 0.789633, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 1.547m dt=0.117s w=1.00 held=true clear=0.029 ik_err=0.023 d=0.678 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.907222, 0.044724) base=(0.0, 0.907244, 0.044724) written=(0.0, 0.789633, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 0.538m dt=0.116s w=1.00 held=true clear=0.029 ik_err=0.023 d=0.678 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.907106, 0.044724) base=(0.0, 0.907244, 0.044724) written=(0.0, 0.789633, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 1.289m dt=0.109s w=1.00 held=true clear=0.029 ik_err=0.023 d=0.678 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.906964, 0.044724) base=(0.0, 0.907244, 0.044724) written=(0.0, 0.789633, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 0.784m dt=0.125s w=1.00 held=true clear=0.029 ik_err=0.023 d=0.678 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.906292, 0.044724) base=(0.0, 0.907244, 0.044724) written=(0.0, 0.789633, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 1.280m dt=0.126s w=1.00 held=true clear=0.029 ik_err=0.023 d=0.678 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.906545, 0.044724) base=(0.0, 0.907244, 0.044724) written=(0.0, 0.789633, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 0.842m dt=0.124s w=1.00 held=true clear=0.029 ik_err=0.023 d=0.678 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.906772, 0.044724) base=(0.0, 0.907244, 0.044724) written=(0.0, 0.789633, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 1.373m dt=0.116s w=1.00 held=true clear=0.029 ik_err=0.023 d=0.678 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.906875, 0.044724) base=(0.0, 0.907244, 0.044724) written=(0.0, 0.789633, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 0.787m dt=0.137s w=1.00 held=true clear=0.029 ik_err=0.023 d=0.678 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.906607, 0.044724) base=(0.0, 0.907244, 0.044724) written=(0.0, 0.789633, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 1.614m dt=0.130s w=1.00 held=true clear=0.029 ik_err=0.023 d=0.678 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.907196, 0.044724) base=(0.0, 0.907244, 0.044724) written=(0.0, 0.789633, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe] ON side=0 ankle=(-0.033, 0.258, -44.784) clearance=0.029
+[foot-ik-probe] ON side=1 ankle=(0.037, 0.496, -44.289) clearance=0.324
+[foot-ik-probe] shot=3 ik=true planted=true w=1.00 err=0.023
+[foot-ik-probe]   angles thigh=-0.809 shin=1.469 goal=(-0.029629, 0.085, -31.19809) ankle=(-0.032824, 0.257577, -44.78418)
+[foot-ik-probe]   chain thigh=0.333 shin=0.391 goal=0.678 (sum=0.724)
+[foot-ik-probe]   step side=0 0.708m dt=0.134s w=1.00 held=true clear=0.029 ik_err=0.023 d=0.678 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.907271, 0.044724) base=(0.0, 0.907244, 0.044724) written=(0.0, 0.789633, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 0.767m dt=0.116s w=1.00 held=true clear=-0.005 ik_err=13.991 d=14.692 reach=0.724 goal_gap=13.970
+[foot-ik-probe]   diag hips now=(0.0, 0.782222, 0.044724) base=(0.0, 0.901284, 0.044724) written=(0.0, 0.782222, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=1 1.744m dt=0.133s w=1.00 held=false clear=-0.004 ik_err=0.013 d=0.687 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.787745, 0.044724) base=(0.0, 0.907329, 0.044724) written=(0.0, 0.787745, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 1.737m dt=0.134s w=1.00 held=false clear=-0.013 ik_err=0.012 d=0.671 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.776579, 0.044724) base=(0.0, 0.896415, 0.044724) written=(0.0, 0.776579, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=1 1.608m dt=0.133s w=1.00 held=false clear=-0.018 ik_err=0.013 d=0.650 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.764168, 0.044724) base=(0.0, 0.884104, 0.044724) written=(0.0, 0.764168, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 1.486m dt=0.142s w=1.00 held=false clear=-0.023 ik_err=0.013 d=0.644 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.757735, 0.044724) base=(0.0, 0.87771, 0.044724) written=(0.0, 0.757735, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=1 0.627m dt=0.142s w=1.00 held=true clear=0.267 ik_err=0.626 d=1.292 reach=0.724 goal_gap=0.569
+[foot-ik-probe]   diag hips now=(0.0, 0.757735, 0.044724) base=(0.0, 0.87771, 0.044724) written=(0.0, 0.757735, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=1 1.055m dt=0.124s w=1.00 held=true clear=-0.023 ik_err=1.650 d=2.364 reach=0.724 goal_gap=1.641
+[foot-ik-probe]   diag hips now=(0.0, 0.771259, 0.044724) base=(0.0, 0.89125, 0.044724) written=(0.0, 0.771259, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 1.243m dt=0.134s w=1.00 held=false clear=-0.018 ik_err=0.003 d=0.697 reach=0.724 goal_gap=0.000
+[foot-ik-probe]   diag hips now=(0.0, 0.773093, 0.044724) base=(0.0, 0.893089, 0.044724) written=(0.0, 0.773093, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 0.862m dt=0.133s w=1.00 held=true clear=0.275 ik_err=0.863 d=1.529 reach=0.724 goal_gap=0.807
+[foot-ik-probe]   diag hips now=(0.0, 0.782126, 0.044724) base=(0.0, 0.902124, 0.044724) written=(0.0, 0.782126, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=1 1.164m dt=0.133s w=1.00 held=false clear=-0.001 ik_err=0.001 d=0.730 reach=0.724 goal_gap=0.008
+[foot-ik-probe]   diag hips now=(0.0, 0.782126, 0.044724) base=(0.0, 0.902124, 0.044724) written=(0.0, 0.782126, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=0 1.059m dt=0.143s w=1.00 held=true clear=0.048 ik_err=1.891 d=2.612 reach=0.724 goal_gap=1.890
+[foot-ik-probe]   diag hips now=(0.0, 0.786016, 0.044724) base=(0.0, 0.906016, 0.044724) written=(0.0, 0.786016, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=1 0.927m dt=0.143s w=1.00 held=true clear=0.232 ik_err=0.926 d=1.593 reach=0.724 goal_gap=0.870
+[foot-ik-probe]   diag hips now=(0.0, 0.786016, 0.044724) base=(0.0, 0.906016, 0.044724) written=(0.0, 0.786016, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe]   step side=1 1.100m dt=0.124s w=1.00 held=true clear=0.247 ik_err=1.998 d=2.678 reach=0.724 goal_gap=1.956
+[foot-ik-probe]   diag hips now=(0.0, 0.787082, 0.044724) base=(0.0, 0.907081, 0.044724) written=(0.0, 0.787082, 0.044724)
+[foot-ik-probe]   diag skel scale=(1.0, 1.0, 1.0) y=(0.0, 1.0, 0.0) | model y=(0.0, 1.0, 0.0) parent_bone=102
+[foot-ik-probe] planted drift: frames=41 mean=1.0957m max=1.7442m
+[foot-ik-probe] pelvis jitter: max step=0.0600m offset=(0.0, -0.12, 0.0)
+[foot-ik-probe] plant switches: L=16 R=16
+[foot-ik-probe] drift at full weight: L=1.0898m (27 frames) R=1.1072m (14 frames)
+[foot-ik-probe] drift split side=0 off frames=12 mean=1.0781m max=1.6142m
+[foot-ik-probe] drift split side=0 on+held   frames=7 mean=0.8793m max=1.0862m
+[foot-ik-probe] drift split side=0 on+replant frames=8 mean=1.2914m max=1.7371m
+[foot-ik-probe] drift split side=1 on+held   frames=6 mean=0.8951m max=1.1001m
+[foot-ik-probe] drift split side=1 on+replant frames=8 mean=1.2663m max=1.7442m
+[foot-ik-probe] body speed mean: 8.60 m/s over 6.1s
+[foot-ik-probe] drift rate side=0 off 8.83 m/s (103% of body, mean w=1.00, 1.47s)
+[foot-ik-probe] drift rate side=0 on+held   6.73 m/s (78% of body, mean w=1.00, 0.91s)
+[foot-ik-probe] drift rate side=0 on+replant 11.32 m/s (132% of body, mean w=1.00, 0.91s)
+[foot-ik-probe] drift rate side=1 on+held   6.88 m/s (80% of body, mean w=1.00, 0.78s)
+[foot-ik-probe] drift rate side=1 on+replant 11.12 m/s (129% of body, mean w=1.00, 0.91s)
+[foot-ik-probe] solve quality side=0 in-reach: mean ik_err=0.0200m (19 frames)
+[foot-ik-probe] solve quality side=0 clamped-out: mean shortfall=2.4848m (8 frames)
+[foot-ik-probe] solve quality side=1 in-reach: mean ik_err=0.0129m (7 frames)
+[foot-ik-probe] solve quality side=1 clamped-out: mean shortfall=0.8868m (7 frames)
+WARNING: 17 ObjectDB instances were leaked at exit (run with `--verbose` for details).
+   at: cleanup (core/object/object.cpp:2536)
+ERROR: 9 resources still in use at exit (run with --verbose for details).
+   at: clear (core/io/resource.cpp:822)

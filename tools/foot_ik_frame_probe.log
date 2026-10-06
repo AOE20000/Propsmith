@@ -1,0 +1,123 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+INFO ModLoader:Store: Applying options override with feature tag "editor".
+DEBUG ModLoader: Autoload order
+[
+  "ModLoaderStore",
+  "ModLoader",
+  "Services",
+  "Events",
+  "DecisionLog",
+  "GameState",
+  "ModHost",
+  "SaveSystem"
+]
+INFO ModLoader: game_install_directory: res://
+INFO ModLoader:UserProfile: No mod_ids inside "mod_list" for user profile "default" 
+DEBUG ModLoader: Found 0 mods at the following paths:
+	 - 
+SUCCESS ModLoader: DONE: Loaded 0 mod files into the virtual filesystem
+DEBUG ModLoader:UserProfile: Updated the mod lists of all user profiles
+DEBUG ModLoader:UserProfile: Updated the active state of all mods, based on the current user profile "default"
+SUCCESS ModLoader: DONE: Loaded all mod configs
+DEBUG ModLoader: mod data
+{}
+SUCCESS ModLoader: DONE: Completely finished loading mods
+SUCCESS ModLoader: DONE: Installed all script extensions
+SUCCESS ModLoader: DONE: Applied all scene extensions
+[fik-probe] A deep fold, static (d=0.30 < l1):
+[fik-probe]   A final err=0.000000 knee_fwd=+0.424
+[fik-probe] A2 stance fold, static (d=0.70, chain 0.90):
+[fik-probe]   A2 final err=0.000000 knee_fwd=+0.283
+[fik-probe] B identity rig, pin swept under it:
+[fik-probe]   B f00 err=0.000000 knee_fwd=+0.427
+[fik-probe]   B f01 err=0.000000 knee_fwd=+0.429
+[fik-probe]   B f02 err=0.000000 knee_fwd=+0.433
+[fik-probe]   B f03 err=0.000000 knee_fwd=+0.438
+[fik-probe]   B f04 err=0.000000 knee_fwd=+0.443
+[fik-probe]   B f05 err=0.000000 knee_fwd=+0.447
+[fik-probe]   B f06 err=0.000000 knee_fwd=+0.450
+[fik-probe]   B f07 err=0.000000 knee_fwd=+0.449
+[fik-probe]   B f08 err=0.000000 knee_fwd=+0.444
+[fik-probe]   B f09 err=0.000000 knee_fwd=+0.433
+[fik-probe]   B f10 err=0.000000 knee_fwd=+0.414
+[fik-probe]   B f11 err=0.000000 knee_fwd=+0.389
+[fik-probe]   B f12 err=0.000000 knee_fwd=+0.357
+[fik-probe]   B f13 err=0.000000 knee_fwd=+0.321
+[fik-probe]   B f14 err=0.000000 knee_fwd=+0.281
+[fik-probe]   B f15 err=0.000000 knee_fwd=+0.240
+[fik-probe]   B f16 err=0.000000 knee_fwd=+0.198
+[fik-probe]   B f17 err=0.000000 knee_fwd=+0.157
+[fik-probe]   B f18 err=0.000000 knee_fwd=+0.116
+[fik-probe]   B f19 err=0.000000 knee_fwd=+0.077
+[fik-probe] B worst err over the sweep: 0.000000 m
+[fik-probe] C yawed 90, rotation fix OFF (must fail):
+[fik-probe]   C f00 err=0.402508 knee_fwd=-0.000
+[fik-probe]   C f01 err=0.364332 knee_fwd=-0.000
+[fik-probe]   C f02 err=0.325777 knee_fwd=-0.000
+[fik-probe]   C f03 err=0.286729 knee_fwd=-0.000
+[fik-probe]   C f04 err=0.246978 knee_fwd=-0.000
+[fik-probe]   C f05 err=0.206205 knee_fwd=-0.000
+[fik-probe]   C f06 err=0.163997 knee_fwd=-0.000
+[fik-probe]   C f07 err=0.575015 knee_fwd=-0.000
+[fik-probe]   C f08 err=0.570326 knee_fwd=-0.000
+[fik-probe]   C f09 err=0.567080 knee_fwd=-0.000
+[fik-probe]   C f10 err=0.025536 knee_fwd=-0.000
+[fik-probe]   C f11 err=0.077701 knee_fwd=-0.000
+[fik-probe]   C f12 err=0.130863 knee_fwd=-0.000
+[fik-probe]   C f13 err=0.184641 knee_fwd=-0.000
+[fik-probe]   C f14 err=0.238892 knee_fwd=-0.000
+[fik-probe]   C f15 err=0.293470 knee_fwd=-0.000
+[fik-probe]   C f16 err=0.347906 knee_fwd=-0.000
+[fik-probe]   C f17 err=0.401465 knee_fwd=+0.000
+[fik-probe]   C f18 err=0.453510 knee_fwd=+0.000
+[fik-probe]   C f19 err=0.503763 knee_fwd=+0.000
+[fik-probe] C worst err over the sweep: 0.575015 m
+[fik-probe] C2 yawed 90, rotation fix ON:
+[fik-probe]   C2 f00 err=0.000000 knee_fwd=+0.427
+[fik-probe]   C2 f01 err=0.000000 knee_fwd=+0.429
+[fik-probe]   C2 f02 err=0.000000 knee_fwd=+0.433
+[fik-probe]   C2 f03 err=0.000000 knee_fwd=+0.438
+[fik-probe]   C2 f04 err=0.000000 knee_fwd=+0.443
+[fik-probe]   C2 f05 err=0.000000 knee_fwd=+0.447
+[fik-probe]   C2 f06 err=0.000000 knee_fwd=+0.450
+[fik-probe]   C2 f07 err=0.000000 knee_fwd=+0.449
+[fik-probe]   C2 f08 err=0.000000 knee_fwd=+0.444
+[fik-probe]   C2 f09 err=0.000000 knee_fwd=+0.433
+[fik-probe]   C2 f10 err=0.000000 knee_fwd=+0.414
+[fik-probe]   C2 f11 err=0.000000 knee_fwd=+0.389
+[fik-probe]   C2 f12 err=0.000000 knee_fwd=+0.357
+[fik-probe]   C2 f13 err=0.000000 knee_fwd=+0.321
+[fik-probe]   C2 f14 err=0.000000 knee_fwd=+0.281
+[fik-probe]   C2 f15 err=0.000000 knee_fwd=+0.240
+[fik-probe]   C2 f16 err=0.000000 knee_fwd=+0.198
+[fik-probe]   C2 f17 err=0.000000 knee_fwd=+0.157
+[fik-probe]   C2 f18 err=0.000000 knee_fwd=+0.116
+[fik-probe]   C2 f19 err=0.000000 knee_fwd=+0.077
+[fik-probe] C2 worst err over the sweep: 0.000000 m
+[fik-probe] D identity + clip overwrite each frame, fix ON:
+[fik-probe]   D f00 err=0.000000 knee_fwd=+0.427
+[fik-probe]   D f01 err=0.000000 knee_fwd=+0.429
+[fik-probe]   D f02 err=0.000000 knee_fwd=+0.433
+[fik-probe]   D f03 err=0.000000 knee_fwd=+0.438
+[fik-probe]   D f04 err=0.000000 knee_fwd=+0.443
+[fik-probe]   D f05 err=0.000000 knee_fwd=+0.447
+[fik-probe]   D f06 err=0.000000 knee_fwd=+0.450
+[fik-probe]   D f07 err=0.000000 knee_fwd=+0.449
+[fik-probe]   D f08 err=0.000000 knee_fwd=+0.444
+[fik-probe]   D f09 err=0.000000 knee_fwd=+0.433
+[fik-probe]   D f10 err=0.000000 knee_fwd=+0.414
+[fik-probe]   D f11 err=0.000000 knee_fwd=+0.389
+[fik-probe]   D f12 err=0.000000 knee_fwd=+0.357
+[fik-probe]   D f13 err=0.000000 knee_fwd=+0.321
+[fik-probe]   D f14 err=0.000000 knee_fwd=+0.281
+[fik-probe]   D f15 err=0.000000 knee_fwd=+0.240
+[fik-probe]   D f16 err=0.000000 knee_fwd=+0.198
+[fik-probe]   D f17 err=0.000000 knee_fwd=+0.157
+[fik-probe]   D f18 err=0.000000 knee_fwd=+0.116
+[fik-probe]   D f19 err=0.000000 knee_fwd=+0.077
+[fik-probe] D worst err over the sweep: 0.000000 m
+[fik-probe] B vs C2 worst frame gap: 0.000000003 m
+[fik-probe] B vs D  worst frame gap: 0.000000069 m
+[fik-probe] contrast C=0.5750 vs C2=0.000100 (x5750)
+[fik-probe] PASS all scenarios

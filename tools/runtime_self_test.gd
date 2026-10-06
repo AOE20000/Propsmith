@@ -52,6 +52,7 @@ func _ready() -> void:
 	_run_section("map catalogue", 23, _check_map_catalog)
 	_run_section("camera and wardrobe wiring", 33, _check_camera_and_wardrobe)
 	_run_section("model clips sampler", 45, _check_model_clips)
+	_run_section("foot IK decision rules", 10, _check_foot_ik_rules)
 	_run_section("guided tour", 10, _check_demo_tour)
 	_run_section("tool wheel", 3, _check_tool_wheel)
 	_run_section("foot IK", 3, _check_foot_ik)
@@ -2135,6 +2136,53 @@ func _check_model_clips() -> void:
 
 	clips.queue_free()
 	model.queue_free()
+
+
+## The foot IK's decision rules, driven directly so the thresholds are checked
+## as values rather than inferred from a picture.
+##
+## Two of these exist because of measured defects, and both are the same shape
+## of mistake — a rule that could only be satisfied by a gait the component does
+## not have:
+##   * the reach release used to latch until the foot swung past `plant_enter`,
+##     which the walk clip clears by 0.015 m, so planting never came back at all;
+##   * `ANKLE_HEIGHT` was a fixed 0.085 m and the shipped figure's sole sits
+##     ~0.1 m below its ankle, so every plant decision was off by that much.
+func _check_foot_ik_rules() -> void:
+	var ik := ModelFootIK.new()
+	add_child(ik)
+
+	# The fallback must be readable and sane on its own, since a model with no
+	# measurable mesh keeps it — the capsule fallback depends on this.
+	_expect(ik.sole_drop() > 0.0, "the sole drop must be positive")
+	_expect(
+		ik.sole_drop() >= ModelFootIK.ANKLE_HEIGHT * 0.5,
+		"the sole drop must not collapse to a sliver on a meshless rig"
+	)
+	_expect(
+		ik.reach_release_hold > 0.0,
+		"a reach release must expire: without a time escape it can deadlock"
+	)
+	_expect(
+		ik.reach_release_distance > 0.0,
+		"a reach release must expire on a stale pin too"
+	)
+	# The plant band has to be a band. A zero-width band chatters on any float
+	# noise, and an inverted one never plants or never releases.
+	_expect(ik.plant_exit > ik.plant_enter, "plant_exit must sit above plant_enter")
+	_expect(ik.still_resume_speed > ik.still_speed, "the standstill gate needs hysteresis")
+	_expect(ik.max_pelvis_drop > 0.0, "the pelvis drop must be allowed to do something")
+	_expect(
+		ik.blend_speed > ik.still_speed_lerp,
+		"the foot must reach full weight inside a stance phase"
+	)
+
+	# A fresh component has never planted, so both escapes must read as closed —
+	# the release only opens once something has actually been released.
+	_expect(not ik._reach_released[0], "a fresh foot must not be flagged as released")
+	_expect(ik._reach_held[0] == 0.0, "a fresh foot must have no release age")
+
+	ik.queue_free()
 
 
 ## The ambience layer: levels, looping, point sources, teardown.

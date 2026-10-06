@@ -345,8 +345,14 @@ func _side_name(side: int) -> String:
 	return "left" if side == 0 else "right"
 
 
+## World-space ankle position, matching what the component itself measures.
+## `_bone_origin` multiplies by `skeleton.global_transform`; reading
+## `get_bone_global_pose().origin` alone gives a skeleton-space point, which on
+## a figure standing 0.87 m off the origin reads metres off. An earlier version
+## of this probe made exactly that mistake and reported a 3.2 m pin gap that the
+## game does not have.
 func _ankle(side: int) -> Vector3:
-	return _skel.get_bone_global_pose(_feet[side]).origin
+	return (_skel.global_transform * _skel.get_bone_global_pose(_feet[side])).origin
 
 
 ## How far the ankle currently sits from the pin it is being held to. Large
