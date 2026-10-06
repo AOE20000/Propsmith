@@ -36,3 +36,6 @@ vendor/*
 # in tools/hamr rebuilds them — see docs/local/hamr.md)
 tools/hamr/build/*
 !tools/hamr/build/.gdignore
+
+# 探针运行日志
+tools/*.log
