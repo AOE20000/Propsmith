@@ -653,20 +653,28 @@ func _pelvis_prepare(delta: float, standstill: bool = false) -> void:
 	if hips < 0:
 		return
 	var hips_origin: Vector3 = _skeleton.get_bone_pose(hips).origin
-	# Claim the bone. If the pose still holds exactly what we wrote last frame,
-	# nobody re-posed the hips since (a stance frame with the clip idle) and
-	# our old drop is still in there — strip it so the shortfall reading below
-	# is the clip's own geometry. If the pose differs, the clips' absolute
-	# write already retired our offset, and subtracting it again would cancel
-	# the very drop this frame applies: the undo-then-apply pair netted zero
-	# every locomotion frame, and the window probe measured the consequence as
-	# a permanent ~0.19 m clamp shortfall and a held foot sliding at body
-	# speed. The old undo presumed the hips pose *persists* between frames;
-	# for a bone the clip positions absolutely, it does not.
-	if _hips_written.length_squared() > 0.0 \
-			and hips_origin.is_equal_approx(_hips_written):
-		hips_origin = _hips_base
-		_skeleton.set_bone_pose_position(hips, hips_origin)
+	# The hips this frame may still carry **our own drop** from last frame —
+	# measured at 100% of frames, because nothing else writes the hips while a
+	# locomotion clip owns them. So the drop is stripped before anything is
+	# measured, and it is stripped *by arithmetic* rather than by writing to the
+	# bone:
+	#
+	# The old code did the equivalent with a pose write (`set_bone_pose_position`
+	# back to `_hips_base`), on the reasoning that the clip's own hips had to be
+	# recovered first. That undo was written when the component was a
+	# SkeletonModifier3D and its write could not survive the frame — the engine
+	# rolled the pose back, so re-reading the bone gave the clip's value and the
+	# undo was the only way to see it. As a plain node the write *does* survive,
+	# so the undo now fires every frame and does the wrong thing twice over: it
+	# undoes the drop that is still legitimately in the pose, and it does so
+	# *after* the shortfall has been read from the polluted hip, so the reading
+	# is of a pose that never existed. That fed the compensation on itself — the
+	# drop reached 0.105 m against a true shortfall of at most 0.067 m, and the
+	# surplus went into the legs as a 117° knee.
+	#
+	# Subtracting the offset in world space gives the clip's hips without touching
+	# the bone, so the shortfall is read against the pose the clip authored and
+	# the drop this frame is written once, on top.
 	var worst: float = 0.0
 	for side: int in SIDES.size():
 		if _weight[side] <= 0.001:
@@ -681,7 +689,20 @@ func _pelvis_prepare(delta: float, standstill: bool = false) -> void:
 		var l2: float = _rest_length(lower, foot)
 		if l1 <= 0.0 or l2 <= 0.0:
 			continue
-		var to_target: Vector3 = _plant_pos[side] - _bone_origin(upper)
+		# The shortfall is measured from the **drop-corrected** hip: the pose the
+		# clip authored, not the pose this component produced last frame. Using
+		# the raw hip made the reading shrink as the drop grew, and since
+		# `worst` is a per-frame maximum the smaller value was discarded — so the
+		# offset only ever accumulated. That is the feedback loop that carried
+		# the drop to 0.105 m against a real shortfall of 0.067 m, and the surplus
+		# had nowhere to go but the knees.
+		#
+		# `_pelvis_current` is world space and this component writes it into the
+		# hips bone, so every bone below the hips moves by the same world
+		# amount. Adding it back here recovers the clip's own geometry without
+		# writing anything to any bone.
+		var to_target: Vector3 = _plant_pos[side] \
+			- (_bone_origin(upper) + _pelvis_current)
 		var gap: float = to_target.length() - (l1 + l2)
 		if gap > worst:
 			worst = gap
@@ -702,17 +723,29 @@ func _pelvis_prepare(delta: float, standstill: bool = false) -> void:
 	# sides — so a raw per-frame value wrote that breathing straight into the
 	# pelvis as a twitch. Which foot is "worst" no longer decides the direction
 	# frame to frame either: the offset itself is the state, and it is smoothed.
-	# Ease in briskly, ease out slowly. The stance phase is short, so the drop
-	# has to arrive during it; but cancelling it the instant the stance ends
-	# snapped the figure back to centre (playtested as a flash back to the
-	# middle of the frame), so leaving takes a third of the rate.
-	var rising: bool = want.length_squared() > _pelvis_current.length_squared()
-	var rate: float = pelvis_smoothing if rising else pelvis_smoothing * 0.3
-	if standstill and not rising:
-		# At standstill the restored legs are already at rest: a slow drain
-		# would leave them brushing the ground under a still-lowered hip and
-		# read as a second bob after the stop. Drain at the full rate — still
-		# exponential, just one motion instead of two.
+	# Ease in briskly, and **out at the same rate**.
+	#
+	# The exit used to run at a third of the entry rate, on the reasoning that
+	# cancelling the drop the instant the stance ends "snapped the figure back to
+	# the middle of the frame". Measured against the shortfall it exists to
+	# track, that is wrong in the direction that matters: the leg is short by only
+	# 0.008–0.088 m and is often **not short at all** (a negative gap — it
+	# reaches), yet a slow exit carried the drop as high as 0.112 m, which is
+	# **770% of the shortfall**. A drop that large cannot be spent on shortfall,
+	# so it goes into the legs instead: the measured knee angle reads 123.8° with
+	# the slow exit and 163.7° with none, which is the playtest's bent-knee,
+	# leaning-back stance. The compensation has to be able to *not exist* the
+	# moment the leg can reach, or it becomes the crouch it was meant to avoid.
+	#
+	# Symmetric easing keeps the offset tracking the shortfall rather than
+	# accumulating it, and a shortfall that breathes with the stride still yields
+	# a drop that breathes with the stride — which is what the raw per-frame value
+	# was wrongly blamed for.
+	var rate: float = pelvis_smoothing
+	if standstill:
+		# At standstill the legs are already back at rest, so the drop's own
+		# target is zero; drain at the full rate. This is a settle, not a stride,
+		# and any residual reads as a second bob after the stop.
 		rate = pelvis_smoothing
 	_pelvis_current = _pelvis_current.lerp(want, 1.0 - exp(-rate * delta))
 	_pelvis_applied = _pelvis_current.length()
