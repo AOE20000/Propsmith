@@ -10,15 +10,27 @@ class_name ModelClips
 ## skeleton's own node and bone names at build time, with the author rig's
 ## Hips-height re-anchored to ours.
 ##
-## ## Implementation note (2026-10-04): poses are applied **manually** — the
-## clip is sampled with `Animation.track_interpolate` each frame and written
-## straight into the skeleton with `set_bone_pose_*`. The AnimationMixer was
-## measured to advance its cursor **without ever writing a single bone** in
-## this build (Godot 4.7.2): every callback mode, wiring order, cache reset
-## and explicit `advance()` — reproduced on a minimal code-built rig, see
-## `tools/mini_rig_probe.gd`. Manual sampling removes that entire failure
-## surface, and this component needs none of the mixer's machinery anyway:
-## one clip, looped, speed-scaled, no blending.
+## ## Implementation note (2026-10-04, corrected 2026-10-06): poses are
+## applied **manually** — the clip is sampled with `Animation.track_interpolate`
+## each frame and written straight into the skeleton with `set_bone_pose_*`.
+## The original justification was that "the AnimationMixer advances its cursor
+## without ever writing a single bone in this build (Godot 4.7.2)" — that
+## measurement came from a minimal code-built rig
+## (`tools/mini_rig_probe.gd`), and a re-verification on the **real** VRM
+## skeleton with the **real** locomotion clips shows the opposite: the mixer
+## writes bones correctly in both manual `advance()` and engine-callback
+## modes (Hips delta 0.065 / 0.083 rad, cursor advancing). The minimal rig
+## itself never wrote a bone, which is what the false conclusion generalised
+## from. So the engine path was never actually blocked.
+##
+## Manual sampling therefore remains as the *current* implementation, not as a
+## workaround: it needs none of the mixer's machinery (one clip, looped,
+## speed-scaled), but it also means every pose transition — and every overlay
+## component fighting this component for the same bones — is hand-rolled. The
+## planned replacement is AnimationTree for clips/blending plus
+## SkeletonModifier3D for the IK/aim/lean/spring chain, which removes the
+## whole "who writes this bone last" class of bugs (see the 2026-10-06 probe
+## results in the daily log).
 ##
 ## Division of labour with the other components, all measured:
 ## * While a clip plays it owns the whole pose — so `ModelStance`'s per-frame
