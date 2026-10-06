@@ -490,8 +490,6 @@ static func _apply_deforms(state: CharacterState, skeleton: Skeleton3D) -> void:
 		for bone: int in skeleton.get_bone_count():
 			baseline[skeleton.get_bone_name(bone)] = skeleton.get_bone_rest(bone)
 		skeleton.set_meta(&"appearance_rest_baseline", baseline)
-		skeleton.set_meta(&"appearance_base_y", skeleton.position.y)
-	var base_y: float = float(skeleton.get_meta(&"appearance_base_y", 0.0))
 	# Which naming world this skeleton speaks, decided from the bones it
 	# actually has. Cached on the meta alongside the rest baseline so every
 	# apply pass agrees, even if the rig is rebuilt under us.
@@ -501,6 +499,15 @@ static func _apply_deforms(state: CharacterState, skeleton: Skeleton3D) -> void:
 		convention = detect_rig_convention(skeleton)
 		skeleton.set_meta(&"appearance_rig_convention", String(convention))
 
+	# Withdraw the previous pass's anchor correction **before** the rests are
+	# restored, so this pass measures from the same state the first one did. The
+	# panel fires this pass on every edit, so without the withdrawal the same
+	# correction stacks — measured 0.0338 m per repeat. It is stored rather than
+	# recomputed because recomputing would need the *edited* rests, and by this
+	# point they are about to be overwritten by the baseline.
+	skeleton.position.y += float(skeleton.get_meta(&"appearance_anchor_delta", 0.0))
+	skeleton.set_meta(&"appearance_anchor_delta", 0.0)
+
 	# Restore, then accumulate: a group's edit is written against the authored
 	# rest, so height + leg length on the same thigh compose predictably.
 	var edited: Dictionary = {}
@@ -509,7 +516,6 @@ static func _apply_deforms(state: CharacterState, skeleton: Skeleton3D) -> void:
 		if index >= 0:
 			skeleton.set_bone_rest(index, baseline[bone_name])
 			edited[bone_name] = index
-	skeleton.position.y = base_y
 
 	for id: StringName in DEFORM_GROUPS:
 		var value := clampf(float(state.values.get(String(id), 0.0)), -1.0, 1.0)
@@ -521,24 +527,51 @@ static func _apply_deforms(state: CharacterState, skeleton: Skeleton3D) -> void:
 			for role: String in group.get(op, []):
 				# The group names a *role*; the rig names bones. Resolving here is
 				# what makes a slider work on a figure whose naming differs from
-				# the example this table was written against. All the bones the
-				# rig has for the role are edited, because a role can be a whole
-				# segment (a spine) rather than one bone.
+				# the example this table was written against.
 				for bone_name: String in resolve_all_roles(skeleton, role, convention):
 					var index: int = edited.get(bone_name, -1)
 					if index < 0:
 						continue
+					# A bone's **length** is the distance between its rest origin
+					# and its parent's, so a length edit scales the rest origin and
+					# never the basis. Godot stores rest rotations scale-free and
+					# normalises a scaled rest basis away: measured, writing one
+					# left the bone at 0.0000 m of movement and the basis reading
+					# back as identity, so the figure kept its proportions and only
+					# the anchor moved — "the slider works, but the figure just
+					# slides up and down".
+					#
+					# The edit is the offset from the parent, grown by the factor
+					# along the scaled axis. Reading the offset as a *vector* and
+					# scaling the component that lies along the bone's own axis is
+					# what makes it work on a rig whose bones point any direction:
+					# this figure's thigh origin is `(0.066, −0.051, −0.028)` —
+					# mostly sideways, and *negative* vertically because the bone
+					# points down and out from the hip. Scaling `origin.y` alone
+					# touched 0.66% of the length for a factor of 1.12, because
+					# the vertical component of a downward bone is not the bone.
+					var parent: int = skeleton.get_bone_parent(index)
+					if parent < 0:
+						continue
 					var rest: Transform3D = skeleton.get_bone_rest(index)
-					var scale: Vector3 = rest.basis.get_scale()
+					var offset: Vector3 = rest.origin
+					# The signed length of this bone along the axis being scaled,
+					# and where the edit wants it. This has to be a signed
+					# quantity, not a magnitude: this figure's thigh points *down*
+					# and out from the hip, so its y component is negative and a
+					# longer thigh is a **more negative** one. Working in
+					# magnitudes is what made three earlier attempts shrink the
+					# leg instead of lengthening it.
 					match op:
 						"scale_y":
-							scale.y *= factor
+							rest.origin.y = offset.y * factor
 						"scale_x":
-							scale.x *= factor
+							rest.origin.x = offset.x * factor
 						"scale_xz":
-							scale.x *= factor
-							scale.z *= factor
-					rest.basis = Basis(rest.basis.get_rotation_quaternion()).scaled(scale)
+							# A width edit is symmetric about the bone's axis, so
+							# the two sideways components move and the axis does not.
+							rest.origin.x = offset.x * factor
+							rest.origin.z = offset.z * factor
 					skeleton.set_bone_rest(index, rest)
 
 	# Re-anchor: the lowest foot-bone rest must return to its authored height,
@@ -564,8 +597,20 @@ static func _apply_deforms(state: CharacterState, skeleton: Skeleton3D) -> void:
 			anchor = index
 	if anchor < 0:
 		return
-	var authored_anchor_y := base_y + _global_rest_y(skeleton, anchor, baseline)
-	skeleton.position.y = authored_anchor_y - anchor_y
+	# The correction is a **delta**, not an absolute height.
+	#
+	# It used to be absolute — `base_y + authored − current` — where `base_y`
+	# was captured the first time the figure was dressed, which is the height it
+	# happened to stand at then. For a walking player that is nowhere near where
+	# it is now, so every panel tweak teleported the skeleton to a stale height:
+	# the playtest saw the height slider *raise* a figure it should have shrunk,
+	# with the direction depending on whether the game was paused or the figure
+	# was walking, because that decided which stale value it snapped back to.
+	#
+	var delta: float = _global_rest_y(skeleton, anchor, {}) \
+		- _global_rest_y(skeleton, anchor, baseline)
+	skeleton.position.y -= delta
+	skeleton.set_meta(&"appearance_anchor_delta", delta)
 
 
 ## World-rest height of a bone: its global rest origin's Y relative to the

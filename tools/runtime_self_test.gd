@@ -956,11 +956,21 @@ func _check_character_appearance() -> void:
 		"zeroed proportions must leave the authored bone rests untouched")
 
 	# Full height must scale the spine rest and pin the foot back to the floor.
+	#
+	# The assertion reads the rest **origin**, not a basis scale. A bone's length
+	# is the distance between its rest origin and its parent's, and Godot stores
+	# rest rotations scale-free — a scaled rest basis is normalised away, so the
+	# old basis-scale assertion was asserting an implementation that cannot work.
+	# Measured on the shipped figure: after writing a 1.12 basis scale the bone
+	# had not moved (0.0000 m) and the basis read back as identity.
 	var taller := CharacterAppearance.default_state()
 	taller.record("body_height", 1.0)
 	CharacterAppearance.apply(taller, model)
-	_expect(rig.get_bone_rest(spine1).basis.get_scale().y > 1.1,
-		"full height must scale the spine rest")
+	var grown_spine1: Vector3 = rig.get_bone_rest(spine1).origin
+	_expect(
+		is_equal_approx(grown_spine1.y, authored_spine1_rest.origin.y * 1.13),
+		"full height must scale the spine rest origin by the group's factor"
+	)
 	_expect(rig.position.y > base_skeleton_y,
 		"a lengthened body must re-anchor the skeleton so the foot stays on the floor")
 
