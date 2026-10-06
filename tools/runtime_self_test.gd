@@ -51,13 +51,13 @@ func _ready() -> void:
 	_run_section("map sources and blueprints", 14, _check_map_sources_and_blueprints)
 	_run_section("map catalogue", 23, _check_map_catalog)
 	_run_section("camera and wardrobe wiring", 33, _check_camera_and_wardrobe)
-	_run_section("model clips sampler", 16, _check_model_clips)
+	_run_section("model clips sampler", 18, _check_model_clips)
 	_run_section("guided tour", 10, _check_demo_tour)
 	_run_section("tool wheel", 3, _check_tool_wheel)
 	_run_section("foot IK", 3, _check_foot_ik)
 	_run_section("foot IK aim arithmetic", 3, _check_aim_arithmetic)
 	_run_section("foot IK standstill restore", 4, _check_foot_ik_restore)
-	_run_section("foot IK standstill hysteresis", 4, _check_foot_ik_stillness)
+	_run_section("foot IK standstill hysteresis", 5, _check_foot_ik_stillness)
 	_run_section("model lean easing", 4, _check_model_lean)
 	_run_section("spring bones", 8, _check_spring_bones)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
@@ -1991,6 +1991,16 @@ func _check_model_clips() -> void:
 		clips._decide_gear(1.0 / 30.0, 0.0)
 	_expect(not clips._blend_active, "the stop blend must finish within its window")
 
+	# Starting to walk again must cross-fade from the standing pose into the
+	# cycle — a one-frame jump from stance to a stride's contact pose was the
+	# "stiff get-going" look. The fade runs its window and clears.
+	clips._decide_gear(1.0 / 30.0, 2.0)
+	_expect(clips._cross_active, "starting to walk must cross-fade from the stance")
+	for i: int in 6:
+		clips._decide_gear(1.0 / 30.0, 2.0)
+	_expect(not clips._cross_active,
+		"the start cross-fade must finish within its window")
+
 	# Airborne: rising selects the jump action, falling the fall loop, and
 	# landing blends the pose back into the stance. Vertical speed is smoothed
 	# like the horizontal one, so each phase transition is fed for a handful of
@@ -2368,6 +2378,16 @@ func _check_foot_ik_stillness() -> void:
 	for i: int in 40:
 		ik._update_stillness(Vector3(0.002, 0.0, 0.0), 1.0 / 60.0)
 	_expect(ik._still, "a slow glide must latch still again")
+	# Between the thresholds the clips may already be walking (the latch only
+	# gates planting) — a running restore must yield to them there, or it
+	# mutes the first strides and hands back a half-rest pose.
+	ik._restore_from[0] = {
+		"upper": {"rot": Quaternion(), "pos": Vector3.ZERO, "scale": Vector3.ONE},
+	}
+	for i: int in 8:
+		ik._update_stillness(Vector3(0.0075, 0.0, 0.0), 1.0 / 60.0)
+	_expect(ik._still and ik._restore_from[0].is_empty(),
+		"past the enter threshold a restore must yield to the clips, still latched")
 
 
 ## The lean's inputs must arrive damped: the raw per-frame yaw rate of a

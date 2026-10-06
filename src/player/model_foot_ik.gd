@@ -324,6 +324,14 @@ func _update_stillness(displacement: Vector3, delta: float) -> bool:
 			# progress would only fight them.
 			_cancel_restore(0)
 			_cancel_restore(1)
+		elif _planar_speed > still_speed:
+			# Between the thresholds the clips may already be walking again —
+			# the latch only gates *planting*, not the clips — so a restore
+			# still running here would mute the first strides and then hand
+			# back a half-rest pose. Yield it early; the latch keeps planting
+			# off until the resume speed either way.
+			_cancel_restore(0)
+			_cancel_restore(1)
 	else:
 		if _planar_speed < still_speed:
 			_still_time += delta

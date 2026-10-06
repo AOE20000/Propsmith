@@ -269,9 +269,11 @@ func _decide_gear(
 	if walking and not _walking:
 		# Walking again cancels any stop blend in progress: the pose continues
 		# from wherever the blend had reached, which is exactly what a human
-		# does when they change their mind mid-deceleration.
+		# does when they change their mind mid-deceleration. The start itself
+		# cross-fades from the standing pose — a one-frame jump from stance to
+		# a stride's contact pose was the "stiff get-going" look.
 		_blend_active = false
-		_start_clip(WALK_CLIP)
+		_start_clip(WALK_CLIP, false, true)
 		_walking = true
 		_running = false
 		_gear_time = 0.0
@@ -279,13 +281,16 @@ func _decide_gear(
 		# Gear selection with hold-time hysteresis: the measured speed hovers
 		# around the threshold during acceleration, and without the hold the
 		# clip flips walk/run every frame (the reference system's
-		# RunToWalkTime, same reason).
+		# RunToWalkTime, same reason). The switch cross-fades too: keeping the
+		# cycle phase aligns *which* stride moment plays next, but the two
+		# cycles' poses still differ, and a hard swap read as a hitch every
+		# time the figure crossed the gear threshold.
 		_gear_time += delta
 		var want_run := _speed > run_threshold
 		if want_run != _running and _gear_time >= gear_hold:
 			_running = want_run
 			_gear_time = 0.0
-			_start_clip(RUN_CLIP if _running else WALK_CLIP, true)
+			_start_clip(RUN_CLIP if _running else WALK_CLIP, true, true)
 		# A gear switch to a clip the library lacks (or any path that lost the
 		# current one) must not sample into null — fall back to the walk clip.
 		if _current_clip == null:
