@@ -58,6 +58,7 @@ func _ready() -> void:
 	_run_section("foot IK aim arithmetic", 3, _check_aim_arithmetic)
 	_run_section("foot IK standstill restore", 4, _check_foot_ik_restore)
 	_run_section("foot IK standstill hysteresis", 4, _check_foot_ik_stillness)
+	_run_section("model lean easing", 4, _check_model_lean)
 	_run_section("spring bones", 8, _check_spring_bones)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
@@ -2367,6 +2368,54 @@ func _check_foot_ik_stillness() -> void:
 	for i: int in 40:
 		ik._update_stillness(Vector3(0.002, 0.0, 0.0), 1.0 / 60.0)
 	_expect(ik._still, "a slow glide must latch still again")
+
+
+## The lean's inputs must arrive damped: the raw per-frame yaw rate of a
+## turning body is a spike train that snapped the roll to its cap on every
+## start (the "suddenly tips over" playtest report), and the ease itself has
+## to be slow enough that the torso arrives with the stride and leaves with
+## the legs.
+func _check_model_lean() -> void:
+	var rig := Node3D.new()
+	rig.name = "LeanRig"
+	add_child(rig)
+	var skel := Skeleton3D.new()
+	rig.add_child(skel)
+	var chest: int = skel.add_bone("Chest")
+	skel.set_bone_rest(chest, Transform3D(Basis(), Vector3.ZERO))
+	skel.reset_bone_poses()
+	var lean := ModelLean.new()
+	add_child(lean)
+	lean.setup(rig)
+	lean._process(1.0 / 60.0)  # the anchor was taken in setup; a settling tick
+	var max_roll: float = deg_to_rad(lean.max_roll_degrees)
+	# A hard sustained turn (0.2 rad per tick = 12 rad/s) for 8 ticks: the
+	# roll must ease in behind the smoothed yaw rate. Measured on this exact
+	# drive: the damped build reaches ~30% of the cap where the old
+	# spike-fed path reached ~42% (calibration probe, 2026-10-06).
+	for i: int in 8:
+		rig.rotation.y += 0.2
+		lean._process(1.0 / 60.0)
+	_expect(absf(lean._roll) < max_roll * 0.36,
+		"a hard turn must ease the roll in, not snap it to the cap")
+	# When the turn stops the smoothed rate drains and the roll follows —
+	# it overshoots briefly (the damper's momentum, measured at ~134% of the
+	# turn-end value), so the decay window is a full second.
+	var rolled: float = lean._roll
+	for i: int in 60:
+		lean._process(1.0 / 60.0)
+	_expect(absf(lean._roll) < absf(rolled) * 0.5,
+		"after the turn ends the roll must decay, not hold")
+	# Forward motion builds the pitch over several ticks; stopping decays it.
+	for i: int in 40:
+		rig.rotation.y = 0.0
+		rig.position.z -= 0.09
+		lean._process(1.0 / 60.0)
+	var built: float = lean._pitch
+	_expect(built > deg_to_rad(1.0), "walking must build the forward pitch")
+	for i: int in 40:
+		lean._process(1.0 / 60.0)
+	_expect(lean._pitch < built * 0.4, "stopping must decay the pitch")
 
 
 ## The spring-bone chains: collection, rest behaviour, gravity response, the
