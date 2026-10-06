@@ -57,6 +57,7 @@ func _ready() -> void:
 	_run_section("foot IK", 3, _check_foot_ik)
 	_run_section("foot IK aim arithmetic", 3, _check_aim_arithmetic)
 	_run_section("foot IK standstill restore", 4, _check_foot_ik_restore)
+	_run_section("foot IK standstill hysteresis", 4, _check_foot_ik_stillness)
 	_run_section("spring bones", 8, _check_spring_bones)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
@@ -2331,6 +2332,41 @@ func _check_foot_ik_restore() -> void:
 		"the restore must ease toward rest, not snap")
 	_expect(ik._restore_from[0].is_empty(),
 		"a finished restore must clear its snapshot")
+
+
+## The standstill gate's hysteresis: a latched still figure must ride out the
+## alternating hit/miss speed samples of a decelerating body without
+## unlatching — an un-latched gate flapped release/restore/re-plant all
+## through the decay tail, and the playtest read it as twitching twice.
+func _check_foot_ik_stillness() -> void:
+	var ik := ModelFootIK.new()
+	add_child(ik)
+	var latched := false
+	for i: int in 30:
+		latched = ik._update_stillness(Vector3.ZERO, 1.0 / 60.0)
+	_expect(latched, "a standing figure must latch still after the delay")
+	# Boundary noise: alternating 0.48 m/s hits and misses (the raw sample of
+	# a body gliding at ~0.2 m/s across uneven physics/render beats) — the
+	# smoothed, latched gate must hold.
+	for i: int in 40:
+		var step := Vector3(0.008, 0.0, 0.0) if i % 2 == 0 else Vector3.ZERO
+		ik._update_stillness(step, 1.0 / 60.0)
+	_expect(ik._still,
+		"boundary spikes must not unlatch a still figure (hysteresis)")
+	# Real motion unlatches — and cancels a restore in progress, or it would
+	# fight the clips' own leg writes. (A fake snapshot stands in for one a
+	# real _begin_restore would have taken; this gate test has no skeleton.)
+	ik._restore_from[0] = {
+		"upper": {"rot": Quaternion(), "pos": Vector3.ZERO, "scale": Vector3.ONE},
+	}
+	for i: int in 30:
+		ik._update_stillness(Vector3(0.1, 0.0, 0.0), 1.0 / 60.0)
+	_expect(not ik._still and ik._restore_from[0].is_empty(),
+		"real motion must unlatch and cancel a running restore")
+	# A slow glide latches again.
+	for i: int in 40:
+		ik._update_stillness(Vector3(0.002, 0.0, 0.0), 1.0 / 60.0)
+	_expect(ik._still, "a slow glide must latch still again")
 
 
 ## The spring-bone chains: collection, rest behaviour, gravity response, the

@@ -48,6 +48,12 @@ class_name ModelFootIK
 ##   is eased back to its rest pose (`_process_standstill`) — surfacing only
 ##   once the gear threshold put the walk speed on the run clip, whose
 ##   pace-exact pins stick where the walk clip's stale pins used to churn.
+##   The gate itself needed two layers of robustness the first cut lacked:
+##   the speed reads the *interpolated* transform and is smoothed, and the
+##   decision latches with hysteresis (`still_resume_speed`) — the raw
+##   per-frame sample of a gliding body alternates hit/miss with the physics
+##   ticks, and an un-latched gate flapped release/restore/re-plant all
+##   through the decay tail ("it twitches twice before settling").
 ##
 ## **Measured acceptance** (window probe `tools/foot_ik_probe.gd`, sampling
 ## after the component tick — before that the probe read the pose the
@@ -119,11 +125,21 @@ const KNEE_SIGN: float = -1.0
 ## After this long standing still the foot is handed back to the clip, so a
 ## character that stops does not keep correcting a pose the animation owns.
 @export var plant_max_time: float = 0.45
-## Below this planar speed (m/s) the figure counts as standing still. It sits
-## above the clip's own walk threshold (0.25) so the release lands while the
-## stop blend still owns the pose, and low enough that no real stride dips
-## under it.
+## Below this planar speed (m/s) the figure starts counting as standing still.
+## It sits above the clip's own walk threshold (0.25) so the release lands
+## while the stop blend still owns the pose.
 @export var still_speed: float = 0.3
+## Planar speed (m/s) above which a latched standstill unlatches. The gap to
+## `still_speed` is hysteresis, and it is not a nicety: the raw per-frame
+## speed of a decelerating body alternates (physics ticks land on render
+## frames unevenly), and an un-latched gate around one threshold flapped —
+## each flap released and restored the legs, then re-planted and re-dropped
+## the pelvis. The playtest read that as "it twitches twice before settling".
+@export var still_resume_speed: float = 0.6
+## How fast the smoothed planar speed follows the measured one (per second).
+## The smoothing is what turns the alternating hit/miss samples of a gliding
+## body into one monotonic decay the hysteresis can work with.
+@export var still_speed_lerp: float = 8.0
 ## Seconds of stillness before the standstill release fires. Long enough to
 ## ride out a one-frame speed dip, short enough that a stop does not read as
 ## frozen.
@@ -217,6 +233,11 @@ var _reach_released: Array[bool] = [false, false]
 var _last_model_pos: Vector3 = Vector3.ZERO
 var _pos_anchored: bool = false
 var _still_time: float = 0.0
+## The smoothed planar speed the stillness decision reads, and the latched
+## decision itself (true between the enter and resume thresholds — the
+## hysteresis that keeps the decay tail from flapping the release).
+var _planar_speed: float = 0.0
+var _still: bool = false
 var _restore_from: Array[Dictionary] = [{}, {}]
 var _restore_t: Array[float] = [0.0, 0.0]
 
@@ -242,6 +263,8 @@ func setup(model: Node3D) -> void:
 	# moved or rebuilt), and any restore in progress belongs to the old rig.
 	_pos_anchored = false
 	_still_time = 0.0
+	_planar_speed = 0.0
+	_still = false
 	_cancel_restore(0)
 	_cancel_restore(1)
 	set_process(true)
@@ -261,32 +284,55 @@ func _process(delta: float) -> void:
 	# the single-bone unit test cannot see (it clears the cache) and what the
 	# end-to-end numbers show as 10-30 cm of error and a 0.87 m lurch.
 	_applied_global.clear()
-	# Standstill measurement: the model's own planar speed, sampled the same
-	# way ModelClips samples its stride. While the figure stands still no clip
-	# writes the legs any more, so pins held from the last stride would freeze
-	# the pose there forever — every release path here "hands the foot back to
-	# the clip", but a stopped clip never picks it up, and fading the weight
-	# to zero leaves the last written pose in place. See
-	# `_process_standstill`.
-	var displacement := _model.global_position - _last_model_pos
-	_last_model_pos = _model.global_position
+	# Standstill measurement: the model's own planar speed, read from the
+	# **interpolated** transform — the raw physics-tick position alternates
+	# hit/miss across render frames (the same sampling trap the physics
+	# interpolation project documented), and an unsmoothed gate on it flapped
+	# at the deceleration tail: release/restore, re-plant/re-drop, over and
+	# over — the "twitches twice before settling" the playtest caught. While
+	# the figure stands still no clip writes the legs any more, so pins held
+	# from the last stride would otherwise freeze the pose there forever (see
+	# `_process_standstill`).
+	var cur_origin: Vector3 = _model.get_global_transform_interpolated().origin
+	var displacement := cur_origin - _last_model_pos
+	_last_model_pos = cur_origin
 	var standstill := false
 	if not _pos_anchored:
 		_pos_anchored = true
 	else:
 		displacement.y = 0.0
-		if displacement.length() / maxf(delta, 1e-4) < still_speed:
-			_still_time += delta
-		else:
-			_still_time = 0.0
-			# Motion resumed: the clips write the legs again, so any restore
-			# in progress would only fight them.
-			_cancel_restore(0)
-			_cancel_restore(1)
-		standstill = _still_time >= still_delay
-	_pelvis_prepare(delta)
+		standstill = _update_stillness(displacement, delta)
+	_pelvis_prepare(delta, standstill)
 	for i: int in SIDES.size():
 		_process_foot(i, delta, standstill)
+
+
+## One step of the standstill decision — pure enough to test without a
+## camera: smooth the measured speed, then latch with hysteresis (enter below
+## `still_speed` after `still_delay`, leave only above `still_resume_speed`).
+## Latching is what makes the decay tail safe: between the thresholds the
+## decision does not change, so the release/restore cannot flap.
+func _update_stillness(displacement: Vector3, delta: float) -> bool:
+	var measured := displacement.length() / maxf(delta, 1e-4)
+	_planar_speed = lerpf(_planar_speed, measured,
+		1.0 - exp(-still_speed_lerp * delta))
+	if _still:
+		if _planar_speed > still_resume_speed:
+			_still = false
+			_still_time = 0.0
+			# Real motion again: the clips write the legs, so a restore in
+			# progress would only fight them.
+			_cancel_restore(0)
+			_cancel_restore(1)
+	else:
+		if _planar_speed < still_speed:
+			_still_time += delta
+			if _still_time >= still_delay:
+				_still = true
+				_still_time = 0.0
+		else:
+			_still_time = 0.0
+	return _still
 
 
 ## Drop the pelvis once per frame by the **worst** shortfall among the feet the
@@ -298,7 +344,7 @@ func _process(delta: float) -> void:
 ## across frames. That is also why the correction is a per-frame recompute and
 ## not a stored baseline: the clip owns the hips, this component only leans on
 ## them.
-func _pelvis_prepare(delta: float) -> void:
+func _pelvis_prepare(delta: float, standstill: bool = false) -> void:
 	if _skeleton == null:
 		return
 	var hips: int = _skeleton.find_bone(HIPS_BONE)
@@ -360,6 +406,12 @@ func _pelvis_prepare(delta: float) -> void:
 	# middle of the frame), so leaving takes a third of the rate.
 	var rising: bool = want.length_squared() > _pelvis_current.length_squared()
 	var rate: float = pelvis_smoothing if rising else pelvis_smoothing * 0.3
+	if standstill and not rising:
+		# At standstill the restored legs are already at rest: a slow drain
+		# would leave them brushing the ground under a still-lowered hip and
+		# read as a second bob after the stop. Drain at the full rate — still
+		# exponential, just one motion instead of two.
+		rate = pelvis_smoothing
 	_pelvis_current = _pelvis_current.lerp(want, 1.0 - exp(-rate * delta))
 	# Apply the eased offset onto the clean hips pose. World → hips-pose needs
 	# BOTH basis steps: the skeleton node's own basis (the authored 180° flip,
