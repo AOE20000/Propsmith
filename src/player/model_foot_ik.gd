@@ -39,6 +39,15 @@ class_name ModelFootIK
 ##   out the easing while the clamp drags — measured pins stuck at 0.15
 ##   against a 0.16 threshold) and hands the foot back; one real lift
 ##   re-arms planting.
+## * The standstill handback (`still_speed`): every release above "hands the
+##   foot back to the clip" — but when the figure has *stopped*, the clip has
+##   stopped writing, and a faded correction just leaves the last written
+##   pose in place: the figure froze mid-stride (the pins also re-pinned
+##   themselves the frame after a plant-time release, the foot never having
+##   moved). Below `still_speed` the pins are released and each owned chain
+##   is eased back to its rest pose (`_process_standstill`) — surfacing only
+##   once the gear threshold put the walk speed on the run clip, whose
+##   pace-exact pins stick where the walk clip's stale pins used to churn.
 ##
 ## **Measured acceptance** (window probe `tools/foot_ik_probe.gd`, sampling
 ## after the component tick — before that the probe read the pose the
@@ -110,6 +119,20 @@ const KNEE_SIGN: float = -1.0
 ## After this long standing still the foot is handed back to the clip, so a
 ## character that stops does not keep correcting a pose the animation owns.
 @export var plant_max_time: float = 0.45
+## Below this planar speed (m/s) the figure counts as standing still. It sits
+## above the clip's own walk threshold (0.25) so the release lands while the
+## stop blend still owns the pose, and low enough that no real stride dips
+## under it.
+@export var still_speed: float = 0.3
+## Seconds of stillness before the standstill release fires. Long enough to
+## ride out a one-frame speed dip, short enough that a stop does not read as
+## frozen.
+@export var still_delay: float = 0.15
+## Seconds the standstill restore takes per leg, from wherever the solve left
+## it back to the rest pose — the same snapshot-plus-smoothstep the stop
+## blend uses, because the failure it fixes is the same family: a pose left
+## in place with nobody writing it.
+@export var still_restore_time: float = 0.18
 ## How fast the correction fades in (per second). This has to be *faster* than
 ## a stride, not slower: a stance phase on this rig lasts about 0.1 s, so at
 ## 3/s the weight never left 0.25 and the foot was corrected by a quarter of
@@ -187,6 +210,15 @@ var _applied_global: Dictionary = {}
 ## foot would just move the anchor under it — the slide this component
 ## exists to remove.
 var _reach_released: Array[bool] = [false, false]
+## Standstill bookkeeping: the model position the planar-speed sample reads
+## against, whether that sample is real yet, how long the figure has been
+## still, and the per-side restore blend (a snapshot of the pose this
+## component last wrote, easing back to rest).
+var _last_model_pos: Vector3 = Vector3.ZERO
+var _pos_anchored: bool = false
+var _still_time: float = 0.0
+var _restore_from: Array[Dictionary] = [{}, {}]
+var _restore_t: Array[float] = [0.0, 0.0]
 
 
 ## Bind to a model root. A model without VRM-named leg bones (a capsule, a mod
@@ -206,6 +238,12 @@ func setup(model: Node3D) -> void:
 			"lower": _skeleton.find_bone(StringName("%s%s" % [SIDES[i], LOWER])),
 			"foot": _skeleton.find_bone(StringName("%s%s" % [SIDES[i], FOOT])),
 		}
+	# Re-setup starts the standstill measurement over (the model may have been
+	# moved or rebuilt), and any restore in progress belongs to the old rig.
+	_pos_anchored = false
+	_still_time = 0.0
+	_cancel_restore(0)
+	_cancel_restore(1)
 	set_process(true)
 
 
@@ -223,9 +261,32 @@ func _process(delta: float) -> void:
 	# the single-bone unit test cannot see (it clears the cache) and what the
 	# end-to-end numbers show as 10-30 cm of error and a 0.87 m lurch.
 	_applied_global.clear()
+	# Standstill measurement: the model's own planar speed, sampled the same
+	# way ModelClips samples its stride. While the figure stands still no clip
+	# writes the legs any more, so pins held from the last stride would freeze
+	# the pose there forever — every release path here "hands the foot back to
+	# the clip", but a stopped clip never picks it up, and fading the weight
+	# to zero leaves the last written pose in place. See
+	# `_process_standstill`.
+	var displacement := _model.global_position - _last_model_pos
+	_last_model_pos = _model.global_position
+	var standstill := false
+	if not _pos_anchored:
+		_pos_anchored = true
+	else:
+		displacement.y = 0.0
+		if displacement.length() / maxf(delta, 1e-4) < still_speed:
+			_still_time += delta
+		else:
+			_still_time = 0.0
+			# Motion resumed: the clips write the legs again, so any restore
+			# in progress would only fight them.
+			_cancel_restore(0)
+			_cancel_restore(1)
+		standstill = _still_time >= still_delay
 	_pelvis_prepare(delta)
 	for i: int in SIDES.size():
-		_process_foot(i, delta)
+		_process_foot(i, delta, standstill)
 
 
 ## Drop the pelvis once per frame by the **worst** shortfall among the feet the
@@ -328,10 +389,13 @@ func _near_camera() -> bool:
 	return camera.global_position.distance_to(_model.global_position) < active_range
 
 
-func _process_foot(side: int, delta: float) -> void:
+func _process_foot(side: int, delta: float, standstill: bool = false) -> void:
 	var chain: Dictionary = _chains[side]
 	var foot: int = int(chain.get("foot", -1))
 	if foot < 0:
+		return
+	if standstill:
+		_process_standstill(side, delta)
 		return
 	var foot_pos: Vector3 = _bone_origin(foot)
 	var ground: Variant = _ground_under(foot_pos)
@@ -403,6 +467,80 @@ func _process_foot(side: int, delta: float) -> void:
 		return
 	_solve(side, _plant_pos[side], _weight[side])
 	_ik_error[side] = (_bone_origin(int((_chains[side] as Dictionary)["foot"])) - _plant_pos[side]).length()
+
+
+## Standstill: no clip is writing the legs any more, so this component is the
+## only writer left — and that is the trap. A pin held from the last stride
+## keeps the solve stretching the leg toward it forever: the reach and
+## plant-time releases "hand the foot back to the clip", but a stopped clip
+## never picks it up, and fading the weight to zero leaves the last written
+## pose in place — the figure freezes mid-stride (reported as exactly that).
+## Release the pin and ease the whole chain back to rest.
+##
+## The pelvis drop drains on its own once the weights read zero
+## (`_pelvis_prepare` sums only owned sides), though on its slower fall rate —
+## for a few tenths of a second the restored legs may brush the ground under a
+## still-lowering hip. Measured acceptable; revisit with the drop rate if a
+## playtest disagrees.
+func _process_standstill(side: int, delta: float) -> void:
+	_planted[side] = false
+	if _weight[side] > 0.001:
+		# This side's pose is the one this component last wrote — nobody else
+		# will rewrite it, so the restore has to start from it. A side whose
+		# weight is already zero was released while the clip still owned the
+		# pose; the stop blend eases that one to rest.
+		if _restore_from[side].is_empty():
+			_begin_restore(side)
+		_weight[side] = 0.0
+	if not _restore_from[side].is_empty():
+		_advance_restore(side, delta)
+
+
+## Snapshot the written pose of one leg chain, as the restore blend's source.
+func _begin_restore(side: int) -> void:
+	var chain: Dictionary = _chains[side]
+	var snapshot: Dictionary = {}
+	for key: String in ["upper", "lower", "foot"]:
+		var index: int = int(chain.get(key, -1))
+		if index < 0:
+			continue
+		snapshot[key] = {
+			"rot": _skeleton.get_bone_pose_rotation(index),
+			"pos": _skeleton.get_bone_pose_position(index),
+			"scale": _skeleton.get_bone_pose_scale(index),
+		}
+	_restore_from[side] = snapshot
+	_restore_t[side] = 0.0
+
+
+## One blended frame of the restore: every chain bone eases from the snapshot
+## toward its rest pose with the stop blend's smoothstep. Done means clear —
+## the empty dictionary is the "not restoring" flag.
+func _advance_restore(side: int, delta: float) -> void:
+	var chain: Dictionary = _chains[side]
+	_restore_t[side] += delta
+	var weight := clampf(_restore_t[side] / still_restore_time, 0.0, 1.0)
+	var eased := weight * weight * (3.0 - 2.0 * weight)
+	for key: String in ["upper", "lower", "foot"]:
+		var index: int = int(chain.get(key, -1))
+		if index < 0 or not _restore_from[side].has(key):
+			continue
+		var rest := _skeleton.get_bone_rest(index)
+		var from: Dictionary = _restore_from[side][key]
+		_skeleton.set_bone_pose_rotation(index, (from["rot"] as Quaternion).slerp(
+			rest.basis.get_rotation_quaternion(), eased))
+		_skeleton.set_bone_pose_position(index, (from["pos"] as Vector3).lerp(
+			rest.origin, eased))
+		_skeleton.set_bone_pose_scale(index, (from["scale"] as Vector3).lerp(
+			rest.basis.get_scale(), eased))
+	if weight >= 1.0:
+		_restore_from[side] = {}
+		_restore_t[side] = 0.0
+
+
+func _cancel_restore(side: int) -> void:
+	_restore_from[side] = {}
+	_restore_t[side] = 0.0
 
 
 ## The two-bone solve: put the foot on `target`, with `weight` deciding how much

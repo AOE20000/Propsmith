@@ -56,6 +56,7 @@ func _ready() -> void:
 	_run_section("tool wheel", 3, _check_tool_wheel)
 	_run_section("foot IK", 3, _check_foot_ik)
 	_run_section("foot IK aim arithmetic", 3, _check_aim_arithmetic)
+	_run_section("foot IK standstill restore", 4, _check_foot_ik_restore)
 	_run_section("spring bones", 8, _check_spring_bones)
 	_run_section("save refuses a foreign map", 6, _check_save_map_identity)
 	_run_section("render styles", 32, _check_render_styles)
@@ -2285,6 +2286,51 @@ func _check_aim_arithmetic() -> void:
 	ik._aim(child, axis, angle, 0.0)
 	after = skel.get_bone_global_pose(child).basis
 	_expect(after.is_equal_approx(before), "a zero weight must leave the pose alone")
+
+
+## The standstill restore: a released leg whose pose the IK last wrote must be
+## eased back to rest, not left in place — when the figure has stopped, the
+## clip has stopped writing, so "hand the foot back to the clip" has no
+## receiver and the figure would stay frozen mid-stride.
+func _check_foot_ik_restore() -> void:
+	var rig := Node3D.new()
+	rig.name = "FootRestoreRig"
+	add_child(rig)
+	var skel := Skeleton3D.new()
+	rig.add_child(skel)
+	var thigh: int = skel.add_bone("LeftUpperLeg")
+	skel.set_bone_rest(thigh, Transform3D(Basis(), Vector3(0.0, -0.45, 0.0)))
+	var shin: int = skel.add_bone("LeftLowerLeg")
+	skel.set_bone_parent(shin, thigh)
+	skel.set_bone_rest(shin, Transform3D(Basis(), Vector3(0.0, -0.45, 0.0)))
+	var foot: int = skel.add_bone("LeftFoot")
+	skel.set_bone_parent(foot, shin)
+	skel.set_bone_rest(foot, Transform3D(Basis(), Vector3(0.0, -0.45, 0.0)))
+	skel.reset_bone_poses()
+	var ik := ModelFootIK.new()
+	add_child(ik)
+	ik._skeleton = skel
+	ik._chains[0] = {
+		"upper": skel.find_bone("LeftUpperLeg"),
+		"lower": skel.find_bone("LeftLowerLeg"),
+		"foot": skel.find_bone("LeftFoot"),
+	}
+	# A pose the solve might have left behind: thigh swung forward, shin folded.
+	var thigh_bone := skel.find_bone("LeftUpperLeg")
+	ik._aim(thigh_bone, Vector3(1.0, 0.0, 0.0), 0.6, 1.0)
+	ik._aim(skel.find_bone("LeftLowerLeg"), Vector3(1.0, 0.0, 0.0), -1.2, 1.0)
+	ik._begin_restore(0)
+	_expect(not ik._restore_from[0].is_empty(), "the restore must begin from a snapshot")
+	var mid_thigh := skel.get_bone_pose_rotation(thigh_bone)
+	ik._advance_restore(0, ik.still_restore_time)
+	var rest_rot := skel.get_bone_rest(thigh_bone).basis.get_rotation_quaternion()
+	var landed := skel.get_bone_pose_rotation(thigh_bone)
+	_expect(landed.angle_to(rest_rot) < 0.01,
+		"the restore must land the leg on its rest pose")
+	_expect(mid_thigh.angle_to(rest_rot) > landed.angle_to(rest_rot),
+		"the restore must ease toward rest, not snap")
+	_expect(ik._restore_from[0].is_empty(),
+		"a finished restore must clear its snapshot")
 
 
 ## The spring-bone chains: collection, rest behaviour, gravity response, the
