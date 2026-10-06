@@ -692,13 +692,6 @@ func _pelvis_prepare(delta: float, standstill: bool = false) -> void:
 		rate = pelvis_smoothing
 	_pelvis_current = _pelvis_current.lerp(want, 1.0 - exp(-rate * delta))
 	_pelvis_applied = _pelvis_current.length()
-	# A reversed parent link means the hips have no local offset that reads as
-	# "down" in the world, so a written drop would be scaled by the wrong
-	# accumulated rest — 3.2x on the shipped figure. Drain to zero instead and
-	# let the reach clamp serve the shortfall with a straighter leg.
-	if not _pelvis_allowed and _pelvis_current.length_squared() > 0.0:
-		_pelvis_current = Vector3.ZERO
-		_pelvis_applied = 0.0
 	# Apply the eased offset onto the clean hips pose. World → hips-pose needs
 	# BOTH basis steps: the skeleton node's own basis (the authored 180° flip,
 	# the run lean — `get_bone_global_pose` never sees node transforms, the
@@ -1188,76 +1181,73 @@ func _bone_tail(bone: int) -> Vector3:
 		* _rest_length(bone, -1, true)
 
 
-## Whether the pelvis compensation is allowed to run at all. See
-## `_check_bone_ordering` for why a reversed parent link turns it off.
-var _pelvis_allowed: bool = true
-## How far the pelvis compensation actually moved, after the ceiling and after
-## the ordering veto. The probes read this to tell "the shortfall was small" from
-## "the compensation was refused".
+## How far the pelvis compensation actually moved, after the ceiling. The probes
+## read this to tell "the shortfall was small" from "the compensation was
+## refused" — the distinction matters when reading a run where the figure
+## visibly does not sink.
 var _pelvis_applied: float = 0.0
-## Bone-order reports already printed, keyed by skeleton instance and disorder
-## size. A figure is assembled from several components that each run this check
-## on the same skeleton, and without this the warning repeats once per component.
+## Bone-order reports already printed, keyed by the model the skeleton came from.
+## A figure is assembled from several components that each run this check, and a
+## crowd runs it once per citizen, so without this the warning repeats per
+## component *and* per citizen for a property that belongs to the asset.
 static var _warned_order: Dictionary = {}
 
 
 ## Refuse the pelvis compensation when the skeleton breaks Godot's bone-order
-## contract, and say so once.
+## Report a skeleton that breaks Godot's bone-order contract — and nothing more.
 ##
 ## `Skeleton3D.get_bone_parent` documents that *"the parent bone returned will
-## always be less than bone_idx"*, and the engine's global-pose paths are built on
-## that: the nested-set optimisation in PR #97538 states that *"the order also
-## ensures, that parent bone poses are calculated before child bone poses"*, and
-## its author assumed imported bones already satisfy it — *"Presumably bones are
-## already ordered this way."*
+## always be less than bone_idx"*. The shipped figure does break it: `Hips` is
+## bone 0 and its parent `Root` is bone 102, the single reversed link in 103
+## bones, left by a VRM import that walks the node tree to build the bone list
+## while the VRM authors its hierarchy and joint list separately.
 ##
-## VRM imports break that assumption. A VRM authors its node hierarchy and its
-## joint list separately, and the importer walks the node tree to build the bone
-## list, so a parent can land after its child. On the shipped figure,
-## `Hips` is bone 0 and its parent `Root` is bone 102 — the single reversed link
-## in 103 bones.
+## **This was measured, and it turns out to be harmless here.** Two probes
+## disagreeing is why this note is worth reading twice:
 ##
-## What that does to a *translation* is specific and nasty: rotations still read
-## correctly, so nothing looks obviously wrong, but the offset is scaled by the
-## wrong accumulated rest. Measured: a bone-local `(0, −0.1, 0)` on the hips
-## landed **0.32 m** below in world space — the right direction, three times too
-## far — while the same write on a foot, whose chain is ordered, landed exactly
-## 0.1 m. So the compensation grew to its 0.12 m ceiling every frame, wrote itself
-## into the bone, and moved nothing but the leg chain: the playtest read that as
-## the figure sinking with both legs trailing behind, and as the drop "not working"
-## when `max_pelvis_drop` was set to zero.
+##   * A write-through probe that added `(0, −0.1, 0)` to the hips and read the
+##     world position back reported **0.32 m** — three times too deep — and
+##     `drop_probe`'s window minimum confirmed that `max_pelvis_drop` 0.12→0
+##     moved the hips' world height by 0.0001 m. Both said the chain was broken.
+##   * A same-frame probe (`ab_probe`) then compared the world position against
+##     the pose the component actually wrote, with the stride's own rise and fall
+##     cancelling out, and measured an offset of **0.00000 m** over 222 frames
+##     with the compensation running at full height.
 ##
-## Turning the compensation off is not a workaround for a missing feature — it is
-## the only behaviour that is *correct* for such a skeleton. A pelvis drop is a
-## world-space translation of the hips; with the chain reversed there is no bone
-## whose local offset means "down" in the world, so any value written is fiction.
-## The leg solve is unaffected: it works from bone-to-bone geometry along an
-## ordered chain, and `drop_probe` confirmed the two-bone solve lands its ankle
-## on the pin regardless.
+## The second is the trustworthy one, and it explains the first: the window
+## minimum is taken over hundreds of frames during which the hips move by more
+## than the drop itself, so it cannot separate "the drop did nothing" from "the
+## stride moved further than the drop". The write-through probe inherited the
+## same fault — it ran while the compensation was active, so it measured the
+## compensation's own baseline error rather than the chain.
+##
+## So the reversed link is a **contract violation worth reporting and worth
+## fixing at the import**, not a live malfunction: the chain resolves a written
+## pose exactly, and the compensation does what it says. The check therefore
+## reports and does not veto. It stays because a mod author whose rig *does*
+## misbehave needs to know this is the first thing to look at, and because the
+## next question ("is it the order?") should be answerable without a new probe.
 func _check_bone_ordering() -> void:
 	var order := SkeletonOrderCheck.new(_skeleton)
-	_pelvis_allowed = order.is_valid()
-	if _pelvis_allowed:
+	if order.is_valid():
 		return
-	# A figure is built from several components and each one asks the same
-	# skeleton the same question, so the report has to be deduplicated or a
-	# single model prints it once per component. And a crowd prints it once per
-	# citizen, which is worse noise than the warning is worth — the disorder is a
-	# property of the *asset*, not of an instance, so the key is the scene file
-	# the model came from. Every citizen sharing one model then reports once,
-	# while a genuinely different model still gets its own line.
+	# A figure is built from several components that each run this check on the
+	# same skeleton, and a crowd runs it once per citizen — so the report is
+	# keyed on the *asset*, not the instance. Two models with different
+	# disorders both get through, because the text differs.
 	var key: String = _skeleton.scene_file_path
 	if key.is_empty():
-		# A procedurally built skeleton has no path to key on. Fall back to the
-		# bone names, which is what actually determines the report.
+		# A procedurally built skeleton has no path to key on; the bone count
+		# and first name are what the report is derived from anyway.
 		key = "#%d:%s" % [order.bone_count, order.name_of(0)]
 	if _warned_order.has(key):
 		return
 	_warned_order[key] = true
 	push_warning(
-		"[foot-ik] %s — pelvis compensation disabled; the leg solve still runs. "
+		"[foot-ik] %s — the chain still resolves poses exactly (measured), "
 		% order.describe()
-		+ "Re-import the model so every bone's parent index is lower than its own."
+		+ "but re-importing so every bone's parent index is lower than its own "
+		+ "keeps the rig inside the documented contract."
 	)
 
 

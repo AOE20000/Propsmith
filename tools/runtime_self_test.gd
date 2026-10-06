@@ -2182,9 +2182,8 @@ func _check_foot_ik_rules() -> void:
 	# the release only opens once something has actually been released.
 	_expect(not ik._reach_released[0], "a fresh foot must not be flagged as released")
 	_expect(ik._reach_held[0] == 0.0, "a fresh foot must have no release age")
-	# A rig with no skeleton has no ordering to be wrong about, so the
-	# compensation must stay allowed — this is the capsule fallback.
-	_expect(ik._pelvis_allowed, "without a skeleton the pelvis compensation must not be vetoed")
+	# A rig with no skeleton never planted, so nothing should be mid-transition.
+	_expect(ik._pelvis_applied == 0.0, "with no skeleton the pelvis compensation moved nothing")
 
 	ik.queue_free()
 
