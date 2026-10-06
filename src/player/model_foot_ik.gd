@@ -475,64 +475,75 @@ func _process_foot(side: int, delta: float, standstill: bool = false) -> void:
 	_clearance[side] = clearance
 	_grounded[side] = ground != null
 	var release_at: float = plant_exit if _planted[side] else plant_enter
+	var keep_planting := true
 	if ground == null or clearance > release_at:
-		# Swing phase — the clip owns the foot, this only fades its own
-		# correction out. A real lift is also what re-arms planting after a
-		# reach release: the foot has to rise above the *landing* threshold
-		# before it may pin again. Requiring `plant_exit` instead would
-		# permanently retire any foot whose swings peak between the two
-		# thresholds — measured sprint swings run 0.2-0.4 m, and the shallow
-		# end of that band would never re-arm.
+		# Swing phase — the clip owns the foot. A real lift is also what
+		# re-arms planting after a reach release: the foot has to rise above
+		# the *landing* threshold before it may pin again. Requiring
+		# `plant_exit` instead would permanently retire any foot whose swings
+		# peak between the two thresholds — measured sprint swings run 0.2-0.4
+		# m, and the shallow end of that band would never re-arm.
+		keep_planting = false
 		_planted[side] = false
 		if ground == null or clearance > plant_enter:
 			_reach_released[side] = false
+	elif not _planted[side] and _reach_released[side]:
+		# Still on the ground after a reach release: the pin is out of the
+		# leg's reach, and re-pinning a dragging foot would just move the
+		# anchor under it.
+		keep_planting = false
+	else:
+		if not _planted[side]:
+			_planted[side] = true
+			# Pin to the **ground**, not to wherever the foot was when the
+			# test fired. A landing frame catches the foot a few centimetres
+			# up; pinning that height leaves the clearance hovering at the
+			# threshold forever, the plant flag chatters, and every re-plant
+			# re-pins the current position — which is the sliding this
+			# component exists to remove.
+			_plant_pos[side] = Vector3(foot_pos.x, (ground as Vector3).y + ANKLE_HEIGHT, foot_pos.z)
+			_plant_time[side] = 0.0
+		_plant_time[side] += delta
+		# The pin must stay within what the leg plus the pelvis drop can
+		# actually hold. Beyond that the reach clamp turns the plant into a
+		# drag anchor: the ankle rides at full extension toward the pin and
+		# scrapes along behind the body at ground level. Hand the foot back;
+		# the next swing re-arms.
+		var upper: int = int(chain.get("upper", -1))
+		var lower: int = int(chain.get("lower", -1))
+		if upper >= 0 and lower >= 0:
+			var l1: float = _rest_length(upper, lower)
+			var l2: float = _rest_length(lower, foot)
+			if l1 > 0.0 and l2 > 0.0:
+				var over: float = (_plant_pos[side] - _bone_origin(upper)).length() \
+					- (l1 + l2)
+				# `over` reads the hip *after* this frame's drop, so while the
+				# drop is still easing in it understates the true shortfall —
+				# keying the release on it alone waits out the easing while
+				# the clamp drags (the walk-gear probe measured pins stuck at
+				# 0.15 against a 0.16 threshold exactly this way). Project the
+				# drop back in: the raw shortfall is what decides whether the
+				# pin can ever be served.
+				var raw_over: float = over + _pelvis_current.length()
+				if raw_over > max_pelvis_drop + reach_exit:
+					keep_planting = false
+					_planted[side] = false
+					_reach_released[side] = true
+		# A pin older than `plant_max_time` is handed back as well — the stand
+		# still gate covers the stopped figure, but a long stance on a slow
+		# walk should not pin forever either.
+		if keep_planting and _plant_time[side] > plant_max_time:
+			keep_planting = false
+			_planted[side] = false
+	# Every release fades the correction WITH the weight and keeps solving
+	# toward the pin while it lasts. Stopping the solve outright snapped the
+	# leg from its corrected pose back to the clip's in a single frame — the
+	# one-frame twitch every walk stride produced (each plant briefly exceeds
+	# the leg's reach, releases, and the whole correction vanished at once).
+	if keep_planting:
+		_weight[side] = move_toward(_weight[side], 1.0, blend_speed * delta)
+	else:
 		_weight[side] = move_toward(_weight[side], 0.0, blend_speed * delta)
-		return
-	if not _planted[side]:
-		if _reach_released[side]:
-			# Still on the ground after a reach release: keep the clip in
-			# charge and keep fading, or the frozen weight would snap the
-			# next plant to full strength.
-			_weight[side] = move_toward(_weight[side], 0.0, blend_speed * delta)
-			return
-		_planted[side] = true
-		# Pin to the **ground**, not to wherever the foot was when the test
-		# fired. A landing frame catches the foot a few centimetres up; pinning
-		# that height leaves the clearance hovering at the threshold forever, the
-		# plant flag chatters, and every re-plant re-pins the current position —
-		# which is the sliding this component exists to remove.
-		_plant_pos[side] = Vector3(foot_pos.x, (ground as Vector3).y + ANKLE_HEIGHT, foot_pos.z)
-		_plant_time[side] = 0.0
-	_plant_time[side] += delta
-	if _plant_time[side] > plant_max_time:
-		_planted[side] = false
-		_weight[side] = move_toward(_weight[side], 0.0, blend_speed * delta)
-		return
-	# The pin must stay within what the leg plus the pelvis drop can actually
-	# hold. Beyond that the reach clamp turns the plant into a drag anchor: the
-	# ankle rides at full extension toward the pin and scrapes along behind the
-	# body at ground level. Hand the foot back; the next swing re-arms.
-	var upper: int = int(chain.get("upper", -1))
-	var lower: int = int(chain.get("lower", -1))
-	if upper >= 0 and lower >= 0:
-		var l1: float = _rest_length(upper, lower)
-		var l2: float = _rest_length(lower, foot)
-		if l1 > 0.0 and l2 > 0.0:
-			var over: float = (_plant_pos[side] - _bone_origin(upper)).length() \
-				- (l1 + l2)
-			# `over` reads the hip *after* this frame's drop, so while the drop
-			# is still easing in it understates the true shortfall — keying the
-			# release on it alone waits out the easing while the clamp drags
-			# (the walk-gear probe measured pins stuck at 0.15 against a 0.16
-			# threshold exactly this way). Project the drop back in: the raw
-			# shortfall is what decides whether the pin can ever be served.
-			var raw_over: float = over + _pelvis_current.length()
-			if raw_over > max_pelvis_drop + reach_exit:
-				_planted[side] = false
-				_reach_released[side] = true
-				_weight[side] = move_toward(_weight[side], 0.0, blend_speed * delta)
-				return
-	_weight[side] = move_toward(_weight[side], 1.0, blend_speed * delta)
 	if _weight[side] <= 0.001:
 		return
 	_solve(side, _plant_pos[side], _weight[side])

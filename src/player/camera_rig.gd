@@ -23,6 +23,14 @@ class_name CameraRig
 ## two controls that do different things should not be one control that surprises.
 @export var min_arm_length: float = 1.2
 @export var max_arm_length: float = 9.0
+## How fast the camera's obstacle-shortened distance pulls IN (m/s). Fast on
+## purpose — the pull-in is the safety direction, and a slow one lets the
+## camera clip the surface it is avoiding.
+@export var arm_pull_speed: float = 25.0
+## How fast the camera's distance extends back out after an obstacle clears
+## (m/s). Slower than the pull-in: the SpringArm3D's own placement snaps in
+## and out in single ticks, and the snap-back read as a screen flash.
+@export var arm_extend_speed: float = 7.0
 @export var zoom_step: float = 0.6
 ## Metres of orbit height per pixel of a held-middle-button vertical drag.
 @export var height_drag_step: float = 0.0035
@@ -45,6 +53,14 @@ var _bob_time: float = 0.0
 var _pitch: float = -0.18
 var _yaw: float = 0.0
 var _arm_length: float = 5.4
+## The camera's *displayed* distance — the user length eased toward the
+## obstacle-limited one. The SpringArm3D still casts the full length every
+## tick (its `get_hit_length` is the obstacle limit), but the camera itself
+## is placed on this eased value, so avoidance pulls in fast and slides back
+## instead of snapping both ways.
+var _display_length: float = 5.4
+## The Camera3D under the spring arm, resolved once in `_ready`.
+var _camera: Camera3D = null
 ## The third-person distance to restore when first person ends.
 var _saved_arm_length: float = 5.4
 var _first_person: bool = false
@@ -106,7 +122,9 @@ func _ready() -> void:
 	if _spring_arm != null:
 		_pivot = _spring_arm.get_parent() as Node3D
 		_spring_arm.spring_length = arm_length
+		_camera = _spring_arm.get_node_or_null("Camera3D") as Camera3D
 	_arm_length = arm_length
+	_display_length = arm_length
 	# Decouple from the target's transform. As a plain child of the player the
 	# rig inherited the *interpolated* player transform every rendered frame,
 	# while the compensation it applied (`rotation.y = _yaw - body_yaw`) read
@@ -224,6 +242,7 @@ func _process(delta: float) -> void:
 	desired += right * sin(_bob_time * walk_bob_speed) * bob \
 		+ Vector3.UP * sin(_bob_time * walk_bob_speed * 1.7 + 1.3) * bob * 0.6
 	global_position = global_position.lerp(desired, clampf(follow_lerp * delta, 0.0, 1.0))
+	_update_camera_distance(delta)
 
 
 func set_mouse_captured(captured: bool) -> void:
@@ -299,6 +318,22 @@ func _set_arm_length(value: float) -> void:
 func _apply_arm(length: float) -> void:
 	if _spring_arm != null:
 		_spring_arm.spring_length = length
+
+
+## Place the camera on an **eased** distance instead of the SpringArm3D's
+## single-tick snap. The arm still does the sensing: it casts the full user
+## length every physics tick and `get_hit_length` reports the obstacle limit.
+## This function eases the displayed length toward that limit — pull-in at
+## `arm_pull_speed` (safety first), release at the gentler
+## `arm_extend_speed` — and writes the camera's local Z itself, overriding
+## the arm's own placement before the frame renders.
+func _update_camera_distance(delta: float) -> void:
+	if _spring_arm == null or _camera == null:
+		return
+	var limit: float = minf(_arm_length, _spring_arm.get_hit_length())
+	var rate: float = arm_pull_speed if limit < _display_length else arm_extend_speed
+	_display_length = move_toward(_display_length, limit, rate * delta)
+	_camera.position = Vector3(0.0, 0.0, _display_length)
 
 
 func _update_visual() -> void:
@@ -478,11 +513,17 @@ func _apply_now() -> void:
 	if _pivot != null:
 		_pivot.rotation.x = _pitch
 	if _spring_arm != null:
-		var cam: Camera3D = _spring_arm.get_node_or_null("Camera3D") as Camera3D
-		if cam != null:
-			# The arm's tip in world space. Collision shortening is skipped on this
-			# one placement; the arm re-syncs on the next tick it processes.
-			cam.global_position = _spring_arm.global_transform * Vector3(0.0, 0.0, _arm_length)
+		# The wardrobe framing is deliberate: snap the displayed length to the
+		# requested one instead of easing through the figure.
+		_display_length = _arm_length
+		if _camera == null:
+			_camera = _spring_arm.get_node_or_null("Camera3D") as Camera3D
+		if _camera != null:
+			# The arm's tip in world space. Collision shortening is skipped on
+			# this one placement; the arm re-syncs on the next tick it
+			# processes.
+			_camera.global_position = _spring_arm.global_transform \
+				* Vector3(0.0, 0.0, _display_length)
 	if target != null and is_instance_valid(target):
 		var right: Vector3 = global_transform.basis.x
 		var forward: Vector3 = -global_transform.basis.z

@@ -2412,13 +2412,13 @@ func _check_model_lean() -> void:
 	var max_roll: float = deg_to_rad(lean.max_roll_degrees)
 	# A hard sustained turn (0.2 rad per tick = 12 rad/s) for 8 ticks: the
 	# roll must ease in behind the smoothed yaw rate. Measured on this exact
-	# drive at ease 5.5: the damped build reaches ~38% of the cap where a
-	# spike-fed goal (no yaw smoothing) reaches ~52% (calibration probe,
+	# drive at ease 7: the damped build reaches ~46% of the cap where a
+	# spike-fed goal (no yaw smoothing) reaches ~61% (calibration probe,
 	# 2026-10-06).
 	for i: int in 8:
 		rig.rotation.y += 0.2
 		lean._process(1.0 / 60.0)
-	_expect(absf(lean._roll) < max_roll * 0.45,
+	_expect(absf(lean._roll) < max_roll * 0.5,
 		"a hard turn must ease the roll in, not snap it to the cap")
 	# When the turn stops the smoothed rate drains and the roll follows —
 	# it overshoots briefly (the damper's momentum, measured at ~134% of the

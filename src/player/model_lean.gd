@@ -44,8 +44,10 @@ class_name ModelLean
 ## How fast the lean eases toward its goal (per second). Slower than the
 ## velocity it follows on purpose — see the header: the lean has to arrive
 ## with the stride and leave with the legs, not with the velocity step. At
-## 5.5/s the stop-side tail is ~0.45 s, inside the legs' own recovery window.
-@export var ease_speed: float = 5.5
+## 7/s the stop-side tail is ~0.35 s, matching the legs' own recovery window
+## (stop blend plus standstill handback) — a longer tail left the torso
+## visibly tipped after the legs had already settled.
+@export var ease_speed: float = 7.0
 ## How fast the smoothed yaw rate follows the raw per-frame one (per second).
 ## The raw signal is a spike train; this turns it into the cornering force it
 ## represents.
