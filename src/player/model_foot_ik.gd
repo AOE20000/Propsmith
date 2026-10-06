@@ -176,6 +176,39 @@ const KNEE_SIGN: float = -1.0
 ## the probe caught pins going metres stale before `plant_max_time` noticed.
 ## Released feet re-arm over one swing: the foot lifts, then may pin again.
 @export var reach_exit: float = 0.04
+## How long a reach release holds planting off (s), and the pin distance past
+## which it stops mattering anyway.
+##
+## This is the deadlock fix. The reach release used to be a latch: once fired,
+## only a clearance above `plant_enter` could clear it, and only one that the
+## *same* gait could produce. Measured on the walk clip, the swing peaks at
+## 0.1845 m against a `plant_enter` of 0.17 — the foot clears the threshold by
+## 0.015 m for a frame or two, so the latch re-armed and re-fired inside one
+## stride. The net result was that planting never came back: over four seconds
+## of a real 3.00 m/s walk the solve weight stayed at 0.00 and the pin drifted
+## 9.2 m behind a leg whose reach is 0.72 m. Nothing the component exists to
+## remove was being removed, because it was writing nothing at all.
+##
+## Two escapes, because either alone has a failure mode:
+##   * **Time** — after this many seconds the foot is allowed to re-arm even if
+##     the gait never lifts it high enough. A figure that never re-plants is
+##     worse than one that re-plants slightly early.
+##   * **Distance** — once the pin is further than this beyond what the leg can
+##     span, the pin is stale by any reading and the question is moot: the foot
+##     is going to take a new pin wherever it lands, so the old one should not
+##     keep voting.
+##
+## The release's purpose (not letting a dragging foot become a drag anchor) is
+## kept: the escape only decides *when the foot may pin again*, never what the
+## solve aims at, and a fresh plant always re-pins to the ground under the foot
+## rather than to the stale position.
+@export var reach_release_hold: float = 0.25
+## Pin staleness (m) past which the reach release stops blocking a re-plant.
+## Scaled off the leg's own reach by the solver would be ideal; this is a flat
+## multiple of a reach the probe measured at 0.724 m, so it clears for a
+## genuinely abandoned pin while still catching one that is merely a stride
+## behind.
+@export var reach_release_distance: float = 1.2
 ## How fast the pelvis offset eases toward its goal (per second). The shortfall
 ## this reacts to rises and falls with every stride; without easing, the hips
 ## twitch in sympathy — reported in play as the legs snapping forward and
@@ -227,11 +260,17 @@ var _last_angles: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]
 var _last_goal: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 ## bone name -> the global basis this component last wrote, for the chain solve.
 var _applied_global: Dictionary = {}
-## Per side: a reach release happened and planting is held off until the foot
-## has lifted through a real swing (see `reach_exit`). Re-pinning a dragging
-## foot would just move the anchor under it — the slide this component
+## Per side: a reach release happened and planting is held off until either
+## the foot lifts through a real swing (see `reach_exit`) or one of the escapes
+## in `reach_release_hold` / `reach_release_distance` fires. Re-pinning a
+## dragging foot would just move the anchor under it — the slide this component
 ## exists to remove.
 var _reach_released: Array[bool] = [false, false]
+## Per side: how long the current reach release has been held (s), and the pin
+## it was taken against. The first is what the time escape counts; the second
+## is what the distance escape measures. Both are read by `_process_foot`.
+var _reach_held: Array[float] = [0.0, 0.0]
+var _reach_pin: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 ## Standstill bookkeeping: the model position the planar-speed sample reads
 ## against, whether that sample is real yet, how long the figure has been
 ## still, and the per-side restore blend (a snapshot of the pose this
@@ -497,24 +536,37 @@ func _process_foot(side: int, delta: float, standstill: bool = false) -> void:
 		clearance = foot_pos.y - (ground as Vector3).y - ANKLE_HEIGHT
 	_clearance[side] = clearance
 	_grounded[side] = ground != null
+	# The reach hold ages every frame it is active, including the swing frames
+	# where the lift escape already fired — the timer measures how long this
+	# foot has been *without* a plant, which is what the time escape asks.
+	if _reach_released[side]:
+		_reach_held[side] += delta
 	var release_at: float = plant_exit if _planted[side] else plant_enter
 	var keep_planting := true
 	if ground == null or clearance > release_at:
-		# Swing phase — the clip owns the foot. A real lift is also what
-		# re-arms planting after a reach release: the foot has to rise above
-		# the *landing* threshold before it may pin again. Requiring
-		# `plant_exit` instead would permanently retire any foot whose swings
-		# peak between the two thresholds — measured sprint swings run 0.2-0.4
-		# m, and the shallow end of that band would never re-arm.
+		# Swing phase — the clip owns the foot. A real lift is also one of the
+		# three ways a reach release re-arms: the foot has to rise above the
+		# *landing* threshold before it may pin again. Requiring `plant_exit`
+		# instead would permanently retire any foot whose swings peak between
+		# the two thresholds — measured sprint swings run 0.2-0.4 m, and the
+		# shallow end of that band would never re-arm.
 		keep_planting = false
 		_planted[side] = false
 		if ground == null or clearance > plant_enter:
-			_reach_released[side] = false
+			_clear_reach_release(side)
 	elif not _planted[side] and _reach_released[side]:
-		# Still on the ground after a reach release: the pin is out of the
-		# leg's reach, and re-pinning a dragging foot would just move the
-		# anchor under it.
-		keep_planting = false
+		# Still on the ground after a reach release: the pin is out of the leg's
+		# reach, and re-pinning a dragging foot would just move the anchor under
+		# it. **But** the swing lift alone is not always coming — the walk clip
+		# peaks 0.015 m over `plant_enter`, which armed and re-fired inside one
+		# stride and left the weight at zero for the whole run. So the hold is
+		# also escaped by elapsed time and by the pin being stale beyond any
+		# reading (see `reach_release_hold`). Without those the plant is not
+		# merely mistimed, it never happens at all.
+		if _reach_escape_open(side):
+			_clear_reach_release(side)
+		else:
+			keep_planting = false
 	else:
 		if not _planted[side]:
 			_planted[side] = true
@@ -551,7 +603,12 @@ func _process_foot(side: int, delta: float, standstill: bool = false) -> void:
 				if raw_over > max_pelvis_drop + reach_exit:
 					keep_planting = false
 					_planted[side] = false
+					# Record the pin this release is about, so the distance
+					# escape can measure staleness against it instead of against
+					# a position the next plant will overwrite.
 					_reach_released[side] = true
+					_reach_held[side] = 0.0
+					_reach_pin[side] = _plant_pos[side]
 		# A pin older than `plant_max_time` is handed back as well — the stand
 		# still gate covers the stopped figure, but a long stance on a slow
 		# walk should not pin forever either.
@@ -583,6 +640,46 @@ func _process_foot(side: int, delta: float, standstill: bool = false) -> void:
 		return
 	_solve(side, _plant_pos[side], _weight[side])
 	_ik_error[side] = (_bone_origin(int((_chains[side] as Dictionary)["foot"])) - _plant_pos[side]).length()
+
+
+## Whether the current reach release on `side` has outlived its own reason to
+## exist, so planting may resume even though the gait never lifted the foot
+## past `plant_enter`.
+##
+## Two independent escapes, because each covers a case the other misses:
+##   * **Time** handles the gait that simply never swings high enough — the
+##     walk clip, whose peak clears the threshold by 0.015 m. It re-arms within
+##     a step rather than never.
+##   * **Distance** handles the pin that is far enough behind to be meaningless.
+##     The figure may be walking on a gentle downhill, or the clip may have
+##     changed under a planted foot; either way the question "should this pin
+##     be held?" has no answer worth defending.
+##
+## Either one opening is enough. Keeping the release's original intent — the
+## foot is not dragged toward a pin it cannot serve — is what protects the
+## re-plant: it re-pins to the ground beneath wherever the foot now is, which
+## is never the stale position.
+func _reach_escape_open(side: int) -> bool:
+	if _reach_held[side] >= reach_release_hold:
+		return true
+	# Distance is measured from the pin the release was taken against to the
+	# foot as it is now: the distance the figure has travelled since, which is
+	# exactly how stale the anchor has become.
+	if _reach_pin[side] != Vector3.ZERO:
+		var foot: int = int((_chains[side] as Dictionary).get("foot", -1))
+		if foot >= 0:
+			var drifted: float = _reach_pin[side].distance_to(_bone_origin(foot))
+			if drifted >= reach_release_distance:
+				return true
+	return false
+
+
+## Lift the reach release and its bookkeeping. Called from all three escapes so
+## no path can clear one and leave the others armed.
+func _clear_reach_release(side: int) -> void:
+	_reach_released[side] = false
+	_reach_held[side] = 0.0
+	_reach_pin[side] = Vector3.ZERO
 
 
 ## Snapshot the written pose of one leg chain at the moment of a release —
