@@ -157,6 +157,10 @@ const KNEE_SIGN: float = -1.0
 ## what it needed. 9/s reaches full strength inside a stance; a hard switch
 ## would pop, this is as close to "immediate" as smooth can get.
 @export var blend_speed: float = 9.0
+## Seconds the release hand-off takes to ease a corrected leg into the
+## clip's own pose. Short enough to read as "the animation takes the foot
+## back", long enough that the handback is not a one-frame pop.
+@export var release_blend: float = 0.12
 ## Skeletons farther than this from the camera stop per-frame IK, like the
 ## stance's distance gate.
 @export var active_range: float = 45.0
@@ -242,6 +246,11 @@ var _planar_speed: float = 0.0
 var _still: bool = false
 var _restore_from: Array[Dictionary] = [{}, {}]
 var _restore_t: Array[float] = [0.0, 0.0]
+## Per side: the leg poses captured at a release and the hand-off blend's
+## clock. The correction eases into the clip's own pose — never back toward
+## the pin, which the advancing body has already left behind.
+var _release_from: Array[Dictionary] = [{}, {}]
+var _release_t: Array[float] = [0.0, 0.0]
 ## Per side: the leg poses the restore wrote on its previous frame. The stop
 ## blend may start writing the legs while a restore is still running (the
 ## clip's smoothed speed crosses the walk threshold later than the standstill
@@ -275,6 +284,10 @@ func setup(model: Node3D) -> void:
 	_still_time = 0.0
 	_planar_speed = 0.0
 	_still = false
+	_release_from[0] = {}
+	_release_from[1] = {}
+	_release_t[0] = 0.0
+	_release_t[1] = 0.0
 	_cancel_restore(0)
 	_cancel_restore(1)
 	set_process(true)
@@ -535,19 +548,72 @@ func _process_foot(side: int, delta: float, standstill: bool = false) -> void:
 		if keep_planting and _plant_time[side] > plant_max_time:
 			keep_planting = false
 			_planted[side] = false
-	# Every release fades the correction WITH the weight and keeps solving
-	# toward the pin while it lasts. Stopping the solve outright snapped the
-	# leg from its corrected pose back to the clip's in a single frame — the
-	# one-frame twitch every walk stride produced (each plant briefly exceeds
-	# the leg's reach, releases, and the whole correction vanished at once).
+	# A release hands the foot back to the clip as a **blend into the clip's
+	# own pose for this frame** — the bones still hold it, because the clip
+	# wrote them before this component runs. Two earlier shapes were wrong:
+	# stopping the solve outright popped the leg back in one frame, and
+	# fading a solve *toward the pin* pulled the leg backwards, because by
+	# then the advancing body had left the pin behind (the periodic
+	# back-kick during walks). The clip pose is the only anchor that is
+	# never stale.
 	if keep_planting:
 		_weight[side] = move_toward(_weight[side], 1.0, blend_speed * delta)
+		_release_from[side] = {}
+		_release_t[side] = 0.0
 	else:
 		_weight[side] = move_toward(_weight[side], 0.0, blend_speed * delta)
+		if _weight[side] > 0.001 and _release_from[side].is_empty():
+			_begin_release(side)
 	if _weight[side] <= 0.001:
+		_release_from[side] = {}
+		_release_t[side] = 0.0
+		return
+	if not _release_from[side].is_empty():
+		_advance_release(side, delta)
 		return
 	_solve(side, _plant_pos[side], _weight[side])
 	_ik_error[side] = (_bone_origin(int((_chains[side] as Dictionary)["foot"])) - _plant_pos[side]).length()
+
+
+## Snapshot the written pose of one leg chain at the moment of a release —
+## the source of the hand-off blend.
+func _begin_release(side: int) -> void:
+	var chain: Dictionary = _chains[side]
+	var snapshot: Dictionary = {}
+	for key: String in ["upper", "lower", "foot"]:
+		var index: int = int(chain.get(key, -1))
+		if index < 0:
+			continue
+		snapshot[key] = {
+			"rot": _skeleton.get_bone_pose_rotation(index),
+			"pos": _skeleton.get_bone_pose_position(index),
+			"scale": _skeleton.get_bone_pose_scale(index),
+		}
+	_release_from[side] = snapshot
+	_release_t[side] = 0.0
+
+
+## One blended frame of the hand-off: each chain bone eases from the release
+## snapshot toward the clip's current pose, smoothstepped so the first frame
+## reproduces the snapshot exactly (no pop) and the last lands on the clip
+## (no residual correction). Read-then-write per bone: the value read *is*
+## the clip's write for this frame.
+func _advance_release(side: int, delta: float) -> void:
+	var chain: Dictionary = _chains[side]
+	_release_t[side] += delta
+	var weight := clampf(_release_t[side] / release_blend, 0.0, 1.0)
+	var eased := weight * weight * (3.0 - 2.0 * weight)
+	for key: String in ["upper", "lower", "foot"]:
+		var index: int = int(chain.get(key, -1))
+		if index < 0 or not _release_from[side].has(key):
+			continue
+		var from: Dictionary = _release_from[side][key]
+		_skeleton.set_bone_pose_rotation(index, (from["rot"] as Quaternion).slerp(
+			_skeleton.get_bone_pose_rotation(index), eased))
+		_skeleton.set_bone_pose_position(index, (from["pos"] as Vector3).lerp(
+			_skeleton.get_bone_pose_position(index), eased))
+		_skeleton.set_bone_pose_scale(index, (from["scale"] as Vector3).lerp(
+			_skeleton.get_bone_pose_scale(index), eased))
 
 
 ## Standstill: no clip is writing the legs any more, so this component is the
@@ -564,6 +630,10 @@ func _process_foot(side: int, delta: float, standstill: bool = false) -> void:
 ## still-lowering hip. Measured acceptable; revisit with the drop rate if a
 ## playtest disagrees.
 func _process_standstill(side: int, delta: float) -> void:
+	# The hand-off blend targets the clip's pose, which no longer exists at
+	# a standstill — the restore below owns the legs from here.
+	_release_from[side] = {}
+	_release_t[side] = 0.0
 	_planted[side] = false
 	if _weight[side] > 0.001:
 		# This side's pose is the one this component last wrote — nobody else
