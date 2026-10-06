@@ -117,6 +117,20 @@ const LAND_COOLDOWN: float = 0.25
 ## at `LIBRARY_PATH` (which needs an import pass a headless test may not run).
 var library_override: AnimationLibrary = null
 
+## The declared states and the one clock that times every transition between
+## them. Entry conditions stay below, in the order the probes measured them;
+## the table owns what a state *is* (its clip, its pace, how long it takes to
+## enter), not when to enter it.
+var states: LocomotionStateTable = LocomotionStateTable.new()
+## The cross-fade gets its own clock because it can run *while* the stop blend
+## is being cancelled: a walk that starts out of a deceleration cross-fades from
+## the pose the blend had reached, and the blend's own clock is reset by that
+## (`_decide_gear` clears `_blend_active`). One shared clock would have had its
+## elapsed time stomped between the two, and both transitions are legitimate at
+## once. Both clocks are fed from the state table, so the *durations* still have
+## a single source.
+var _cross_clock: TransitionClock = TransitionClock.new()
+
 var _model: Node3D = null
 var _skeleton: Skeleton3D = null
 var _library: AnimationLibrary = null
@@ -128,8 +142,10 @@ var _track_bones: PackedInt32Array = PackedInt32Array()
 ## snapshot up by name every sampled frame, and slicing the track path there
 ## would be per-frame string work.
 var _track_names: PackedStringArray = PackedStringArray()
-## Cross-fade state: the pose the current clip blends from, its elapsed time,
-## and whether a fade is in progress.
+## Cross-fade state: the pose the current clip blends from, whether a fade is
+## in progress, and — for the probes and the debug panel only — the elapsed
+## time. The fade itself is timed by `_cross_clock`; `_cross_t` mirrors it and
+## nothing reads it for the blend.
 var _cross_active: bool = false
 var _cross_t: float = 0.0
 var _cross_from: Dictionary = {}
@@ -439,18 +455,23 @@ func _begin_stop_blend() -> void:
 	_blend_active = true
 	_blend_t = 0.0
 	_current_clip = null
+	# How long to take is the idle state's answer, not a constant here: the
+	# landing enters this same transition, and any future state that settles
+	# into a standstill brings its own time with it. `stop_blend` stays as the
+	# table's fallback for a caller that has not declared an idle state.
+	var idle := states.get_state(LocomotionStateTable.IDLE)
+	states.clock.begin(stop_blend if idle == null else idle.blend_time)
 
 
 ## One blended frame of the stop transition: write the standing target, then
-## slerp every touched bone from the snapshot toward it. Smoothstep weight so
-## both the start and the end of the deceleration ease — a linear ramp reads
-## as a mechanical snap at the endpoints.
+## slerp every touched bone from the snapshot toward it. The eased weight comes
+## from the shared clock, so this transition, the foot IK's handback and the
+## torso's settle are all pacing off one timeline instead of three.
 func _advance_stop_blend(delta: float) -> void:
 	if not _blend_active:
 		return
 	_blend_t += delta
-	var weight := clampf(_blend_t / stop_blend, 0.0, 1.0)
-	var eased := weight * weight * (3.0 - 2.0 * weight)
+	var eased := states.clock.advance(delta)
 	_write_stand_target()
 	for bone_name: String in _touched_bones:
 		var index := _skeleton.find_bone(bone_name)
@@ -463,10 +484,28 @@ func _advance_stop_blend(delta: float) -> void:
 			_skeleton.get_bone_pose_position(index), eased))
 		_skeleton.set_bone_pose_scale(index, (from["scale"] as Vector3).lerp(
 			_skeleton.get_bone_pose_scale(index), eased))
-	if weight >= 1.0:
+	if eased >= 1.0:
 		_blend_active = false
 		if _stance != null:
+			# Hand the pose back now that the blend has landed. The blend's
+			# target was `rest` for every touched bone plus the stance's arms —
+			# the pose that is authoritative at this instant — so the stance
+			# re-captures from here and composes its breathing on top of where
+			# the figure actually stopped, not on a snapshot from before the
+			# walk began.
+			_stance.invalidate_baselines()
 			_stance.set_process(true)
+
+
+## Which declared state plays `clip_name`. The reverse of the table's own
+## mapping, so `_start_clip` can ask how long entering this pose should take
+## without the call site having to name a state as well as a clip.
+func _state_for_clip(clip_name: StringName) -> StringName:
+	for id: StringName in states.ids():
+		var state := states.get_state(id)
+		if state != null and state.clip == clip_name:
+			return id
+	return &""
 
 
 ## The blend's target: rest for every touched bone, then the stance's arm aims
@@ -505,6 +544,12 @@ func _start_clip(
 			}
 		_cross_active = true
 		_cross_t = 0.0
+		# How long the fade takes comes from the state being entered, so the
+		# airborne hand-over (leap to fall loop) and the gear switch (walk to
+		# run) time themselves from the table rather than from one constant
+		# that has to be right for both. `cross_blend` remains the fallback.
+		var entering := states.get_state(_state_for_clip(clip_name))
+		_cross_clock.begin(cross_blend if entering == null else entering.blend_time)
 	if keep_phase and _current_clip != null and _current_clip.length > 0.0:
 		# Carry the cycle phase across the gear switch: walking and running
 		# loops differ in length, but keeping the *ratio* means the stride
@@ -517,6 +562,13 @@ func _start_clip(
 	# The clip owns the pose; the stance's per-frame writes would fight it.
 	if _stance != null:
 		_stance.set_process(false)
+		# Drop the stance's recorded baselines as we take the pose away. They
+		# cache where the spine, neck and arms were the last time it wrote, and
+		# from here on this clip is moving those bones. Left in place they would
+		# be handed back as-is at the stop blend, so the stance's first frame
+		# back would compose its breathing and its arm aims around a pre-walk
+		# snapshot — see `ModelStance.invalidate_baselines`.
+		_stance.invalidate_baselines()
 
 
 ## Manual sampling: the whole point of this component. The per-type
@@ -527,10 +579,9 @@ func _start_clip(
 func _apply_sampled_pose(clip: Animation, time: float, delta: float = 0.0) -> void:
 	var weight := -1.0
 	if _cross_active:
-		_cross_t += delta
-		var w := clampf(_cross_t / cross_blend, 0.0, 1.0)
-		weight = w * w * (3.0 - 2.0 * w)
-		if w >= 1.0:
+		weight = _cross_clock.advance(delta)
+		_cross_t = _cross_clock.elapsed
+		if not _cross_clock.in_progress():
 			_cross_active = false
 	for track: int in clip.get_track_count():
 		var bone := _track_bones[track]
@@ -584,6 +635,7 @@ func _stop_clip() -> void:
 			_skeleton.set_bone_pose_position(index, rest.origin)
 			_skeleton.set_bone_pose_scale(index, rest.basis.get_scale())
 	if _stance != null:
+		_stance.invalidate_baselines()
 		_stance.set_process(true)
 		_stance.reapply()
 

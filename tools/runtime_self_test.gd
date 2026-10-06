@@ -51,7 +51,7 @@ func _ready() -> void:
 	_run_section("map sources and blueprints", 14, _check_map_sources_and_blueprints)
 	_run_section("map catalogue", 23, _check_map_catalog)
 	_run_section("camera and wardrobe wiring", 33, _check_camera_and_wardrobe)
-	_run_section("model clips sampler", 18, _check_model_clips)
+	_run_section("model clips sampler", 45, _check_model_clips)
 	_run_section("guided tour", 10, _check_demo_tour)
 	_run_section("tool wheel", 3, _check_tool_wheel)
 	_run_section("foot IK", 3, _check_foot_ik)
@@ -2044,6 +2044,94 @@ func _check_model_clips() -> void:
 	for i: int in 5:
 		clips._apply_sampled_pose(clips._current_clip, 0.0, 1.0 / 30.0)
 	_expect(not clips._cross_active, "the cross-fade must finish within its window")
+
+	# The declared states and the shared clock. These carry the rule the
+	# scattered timers used to break: a transition's duration belongs to the
+	# state being entered, so a new state cannot arrive without one.
+	var table := clips.states
+	_expect(table.has_state(LocomotionStateTable.IDLE), "the table must declare an idle")
+	_expect(table.has_state(LocomotionStateTable.WALK), "the table must declare a walk")
+	_expect(table.has_state(LocomotionStateTable.RUN), "the table must declare a run")
+	_expect(table.has_state(LocomotionStateTable.JUMP), "the table must declare a jump")
+	_expect(table.has_state(LocomotionStateTable.FALL), "the table must declare a fall")
+	_expect(table.get_state(LocomotionStateTable.WALK) != null, "walk must resolve to a state")
+	_expect(
+		table.get_state(&"no_such_state") == null,
+		"an undeclared state must resolve to null, not a missing-key error"
+	)
+	# A floating body measures zero speed, which used to mean "stopped" and
+	# played a standing pose. The row has to exist for that case to be a
+	# choice rather than an accident of the speed test.
+	var float_state := table.get_state(LocomotionStateTable.FLOAT)
+	_expect(float_state != null, "the table must declare a float state")
+	_expect(
+		float_state != null and float_state.clip == &"",
+		"floating plays no clip — there is no stride to loop"
+	)
+	_expect(
+		float_state != null and float_state.footwork == LocomotionState.Footwork.FREE,
+		"floating must not try to plant feet on water"
+	)
+	# The exit blend is the one that differs from the entry: a landing is
+	# quicker than a deceleration because the ground already absorbed the fall.
+	var idle_state := table.get_state(LocomotionStateTable.IDLE)
+	_expect(
+		idle_state != null and idle_state.exit_blend() > 0.0,
+		"an explicit exit blend must resolve, not stay at the sentinel"
+	)
+	_expect(
+		idle_state != null and idle_state.exit_blend() == idle_state.blend_time,
+		"the stop and the landing share one transition time"
+	)
+	# The reverse lookup `_start_clip` uses to time a fade.
+	_expect(
+		clips._state_for_clip(&"walk") == LocomotionStateTable.WALK,
+		"the walk clip must map back to the walk state"
+	)
+	_expect(
+		clips._state_for_clip(&"fall") == LocomotionStateTable.FALL,
+		"the fall clip must map back to the fall state"
+	)
+	_expect(clips._state_for_clip(&"no_such_clip") == &"", "an unknown clip maps to no state")
+
+	# The clock itself: an eased weight that starts at 0, ends at 1, never
+	# leaves [0, 1], and treats a zero duration as instant.
+	var clock := TransitionClock.new()
+	_expect(not clock.in_progress(), "a fresh clock is not running")
+	_expect(clock.advance(0.1) == 1.0, "an idle clock reports full weight")
+	clock.begin(0.2)
+	_expect(clock.in_progress(), "a begun clock is running")
+	_expect(clock.advance(0.0) == 0.0, "a transition starts at zero weight")
+	var mid := clock.advance(0.1)
+	_expect(mid > 0.0 and mid < 1.0, "the halfway weight is strictly between")
+	_expect(clock.advance(0.1) == 1.0, "the transition lands exactly at its duration")
+	_expect(not clock.in_progress(), "a landed clock is no longer running")
+	var monotonic := true
+	var previous := 0.0
+	var probe := TransitionClock.new()
+	probe.begin(1.0)
+	for i: int in 20:
+		var w := probe.advance(0.05)
+		if w < previous or w < 0.0 or w > 1.0:
+			monotonic = false
+		previous = w
+	_expect(monotonic, "the eased weight must rise without leaving [0, 1]")
+	probe.cancel()
+	_expect(probe.advance(0.1) == 1.0, "a cancelled clock reports full weight")
+	var instant := TransitionClock.new()
+	instant.begin(0.0)
+	_expect(not instant.in_progress(), "a zero duration lands immediately")
+
+	# The stop blend must be timed by the clock, and its duration must come
+	# from the idle state rather than from a constant of its own.
+	clips._begin_stop_blend()
+	_expect(clips.states.clock.in_progress(), "the stop blend must run on the shared clock")
+	_expect(
+		is_equal_approx(
+			clips.states.clock.duration, table.get_state(LocomotionStateTable.IDLE).blend_time
+		),
+		"the stop blend's duration must be the idle state's, not a private constant"
+	)
 
 	clips.queue_free()
 	model.queue_free()

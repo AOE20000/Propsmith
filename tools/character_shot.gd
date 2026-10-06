@@ -50,7 +50,10 @@ func _ready() -> void:
 		# built-in fallback body and call it the player model, which is exactly the
 		# mistake it exists to catch.
 		ModHost.load_all()
-		model = FigureAttachments.resolve_player_model()
+		# The resolver lives on `PlayerScene`, which owns the model-registration
+		# order (mod-registered `player_model` first, then the built-in body).
+		# `FigureAttachments` is only the mounting point and never resolved one.
+		model = PlayerScene.resolve_player_model()
 	else:
 		var packed: PackedScene = load(override) as PackedScene
 		if packed == null:

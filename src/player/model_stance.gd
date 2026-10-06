@@ -79,6 +79,34 @@ func _apply_arm_pose() -> void:
 	_aim_pair(&"LeftLowerArm", &"RightLowerArm", forearm_aim)
 
 
+## Drop every recorded baseline so the next frame re-captures from whatever
+## the pose actually is then.
+##
+## The two dictionaries here are caches of *the world as it looked when we last
+## wrote*, and they were write-once: `_drift_bone` captured a bone's baseline
+## on first use and never refreshed it, so the breathing and the sway composed
+## around whatever the spine and neck held at that moment — forever. That is
+## invisible while nothing else touches the figure, and wrong the moment
+## something does: `ModelClips` mutes this component while a locomotion clip
+## plays (it needs the pose), writes dozens of bones up and down the body, and
+## hands it back at the stop blend. The stance then kept aiming and drifting
+## around a snapshot from before the walk started — the arms re-solve against a
+## spine that no longer exists, and the first idle frame after a stop inherits
+## the stride's own pose as its baseline.
+##
+## This is the same defect the foot-IK release had (b4e1245: easing toward a
+## stale target reads as a periodic back-kick) and the same project rule
+## applies: **a correction's exit must hand back toward the pose that is
+## authoritative *now***, never toward a target that has since moved. Clearing
+## the caches is that hand-back — the next write re-reads the live pose.
+##
+## Called by `ModelClips` at both ends of a clip: when it takes the pose, and
+## when it gives it back.
+func invalidate_baselines() -> void:
+	_base_poses.clear()
+	_applied_global.clear()
+
+
 ## Re-aim the arms from scratch. Called by `ModelClips` when a locomotion clip
 ## stops: the clip owned the arm poses while it played, and the aims captured
 ## at setup are stale after that — re-solving restores the relaxed hang.
@@ -114,8 +142,18 @@ func _aim_bone(bone_name: StringName, target: Vector3) -> void:
 	var parent_global := Basis.IDENTITY
 	if parent >= 0:
 		var parent_name := _skeleton.get_bone_name(parent)
+		# Bones this component never aims (the spine, the neck — they take a
+		# drift offset, not an aim) have no entry here, and they are looked up
+		# every frame, so the fallback is load-bearing: it decides what the
+		# child's aim is solved against. Rest is the right answer only while the
+		# chain is entirely this component's own, because then "rest" and
+		# "where the parent actually is" are the same thing. Once a locomotion
+		# clip has rotated the spine they diverge, and every frame after that
+		# re-derived the arms from a parent that was not there. Reading the live
+		# global pose is what makes aiming at an *absolute* direction mean it:
+		# the chain solves against the frame in front of the player.
 		parent_global = _applied_global.get(
-			parent_name, _skeleton.get_bone_global_rest(parent).basis
+			parent_name, _skeleton.get_bone_global_pose(parent).basis
 		)
 	var current := parent_global * _skeleton.get_bone_pose(index).basis
 	var wanted := _safe_direction(current.y.normalized(), target.normalized())
