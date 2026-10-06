@@ -347,6 +347,7 @@ func setup(model: Node3D) -> void:
 			"lower": _skeleton.find_bone(StringName("%s%s" % [SIDES[i], LOWER])),
 			"foot": _skeleton.find_bone(StringName("%s%s" % [SIDES[i], FOOT])),
 		}
+	_check_bone_ordering()
 	# How far the sole sits below the ankle, read off this model's own geometry
 	# — see `_measure_sole_drop`. Cannot happen here: `setup` runs before the
 	# model enters the tree (the project rule is that global transforms are not
@@ -690,6 +691,14 @@ func _pelvis_prepare(delta: float, standstill: bool = false) -> void:
 		# exponential, just one motion instead of two.
 		rate = pelvis_smoothing
 	_pelvis_current = _pelvis_current.lerp(want, 1.0 - exp(-rate * delta))
+	_pelvis_applied = _pelvis_current.length()
+	# A reversed parent link means the hips have no local offset that reads as
+	# "down" in the world, so a written drop would be scaled by the wrong
+	# accumulated rest — 3.2x on the shipped figure. Drain to zero instead and
+	# let the reach clamp serve the shortfall with a straighter leg.
+	if not _pelvis_allowed and _pelvis_current.length_squared() > 0.0:
+		_pelvis_current = Vector3.ZERO
+		_pelvis_applied = 0.0
 	# Apply the eased offset onto the clean hips pose. World → hips-pose needs
 	# BOTH basis steps: the skeleton node's own basis (the authored 180° flip,
 	# the run lean — `get_bone_global_pose` never sees node transforms, the
@@ -698,11 +707,30 @@ func _pelvis_prepare(delta: float, standstill: bool = false) -> void:
 	# vector, which is why the missing node step stayed invisible this long.
 	_hips_base = hips_origin
 	if _pelvis_current.length_squared() > 0.0:
-		var offset: Vector3 = _skeleton.global_transform.basis.inverse() \
-			* _pelvis_current
-		var parent := _skeleton.get_bone_parent(hips)
-		if parent >= 0:
-			offset = _skeleton.get_bone_global_pose(parent).basis.inverse() * offset
+		# The hips' own global basis is the frame a bone-local offset is
+		# expressed in, and — unlike the parent bone's — it does not depend on
+		# resolving a link that may run backwards. Using it instead of
+		# `get_bone_global_pose(parent).basis` is correct for an ordered skeleton
+		# and identical in practice.
+		#
+		# It is *not* a fix for a reversed link, and the distinction is the point:
+		# a reversed link corrupts the **translation** accumulation, not the
+		# rotation. The basis reads exactly right either way — the shipped figure
+		# measures (0,1,0) on every axis, pose-vs-rest dot 1.000000 — which is why
+		# the failure was invisible in every orientation reading and only showed
+		# up as a magnitude error. A write-through probe found it: a bone-local
+		# (0, −0.1, 0) on the hips lands **0.32 m** below in world space, the
+		# right direction three times too far, while the same write on a foot
+		# lands exactly 0.1 m. No rotation fix can address that, so the
+		# compensation is refused upstream in `_check_bone_ordering` instead.
+		#
+		# The scale strip is not cosmetic: a scaled basis skews the offset so the
+		# drop lands at the wrong angle as well as the wrong depth, and the rig
+		# may carry a non-uniform one from the import.
+		var world_basis: Basis = _skeleton.global_transform.basis \
+			* _skeleton.get_bone_global_pose(hips).basis
+		world_basis = world_basis.orthonormalized()
+		var offset: Vector3 = world_basis.inverse() * _pelvis_current
 		var written: Vector3 = hips_origin + offset
 		_skeleton.set_bone_pose_position(hips, written)
 		_hips_written = written
@@ -1160,6 +1188,80 @@ func _bone_tail(bone: int) -> Vector3:
 		* _rest_length(bone, -1, true)
 
 
+## Whether the pelvis compensation is allowed to run at all. See
+## `_check_bone_ordering` for why a reversed parent link turns it off.
+var _pelvis_allowed: bool = true
+## How far the pelvis compensation actually moved, after the ceiling and after
+## the ordering veto. The probes read this to tell "the shortfall was small" from
+## "the compensation was refused".
+var _pelvis_applied: float = 0.0
+## Bone-order reports already printed, keyed by skeleton instance and disorder
+## size. A figure is assembled from several components that each run this check
+## on the same skeleton, and without this the warning repeats once per component.
+static var _warned_order: Dictionary = {}
+
+
+## Refuse the pelvis compensation when the skeleton breaks Godot's bone-order
+## contract, and say so once.
+##
+## `Skeleton3D.get_bone_parent` documents that *"the parent bone returned will
+## always be less than bone_idx"*, and the engine's global-pose paths are built on
+## that: the nested-set optimisation in PR #97538 states that *"the order also
+## ensures, that parent bone poses are calculated before child bone poses"*, and
+## its author assumed imported bones already satisfy it — *"Presumably bones are
+## already ordered this way."*
+##
+## VRM imports break that assumption. A VRM authors its node hierarchy and its
+## joint list separately, and the importer walks the node tree to build the bone
+## list, so a parent can land after its child. On the shipped figure,
+## `Hips` is bone 0 and its parent `Root` is bone 102 — the single reversed link
+## in 103 bones.
+##
+## What that does to a *translation* is specific and nasty: rotations still read
+## correctly, so nothing looks obviously wrong, but the offset is scaled by the
+## wrong accumulated rest. Measured: a bone-local `(0, −0.1, 0)` on the hips
+## landed **0.32 m** below in world space — the right direction, three times too
+## far — while the same write on a foot, whose chain is ordered, landed exactly
+## 0.1 m. So the compensation grew to its 0.12 m ceiling every frame, wrote itself
+## into the bone, and moved nothing but the leg chain: the playtest read that as
+## the figure sinking with both legs trailing behind, and as the drop "not working"
+## when `max_pelvis_drop` was set to zero.
+##
+## Turning the compensation off is not a workaround for a missing feature — it is
+## the only behaviour that is *correct* for such a skeleton. A pelvis drop is a
+## world-space translation of the hips; with the chain reversed there is no bone
+## whose local offset means "down" in the world, so any value written is fiction.
+## The leg solve is unaffected: it works from bone-to-bone geometry along an
+## ordered chain, and `drop_probe` confirmed the two-bone solve lands its ankle
+## on the pin regardless.
+func _check_bone_ordering() -> void:
+	var order := SkeletonOrderCheck.new(_skeleton)
+	_pelvis_allowed = order.is_valid()
+	if _pelvis_allowed:
+		return
+	# A figure is built from several components and each one asks the same
+	# skeleton the same question, so the report has to be deduplicated or a
+	# single model prints it once per component. And a crowd prints it once per
+	# citizen, which is worse noise than the warning is worth — the disorder is a
+	# property of the *asset*, not of an instance, so the key is the scene file
+	# the model came from. Every citizen sharing one model then reports once,
+	# while a genuinely different model still gets its own line.
+	var key: String = _skeleton.scene_file_path
+	if key.is_empty():
+		# A procedurally built skeleton has no path to key on. Fall back to the
+		# bone names, which is what actually determines the report.
+		key = "#%d:%s" % [order.bone_count, order.name_of(0)]
+	if _warned_order.has(key):
+		return
+	_warned_order[key] = true
+	push_warning(
+		"[foot-ik] %s — pelvis compensation disabled; the leg solve still runs. "
+		% order.describe()
+		+ "Re-import the model so every bone's parent index is lower than its own."
+	)
+
+
+## Read a bone's world position, the way the component does everywhere.
 func _bone_origin(bone: int) -> Vector3:
 	return (_skeleton.global_transform * _skeleton.get_bone_global_pose(bone)).origin
 

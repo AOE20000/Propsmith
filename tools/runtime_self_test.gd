@@ -52,7 +52,8 @@ func _ready() -> void:
 	_run_section("map catalogue", 23, _check_map_catalog)
 	_run_section("camera and wardrobe wiring", 33, _check_camera_and_wardrobe)
 	_run_section("model clips sampler", 45, _check_model_clips)
-	_run_section("foot IK decision rules", 10, _check_foot_ik_rules)
+	_run_section("foot IK decision rules", 11, _check_foot_ik_rules)
+	_run_section("skeleton bone-order contract", 12, _check_skeleton_ordering)
 	_run_section("guided tour", 10, _check_demo_tour)
 	_run_section("tool wheel", 3, _check_tool_wheel)
 	_run_section("foot IK", 3, _check_foot_ik)
@@ -2181,8 +2182,59 @@ func _check_foot_ik_rules() -> void:
 	# the release only opens once something has actually been released.
 	_expect(not ik._reach_released[0], "a fresh foot must not be flagged as released")
 	_expect(ik._reach_held[0] == 0.0, "a fresh foot must have no release age")
+	# A rig with no skeleton has no ordering to be wrong about, so the
+	# compensation must stay allowed — this is the capsule fallback.
+	_expect(ik._pelvis_allowed, "without a skeleton the pelvis compensation must not be vetoed")
 
 	ik.queue_free()
+
+
+## The bone-order contract, on a skeleton built here so both cases are certain.
+##
+## Godot documents that a bone's parent index is always lower than its own, and
+## every global-transform path in the engine relies on it. A VRM import can break
+## it (the shipped figure has `Hips` at index 0 with `Root` at 102), and the
+## symptom is a translation scaled by the wrong accumulated rest — a pelvis drop
+## three times too deep — while rotations still read perfectly, so nothing else
+## reveals it. The check has to catch that from the skeleton alone.
+func _check_skeleton_ordering() -> void:
+	var ok := Skeleton3D.new()
+	# Built the way the contract wants: parents added before children.
+	ok.add_bone("Root")
+	ok.add_bone("Hips")
+	ok.add_bone("LeftUpperLeg")
+	ok.set_bone_parent(1, 0)
+	ok.set_bone_parent(2, 1)
+	var good := SkeletonOrderCheck.new(ok)
+	_expect(good.is_valid(), "a skeleton built parents-first must pass the order check")
+	_expect(good.bone_count == 3, "the order check must count every bone")
+	_expect(good.well_ordered == 3, "every bone on a parents-first chain is well ordered")
+	_expect(good.reversed.is_empty(), "a parents-first skeleton has no reversed links")
+	_expect(good.describe().contains("all correctly ordered"),
+		"a clean skeleton reports itself as ordered")
+
+	# Now the broken case: a parent that lands *after* its child, which is exactly
+	# what a VRM import produces. `Hips` is bone 0 and its parent `Root` is bone 2,
+	# so the link runs backwards and bone 0's world translation is no longer
+	# resolved against a settled parent.
+	var bad := Skeleton3D.new()
+	bad.add_bone("Hips")
+	bad.add_bone("LeftUpperLeg")
+	bad.add_bone("Root")
+	bad.set_bone_parent(0, 2)
+	bad.set_bone_parent(1, 0)
+	var found := SkeletonOrderCheck.new(bad)
+	_expect(not found.is_valid(), "a child listed before its parent must fail the check")
+	_expect(found.reversed.size() == 1, "exactly one reversed link here")
+	_expect(found.reversed[0] == 0, "the reversed bone is the child, not the parent")
+	_expect(found.well_ordered == 2, "the other two bones are still fine")
+	# The report has to name the bone, or a mod author cannot act on it.
+	_expect(found.describe().contains("Hips"), "the report must name the offending bone")
+	_expect(found.describe().contains("Root"), "the report must name its parent")
+	_expect(found.name_of(-1) == "<root>", "a parentless bone reads as the root")
+
+	ok.free()
+	bad.free()
 
 
 ## The ambience layer: levels, looping, point sources, teardown.
